@@ -273,7 +273,7 @@ exports.getBestSellerReport = async (req, res) => {
         `SELECT oi.product, COALESCE(SUM(oi."totalPrice"), 0) as revenue
          FROM order_item oi
          JOIN "order" o ON o.id = oi."order"
-         WHERE o."paymentStatus" = 'paid'${store ? ' AND o.store = :store' : ''}
+         WHERE o."paymentStatus" = 'paid' AND o.status NOT IN ('cancelled','void')${store ? ' AND o.store = :store' : ''}
          GROUP BY oi.product`,
         {
           replacements: store ? { store } : {},
