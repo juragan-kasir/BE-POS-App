@@ -2,6 +2,7 @@
 const { Op } = require('sequelize')
 const db = require('../../db/models')
 const reportDefs = require('../service/reportDefs')
+const { bucketCashFlowTenders } = require('../service/canonicalPayment')
 const { getStoreTodayBounds, getStoreDayBounds, DEFAULT_TIMEZONE } = require('../../utils/businessDate')
 const Order = db.order
 
@@ -361,28 +362,15 @@ exports.getCashFlow = async (req, res) => {
       { replacements, type: db.sequelize.QueryTypes.SELECT }
     )
 
-    let penerimaanTunai = 0
-    let penerimaanQris = 0
-    let penerimaanTransfer = 0
-    let lainnya = 0
-
-    for (const row of paymentRows) {
-      const type = (row.typePayment || '').toLowerCase()
-      const amount = Number(row.total || 0)
-      if (
-        type.includes('cash') ||
-        type === 'tunai' ||
-        type.includes('debit') ||
-        type.includes('credit') ||
-        type.includes('other') ||
-        type.includes('points')
-      )
-        penerimaanTunai += amount
-      else if (type.includes('qris') || type.includes('e-wallet'))
-        penerimaanQris += amount
-      else if (type.includes('transfer')) penerimaanTransfer += amount
-      else lainnya += amount
-    }
+    // Tender buckets share one taxonomy (canonicalPayment
+    // .bucketCashFlowTenders, same helper the export definition uses) so the
+    // HTTP report and the export can never diverge: only CASH feeds Tunai.
+    const {
+      tunai: penerimaanTunai,
+      qris: penerimaanQris,
+      transfer: penerimaanTransfer,
+      lainnya
+    } = bucketCashFlowTenders(paymentRows)
 
     // Aggregate expenses in SQL
     const expReplacements = {}

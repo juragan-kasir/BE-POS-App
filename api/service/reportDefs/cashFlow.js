@@ -1,6 +1,7 @@
 'use strict'
 const db = require('../../../db/models')
 const { assertReportStore } = require('./getReportStore')
+const { bucketCashFlowTenders } = require('../canonicalPayment')
 
 const defaultColumns = [
   { key: 'keterangan', label: 'Keterangan', type: 'string', width: 28, align: 'left' },
@@ -30,15 +31,17 @@ const getData = async (req) => {
     { replacements, type: db.sequelize.QueryTypes.SELECT }
   )
 
-  let penerimaanTunai = 0, penerimaanQris = 0, penerimaanTransfer = 0, _lainnya = 0
-  for (const row of paymentRows) {
-    const type = (row.typePayment || '').toLowerCase()
-    const amount = Number(row.total || 0)
-    if (type.includes('cash') || type === 'tunai' || type.includes('debit') || type.includes('credit') || type.includes('other') || type.includes('points')) penerimaanTunai += amount
-    else if (type.includes('qris') || type.includes('e-wallet')) penerimaanQris += amount
-    else if (type.includes('transfer')) penerimaanTransfer += amount
-    else _lainnya += amount
-  }
+  // Same shared taxonomy as the HTTP cash-flow report (see
+  // bucketCashFlowTenders): only CASH feeds Tunai. Lainnya renders as its
+  // own row — without it, reclassified CARD/OTHER/POINTS money would vanish
+  // from the export entirely (the previous `_lainnya` was computed but
+  // never rendered).
+  const {
+    tunai: penerimaanTunai,
+    qris: penerimaanQris,
+    transfer: penerimaanTransfer,
+    lainnya
+  } = bucketCashFlowTenders(paymentRows)
 
   const expReplacements = {}
   let expConditions = `"status" = 'approved'`
@@ -98,6 +101,7 @@ const getData = async (req) => {
     { keterangan: 'Penerimaan Tunai', nominal: penerimaanTunai, flow: 'in' },
     { keterangan: 'Penerimaan QRIS', nominal: penerimaanQris, flow: 'in' },
     { keterangan: 'Penerimaan Transfer', nominal: penerimaanTransfer, flow: 'in' },
+    { keterangan: 'Lainnya', nominal: lainnya, flow: 'in' },
     { keterangan: 'Penerimaan Retur Pembelian', nominal: penerimaanReturPembelian, flow: 'in' },
     { keterangan: 'Pengeluaran Expense', nominal: pengeluaranExpense, flow: 'out' },
     { keterangan: 'Pengeluaran Purchase Payment', nominal: pengeluaranPurchasePayment, flow: 'out' }

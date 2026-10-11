@@ -96,9 +96,40 @@ function reportingBucket(value) {
   }
 }
 
+// Cash-flow (arus kas) tender buckets over aggregated payment rows shaped
+// like `{ typePayment, total }` (the transaction GROUP BY both cash-flow
+// readers run). Single taxonomy shared by the cash-flow controller
+// (report.js getCashFlow) and the export definition
+// (reportDefs/cashFlow.js) so the two can never diverge again:
+// CASH → tunai; QRIS/E_WALLET → qris; BANK_TRANSFER → transfer;
+// CARD/OTHER/POINTS/UNRECONCILED → lainnya. Every row lands in exactly one
+// bucket, so tender totals are preserved and only CASH feeds Tunai.
+function bucketCashFlowTenders(paymentRows) {
+  const buckets = { tunai: 0, qris: 0, transfer: 0, lainnya: 0 }
+  for (const row of paymentRows || []) {
+    const amount = Number(row.total || 0)
+    switch (reportingBucket(row.typePayment)) {
+      case 'CASH':
+        buckets.tunai += amount
+        break
+      case 'QRIS':
+      case 'E_WALLET':
+        buckets.qris += amount
+        break
+      case 'BANK_TRANSFER':
+        buckets.transfer += amount
+        break
+      default:
+        buckets.lainnya += amount
+    }
+  }
+  return buckets
+}
+
 module.exports = {
   CANONICAL_PAYMENT_METHODS,
   CANONICAL_METHOD_ORDER,
   normalizePaymentMethod,
-  reportingBucket
+  reportingBucket,
+  bucketCashFlowTenders
 }
