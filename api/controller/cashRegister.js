@@ -1174,44 +1174,61 @@ const cashRegisterController = {
       const { id } = req.params
       const { decision } = req.body
 
-      const cashRegister = await db.cashRegister.findOne({
-        where: scalarStoreScope(req, { id })
-      })
+      // BE-1: serialize concurrent decisions on the same register with a
+      // row-level lock inside a transaction (same pattern as
+      // decideMovement/createMovement). The eligibility check and the
+      // winning state transition are atomic: the loser blocks on the lock,
+      // then re-reads decided state and receives 409 without writing audit.
+      const cashRegister = await withDeadlockRetry(() =>
+        db.sequelize.transaction(async (t) => {
+          const locked = await db.cashRegister.findOne({
+            where: scalarStoreScope(req, { id }),
+            transaction: t,
+            lock: t.LOCK.UPDATE
+          })
 
-      if (!cashRegister) {
-        return res.status(404).json({
-          success: false,
-          message: 'Cash register not found'
+          if (!locked) {
+            const e = new Error('Cash register not found')
+            e.statusCode = 404
+            throw e
+          }
+
+          if (
+            locked.status !== 'closed' ||
+            locked.varianceApprovalStatus !== 'pending_approval'
+          ) {
+            const e = new Error(
+              `Cannot decide variance for a register in status ${locked.status}/${locked.varianceApprovalStatus}`
+            )
+            e.statusCode = 409
+            throw e
+          }
+
+          const newStatus = decision === 'approve' ? 'approved' : 'rejected'
+
+          await locked.update(
+            {
+              varianceApprovalStatus: newStatus,
+              approvedBy: req.user?.id || null,
+              approvedAt: new Date()
+            },
+            { transaction: t }
+          )
+
+          await redactAndAudit(req, {
+            action:
+              decision === 'approve' ? AUDIT_ACTIONS.APPROVE : AUDIT_ACTIONS.REJECT,
+            entity: 'cash_register',
+            entityId: locked.id,
+            description: `Cash register variance ${decision}d`,
+            oldValues: { varianceApprovalStatus: 'pending_approval' },
+            newValues: { varianceApprovalStatus: newStatus },
+            transaction: t
+          })
+
+          return locked
         })
-      }
-
-      if (
-        cashRegister.status !== 'closed' ||
-        cashRegister.varianceApprovalStatus !== 'pending_approval'
-      ) {
-        return res.status(409).json({
-          success: false,
-          message: `Cannot decide variance for a register in status ${cashRegister.status}/${cashRegister.varianceApprovalStatus}`
-        })
-      }
-
-      const newStatus = decision === 'approve' ? 'approved' : 'rejected'
-
-      await cashRegister.update({
-        varianceApprovalStatus: newStatus,
-        approvedBy: req.user?.id || null,
-        approvedAt: new Date()
-      })
-
-      await redactAndAudit(req, {
-        action:
-          decision === 'approve' ? AUDIT_ACTIONS.APPROVE : AUDIT_ACTIONS.REJECT,
-        entity: 'cash_register',
-        entityId: cashRegister.id,
-        description: `Cash register variance ${decision}d`,
-        oldValues: { varianceApprovalStatus: 'pending_approval' },
-        newValues: { varianceApprovalStatus: newStatus }
-      })
+      )
 
       return res.status(200).json({
         success: true,
@@ -1220,9 +1237,9 @@ const cashRegisterController = {
       })
     } catch (error) {
       console.log(error)
-      return res.status(500).json({
+      return res.status(error.statusCode || 500).json({
         success: false,
-        message: 'Internal server error'
+        message: error.message || 'Internal server error'
       })
     }
   },
