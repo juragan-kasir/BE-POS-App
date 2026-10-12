@@ -111,6 +111,11 @@ const auditLog = async ({
     )
   } catch (error) {
     console.error('Audit log error:', error)
+    // FP-01: when participating in a caller-owned transaction, the failure
+    // must propagate so the owner rolls back instead of reporting success
+    // without its required audit record. Without a transaction the legacy
+    // fire-and-forget contract is preserved. Mirrors recordAudit().
+    if (transaction) throw error
   }
 }
 
