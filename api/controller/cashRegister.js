@@ -1244,6 +1244,43 @@ const cashRegisterController = {
     }
   },
 
+  // GET /cash-register/:id/movements — newest first. The register lookup
+  // carries the tenant/store scope, so a non-owning row reads as 404 rather
+  // than 403 (same convention as the movement write paths).
+  async listMovements(req, res) {
+    try {
+      const { id } = req.params
+
+      const cashRegister = await db.cashRegister.findOne({
+        where: scalarStoreScope(req, { id })
+      })
+
+      if (!cashRegister) {
+        return res.status(404).json({
+          success: false,
+          message: 'Cash register not found'
+        })
+      }
+
+      const movements = await db.cashMovement.findAll({
+        where: { cashRegisterId: cashRegister.id },
+        order: [['id', 'DESC']]
+      })
+
+      return res.status(200).json({
+        success: true,
+        message: 'Cash movements retrieved',
+        data: movements
+      })
+    } catch (error) {
+      console.log(error)
+      return res.status(500).json({
+        success: false,
+        message: 'Internal server error'
+      })
+    }
+  },
+
   // POST /cash-register/:id/movement
   async createMovement(req, res) {
     try {

@@ -69,6 +69,12 @@ router.get(
 )
 
 // ===================== Cash Movement (F2) =====================
+router.get(
+  '/:id/movements',
+  authorization,
+  validateStoreAccess,
+  cashRegisterController.listMovements
+)
 router.post(
   '/:id/movement',
   authorization,
