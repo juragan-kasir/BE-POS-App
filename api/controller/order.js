@@ -3878,15 +3878,13 @@ exports.createCustomerOrder = async (req, res) => {
       if (!member) {
         return res.status(400).json({ message: 'Customer not found' })
       }
-    } else if (customerName) {
-      member = await db.member.findOne({
-        where: {
-          name: { [Op.iLike]: customerName.trim() },
-          store,
-          status: 'active'
-        }
-      })
     }
+    // DR-16: free-text customerName never establishes member identity and
+    // unlocks no tier discount or loyalty benefits. It stays a plain order
+    // label (receipt display, kitchen ticket). Member attachment for QR
+    // orders happens only through an explicitly supplied customerId today;
+    // verified staff-attach at settlement is the approved follow-up
+    // mechanism, not free-text matching.
 
     let discountValue = 0
     let discountType = 'none'

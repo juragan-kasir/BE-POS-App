@@ -13,7 +13,9 @@ const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 // from the member already attached to the order, together with the
 // settlement itself. Member identity and amount are server-derived only;
 // business failures are 422 with nothing persisted; a replay never deducts
-// twice; settlement never awards points.
+// twice; settlement awards nothing here because this file's product carries
+// point: 0 (earn-on-settlement for point-bearing products is covered by the
+// dr16-loyalty-earn-on-payment suite).
 
 const unique = (prefix) => `${prefix}_${Date.now()}_${Math.floor(Math.random() * 1e6)}`
 

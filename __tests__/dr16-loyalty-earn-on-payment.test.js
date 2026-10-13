@@ -451,3 +451,71 @@ describe('DR-16 preserved behavior', () => {
     expect(await memberPoints(member.id)).toBe(PRICE * 2)
   })
 })
+
+describe('DR-16 free-text name grants nothing', () => {
+  async function makeTieredMember() {
+    const tier = await db.member_tier.create({
+      name: unique('DR16_TIER'),
+      discountPercent: 15,
+      status: 'active'
+    })
+    const member = await db.member.create({
+      name: unique('DR16 Named Member'),
+      phoneNumber: `08${Math.floor(1e9 + Math.random() * 9e9)}`,
+      store: store.id,
+      totalPoints: 0,
+      lifetimePoints: 0,
+      status: 'active',
+      tier: tier.id
+    })
+    createdMemberIds.push(member.id)
+    return member
+  }
+
+  async function makeQrOrderAsName(name, qty = 2) {
+    const table = await makeTable()
+    const res = await request(app)
+      .post('/order/customer-create')
+      .send({
+        store: store.id,
+        tableId: table.id,
+        customerName: name,
+        items: [{ productId: product.id, productName: product.nameProduct, quantity: qty }],
+        idempotencyKey: unique('dr16qrname')
+      })
+    if (res.status !== 201) throw new Error('qr setup failed: ' + JSON.stringify(res.body))
+    createdOrderIds.push(res.body.data.id)
+    return res.body.data
+  }
+
+  test('exact member name attaches no identity and no discount', async () => {
+    const member = await makeTieredMember()
+    const order = await makeQrOrderAsName(member.name, 2)
+    const row = await db.order.findByPk(order.id)
+    // Free text stays a label only: no member link, no tier discount.
+    expect(row.customerId).toBeNull()
+    expect(row.customerName).toBe(member.name)
+    expect(Number(row.discountAmount) || 0).toBe(0)
+    // Settlement cannot earn for an unattached member.
+    expect((await settleCash(row)).status).toBe(200)
+    expect(await memberPoints(member.id)).toBe(0)
+    expect((await earnedTotal(member.id, order.id)).rows).toBe(0)
+  })
+
+  test('case-variant member name attaches nothing', async () => {
+    const member = await makeTieredMember()
+    const order = await makeQrOrderAsName(member.name.toUpperCase(), 2)
+    const row = await db.order.findByPk(order.id)
+    expect(row.customerId).toBeNull()
+    expect(await memberPoints(member.id)).toBe(0)
+  })
+
+  test('explicit customerId attach still works (preservation)', async () => {
+    const member = await makeMember(0)
+    const order = await makeQrOrder({ member, qty: 2 })
+    const row = await db.order.findByPk(order.id)
+    expect(Number(row.customerId)).toBe(member.id)
+    expect((await settleCash(row)).status).toBe(200)
+    expect(await memberPoints(member.id)).toBe(20)
+  })
+})
