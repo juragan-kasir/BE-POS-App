@@ -519,3 +519,60 @@ describe('DR-16 free-text name grants nothing', () => {
     expect(await memberPoints(member.id)).toBe(20)
   })
 })
+
+describe('DR-16 staff attachment behavior', () => {
+  // Each test creates its own order to avoid state conflicts
+
+  test('first-time member attachment persists member ID and awards points', async () => {
+    const member = await makeMember(0);
+    const order = await makeQrOrder({ qty: 2 });
+    const row = await db.order.findByPk(order.id);
+    const settleRes = await settleCash(row, undefined, member.id);
+    expect(settleRes.status).toBe(200);
+    expect(Number(await db.order.findByPk(row.id).customerId)).toBe(member.id);
+    expect(await memberPoints(member.id)).toBe(20);
+  });
+
+  test('settlement without customerId omitted remains anonymous', async () => {
+    const order = await makeQrOrder({ qty: 2 });
+    const row = await db.order.findByPk(order.id);
+    const settleRes = await settleCash(row);
+    expect(settleRes.status).toBe(200);
+    expect(Number(row.customerId)).toBeNull();
+    expect(await memberPoints(member.id)).toBe(0);
+  });
+
+  test('explicit null customerId when no existing member clears member', async () => {
+    const member = await makeMember(0);
+    const order = await makeQrOrder({ qty: 2 });
+    const row = await db.order.findByPk(order.id);
+    const settleRes = await settleCash(row, undefined, null);
+    expect(settleRes.status).toBe(200);
+    expect(Number(await db.order.findByPk(row.id).customerId)).toBeNull();
+    expect(await memberPoints(member.id)).toBe(0);
+  });
+
+  test('same member ID is idempotent (points awarded once)', async () => {
+    const member = await makeMember(0);
+    const order = await makeQrOrder({ qty: 2 });
+    const row = await db.order.findByPk(order.id);
+    // First attachment
+    await settleCash(row, undefined, member.id);
+    // Same member retry should be idempotent
+    await settleCash(row, undefined, member.id);
+    expect(await memberPoints(member.id)).toBe(20);
+  });
+
+  test('different member ID returns 409 MEMBER_MISMATCH', async () => {
+    const memberA = await makeMember(0);
+    const order = await makeQrOrder({ qty: 2 });
+    const row = await db.order.findByPk(order.id);
+    // First attach memberA
+    await settleCash(row, undefined, memberA.id);
+    // Then try memberB - should return 409
+    const memberB = await makeMember(0);
+    const settleRes = await settleCash(row, undefined, memberB.id);
+    expect(settleRes.status).toBe(409);
+    expect(Number(await db.order.findByPk(row.id).customerId)).toBe(memberA.id);
+  });
+});
