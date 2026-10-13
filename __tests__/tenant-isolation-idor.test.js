@@ -520,9 +520,8 @@ beforeAll(async () => {
     store: [store2.id], supplierId: bankSupplier2.id, period: 'monthly'
   })
 
-  // ---- invoice_setting fixture (store 2 only — store 1's is created by
-  // the malicious-update test itself, to prove the attacker's own store
-  // is what actually gets touched) ----
+  // ---- invoice_setting fixture (store 2 only — the malicious-update test
+  // asserts fail-closed behavior, so no store-1 setting is ever created) ----
   invoiceSetting2 = await db.invoice_setting.create({ store: store2.id, footer: 'IDOR_INVOICE_2' })
 
   // ---- driver fixtures ----
@@ -1736,7 +1735,9 @@ describe('PUT /reservation/:id — tenant isolation', () => {
       .set('Authorization', `Bearer ${adminStore1Token}`)
       .send({ store: store2.id, customerName: 'HACKED_VIA_BODY_STORE' })
 
-    expect(res.status).toBe(404)
+    // Fail-closed (KF-NEW-06/07): conflicting query.store + body.store is
+    // rejected at the middleware layer before reaching the controller.
+    expect(res.status).toBe(403)
     const unchanged = await db.reservation.findByPk(reservation2.id)
     expect(unchanged.customerName).toBe('IDOR_RESV_2')
   })
@@ -1772,7 +1773,8 @@ describe('DELETE /reservation/:id — tenant isolation', () => {
       .set('Authorization', `Bearer ${adminStore1Token}`)
       .send({ store: store2.id })
 
-    expect(res.status).toBe(404)
+    // Fail-closed (KF-NEW-06/07): conflicting identifiers rejected at middleware.
+    expect(res.status).toBe(403)
     const stillThere = await db.reservation.findByPk(reservation2.id)
     expect(stillThere).not.toBeNull()
   })
@@ -1876,7 +1878,8 @@ describe('PUT /table/update/:id — tenant isolation', () => {
       .set('Authorization', `Bearer ${adminStore1Token}`)
       .send({ id: table2.id, store: store2.id, name: 'HACKED_VIA_BODY_STORE' })
 
-    expect(res.status).toBe(404)
+    // Fail-closed (KF-NEW-06/07): conflicting identifiers rejected at middleware.
+    expect(res.status).toBe(403)
     const unchanged = await db.table.findByPk(table2.id)
     expect(unchanged.name).toBe('IDOR_TABLE_2')
   })
@@ -2272,7 +2275,8 @@ describe('PUT /social-media/edit-social-media/:id — tenant isolation', () => {
       .set('Authorization', `Bearer ${adminStore1Token}`)
       .send({ store: store2.id, name: 'HACKED_VIA_BODY_STORE' })
 
-    expect(res.status).toBe(404)
+    // Fail-closed (KF-NEW-06/07): conflicting identifiers rejected at middleware.
+    expect(res.status).toBe(403)
     const unchanged = await db.social_media.findByPk(socialMedia2.id)
     expect(unchanged.name).toBe('IDOR_SOCIAL_2')
   })
@@ -2389,16 +2393,17 @@ describe('PUT /invoice/setting — tenant isolation', () => {
       .set('Authorization', `Bearer ${adminStore1Token}`)
       .send({ store: store2.id, footer: 'HACKED_VIA_BODY_STORE' })
 
-    expect(res.status).toBe(200)
+    // Fail-closed (KF-NEW-06/07): conflicting query.store + body.store is
+    // rejected at the middleware layer, so no write lands anywhere.
+    expect(res.status).toBe(403)
 
     // Store 2's setting must be completely untouched.
     const store2Setting = await db.invoice_setting.findOne({ where: { store: store2.id } })
     expect(store2Setting.footer).toBe('IDOR_INVOICE_2')
 
-    // The write actually landed on the attacker's own store, not the victim's.
+    // Nothing was written to the attacker's own store either.
     const store1Setting = await db.invoice_setting.findOne({ where: { store: store1.id } })
-    expect(store1Setting).not.toBeNull()
-    expect(store1Setting.footer).toBe('HACKED_VIA_BODY_STORE')
+    expect(store1Setting).toBeNull()
   })
 })
 
