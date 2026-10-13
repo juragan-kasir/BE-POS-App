@@ -19,6 +19,7 @@ const {
 } = require('../service/orderFinancials')
 const { normalizePaymentMethod } = require('../service/canonicalPayment')
 const { resolveAttributedRegister } = require('../service/settlementAttribution')
+const { awardEarnedPointsOnce } = require('../service/loyaltyService')
 
 // split_bill has no store column of its own — ownership is entirely
 // inherited through order.store (a plain INTEGER, same shape scalarStoreScope
@@ -419,6 +420,11 @@ const splitBillController = {
 
           if (after.state === FINANCIAL_STATES.PAID) {
             // Stock is deducted exactly once, on the transition to PAID.
+            // DR-16 earned points land on the same transition, exactly once:
+            // same durable history guard as the update-status settlement
+            // hook, so whichever completion path runs first writes the award
+            // row and the other sees it and skips. Partial split collections
+            // award nothing.
             if (order.paymentStatus !== 'paid') {
               await deductStockForPaidOrder(
                 order.id,
@@ -427,6 +433,18 @@ const splitBillController = {
                 req.user?.id || null,
                 t
               )
+              const completeItems = await db.order_item.findAll({
+                where: { order: order.id },
+                transaction: t
+              })
+              await awardEarnedPointsOnce({
+                orderId: order.id,
+                orderNumber: order.orderNumber,
+                memberId: order.customerId,
+                items: completeItems,
+                userId: req.user?.id || null,
+                transaction: t
+              })
             }
             await order.update({ status: 'paid', paymentStatus: 'paid' }, { transaction: t })
             if (order.tableId) {

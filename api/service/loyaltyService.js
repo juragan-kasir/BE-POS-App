@@ -114,4 +114,109 @@ async function maybeUpgradeMemberTier({ member, transaction }) {
   }
 }
 
-module.exports = { adjustMemberPoints, maybeUpgradeMemberTier }
+// DR-16: the single approved earning formula — sum of product.point x
+// quantity over the given items. Items may carry `product` or `productId`
+// (both shapes occur in order flows). Pure read; callers own locking.
+async function computeEarnedPoints(items, transaction) {
+  const list = Array.isArray(items) ? items : []
+  const productIds = [...new Set(list.map((i) => i.product || i.productId).filter(Boolean))]
+  if (productIds.length === 0) return 0
+  const products = await db.product.findAll({
+    where: { id: productIds },
+    attributes: ['id', 'point'],
+    transaction
+  })
+  const pointMap = Object.fromEntries(
+    products.map((p) => [p.id, Number(p.point) || 0])
+  )
+  return list.reduce((sum, item) => {
+    const pid = item.product || item.productId
+    return sum + (pointMap[pid] || 0) * Number(item.quantity)
+  }, 0)
+}
+
+// DR-16: award earned points exactly once per order. The member_point_history
+// rows written by prior awards are the durable guard — checked inside the
+// caller's transaction (which must already hold the order row lock), so two
+// concurrent completions (settlement retry, split-pay vs status update)
+// cannot both award. Notes prefix 'Earned ' is the award marker (the only
+// writer of such rows); 'Restored '/'Reversed ' rows never match it.
+async function awardEarnedPointsOnce({
+  orderId,
+  orderNumber,
+  memberId,
+  items,
+  userId = null,
+  transaction
+}) {
+  if (!memberId) return null
+  const prior = await db.member_point_history.findOne({
+    where: {
+      member: memberId,
+      transactionId: String(orderId),
+      notes: { [Op.like]: 'Earned %' }
+    },
+    transaction
+  })
+  if (prior) return { alreadyAwarded: true }
+  const pointsEarned = await computeEarnedPoints(items, transaction)
+  if (!(pointsEarned > 0)) return null
+  const result = await adjustMemberPoints({
+    memberId,
+    deltaPoints: pointsEarned,
+    deltaLifetimePoints: pointsEarned,
+    referenceId: orderId,
+    notes: `Earned ${pointsEarned} points from order ${orderNumber}`,
+    createdBy: userId,
+    transaction
+  })
+  if (result) {
+    await maybeUpgradeMemberTier({ member: result.member, transaction })
+  }
+  return result
+}
+
+// DR-16: reverse previously earned points for a cancelled/voided/refunded
+// purchase. Totals are derived from the ledger in-transaction (earned minus
+// prior reversals for this order), so the call is a safe no-op when nothing
+// was earned and can never reverse more than the original award across
+// multiple partial refunds. `items` are the reversed units in the same
+// shape as computeEarnedPoints — the same approved formula applied to the
+// returned portion, so no new rounding policy is introduced.
+async function reverseEarnedPoints({
+  orderId,
+  orderNumber,
+  memberId,
+  items,
+  userId = null,
+  transaction,
+  reason
+}) {
+  if (!memberId) return null
+  const rows = await db.member_point_history.findAll({
+    where: { member: memberId, transactionId: String(orderId) },
+    transaction
+  })
+  const earned = rows
+    .filter((r) => String(r.notes || '').startsWith('Earned '))
+    .reduce((s, r) => s + Number(r.pointsChange), 0)
+  const reversed = rows
+    .filter((r) => String(r.notes || '').startsWith('Reversed '))
+    .reduce((s, r) => s + Math.abs(Number(r.pointsChange)), 0)
+  const remaining = earned - reversed
+  if (!(remaining > 0)) return null
+  const computed = await computeEarnedPoints(items, transaction)
+  const amount = Math.min(Math.trunc(Number(computed)) || 0, Math.trunc(remaining))
+  if (!(amount > 0)) return null
+  return adjustMemberPoints({
+    memberId,
+    deltaPoints: -amount,
+    deltaLifetimePoints: -amount,
+    referenceId: orderId,
+    notes: `Reversed ${amount} earned points from order ${orderNumber} (${reason})`,
+    createdBy: userId,
+    transaction
+  })
+}
+
+module.exports = { adjustMemberPoints, maybeUpgradeMemberTier, computeEarnedPoints, awardEarnedPointsOnce, reverseEarnedPoints }
