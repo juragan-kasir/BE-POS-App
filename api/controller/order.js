@@ -2711,6 +2711,8 @@ exports.updateOrderStatus = async (req, res) => {
       })
     }
 
+    const sentCustomerId = req.body.customerId
+
     // Used outside the transaction below (accounting posting, which is
     // already dedup-guarded by referenceId). The guards that actually
     // decide whether to mutate stock use a fresh, row-locked read taken
@@ -3005,6 +3007,21 @@ exports.updateOrderStatus = async (req, res) => {
         }
         if (!zeroPayableCompletion) {
           settleAmount = fin.O
+
+          // DR-16: member attachment is idempotent only under these conditions:
+          //  • no existing member on the order → any valid supplied ID attaches
+          //  • same existing member → idempotent (no-op, points still awarded once)
+          //  • different existing member → 409, never silently replace attribution
+          const orderHasExistingMember = lockedOrder.customerId !== null && lockedOrder.customerId !== undefined
+          if (sentCustomerId !== undefined) {
+            if (orderHasExistingMember && Number(sentCustomerId) !== Number(lockedOrder.customerId)) {
+              // Different existing member: refuse and never silently replace
+              throw financialError(409, 'MEMBER_MISMATCH', 'Cannot attach a different member ID to an already-attached order')
+            }
+            // Either (a) no existing member → attach the supplied member,
+            // or (b) same existing member → idempotent (fall through, points awarded once)
+          }
+
           // DR-04: complete tender — method, server-validated cash detail
           // against the outstanding amount, and drawer attribution.
           paidTender = await resolvePaidSettlement({
@@ -3221,6 +3238,9 @@ exports.updateOrderStatus = async (req, res) => {
           status,
           ...(paidTender
             ? { paymentMethod: paidTender.method, cashRegisterId: paidTender.registerId }
+            : {}),
+          ...(sentCustomerId !== undefined && lockedOrder.customerId === null
+            ? { customerId: sentCustomerId }
             : {}),
           ...(refundRegisterId ? { cashRegisterId: refundRegisterId } : {})
         },

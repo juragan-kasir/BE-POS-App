@@ -343,6 +343,7 @@ exports.updateOrderStatusSchema = z.object({
   ]),
   changedBy: strToNum().optional().nullable(),
   changedByName: z.string().optional().nullable(),
+  customerId: strToNum().optional().nullable(),
   notes: z.string().optional().default(''),
   // DR-04: tender fields for settling an order to paid via update-status.
   // Optional so non-paid transitions keep their existing shape; when
