@@ -51,4 +51,74 @@ describe('KF-NEW-06/07: location parameter bypass in store isolation', () => {
     expect(next).toBe(false)
     expect(res.statusCode).toBe(403)
   })
+
+  test('duplicate consistent query store and location passes', () => {
+    const req = { authSession: { userId: 1 }, user: { id: 1, roleType: 'admin', store: 10 }, query: { store: '10', location: '10' }, body: {}, cookies: {} }
+    const res = mockRes()
+    let next = false
+    validateStoreAccess(req, res, () => { next = true })
+    expect(next).toBe(true)
+    expect(req.storeId).toBe(10)
+  })
+
+  test('equivalent identifiers with different representations pass', () => {
+    const req = { authSession: { userId: 1 }, user: { id: 1, roleType: 'admin', store: 10 }, query: { store: 10 }, body: { location: ' 10 ' }, cookies: {} }
+    const res = mockRes()
+    let next = false
+    validateStoreAccess(req, res, () => { next = true })
+    expect(next).toBe(true)
+    expect(req.storeId).toBe(10)
+  })
+
+  test('conflicting body storeId and location fails closed', () => {
+    const req = { authSession: { userId: 1 }, user: { id: 1, roleType: 'admin', store: 10 }, query: {}, body: { storeId: '10', location: '11' }, cookies: {} }
+    const res = mockRes()
+    let next = false
+    validateStoreAccess(req, res, () => { next = true })
+    expect(next).toBe(false)
+    expect(res.statusCode).toBe(403)
+  })
+
+  test('cross query/body conflict fails closed', () => {
+    const req = { authSession: { userId: 1 }, user: { id: 1, roleType: 'admin', store: 10 }, query: { store: '10' }, body: { location: '11' }, cookies: {} }
+    const res = mockRes()
+    let next = false
+    validateStoreAccess(req, res, () => { next = true })
+    expect(next).toBe(false)
+    expect(res.statusCode).toBe(403)
+  })
+
+  test('legacy validateStoreAccess allows non-super-admin own body.location', () => {
+    const req = { authSession: { userId: 1 }, user: { id: 1, roleType: 'admin', store: 10 }, query: {}, body: { location: '10' }, cookies: {} }
+    const res = mockRes()
+    let next = false
+    validateStoreAccess(req, res, () => { next = true })
+    expect(next).toBe(true)
+    expect(req.storeId).toBe(10)
+  })
+
+  test('missing store params defaults to own store', () => {
+    const req = { authSession: { userId: 1 }, user: { id: 1, roleType: 'admin', store: 10 }, query: {}, body: {}, cookies: {} }
+    const res = mockRes()
+    let next = false
+    validateStoreAccess(req, res, () => { next = true })
+    expect(next).toBe(true)
+    expect(req.storeId).toBe(10)
+  })
+
+  test('super_admin bypass preserved for foreign query.location', () => {
+    const req = { authSession: { userId: 1 }, user: { id: 1, roleType: 'super_admin', store: null }, query: { location: '11' }, body: {}, cookies: {} }
+    const res = mockRes()
+    let next = false
+    validateStoreAccess(req, res, () => { next = true })
+    expect(next).toBe(true)
+  })
+
+  test('super_admin with conflicting identifiers is not blocked', () => {
+    const req = { authSession: { userId: 1 }, user: { id: 1, roleType: 'super_admin', store: null }, query: { store: '10', location: '11' }, body: {}, cookies: {} }
+    const res = mockRes()
+    let next = false
+    validateStoreAccess(req, res, () => { next = true })
+    expect(next).toBe(true)
+  })
 })
