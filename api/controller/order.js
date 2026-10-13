@@ -12,7 +12,7 @@ const { createNotification } = require('../../utils/createNotification')
 const { createAudit, redactAndAudit, AUDIT_ACTIONS } = require('../../utils/auditLog')
 const { emitItemStatusUpdate, emitNewOrder } = require('../service/socket')
 const batchService = require('../service/batchService')
-const { adjustMemberPoints, maybeUpgradeMemberTier } = require('../service/loyaltyService')
+const { adjustMemberPoints, maybeUpgradeMemberTier, computeEarnedPoints, awardEarnedPointsOnce, reverseEarnedPoints } = require('../service/loyaltyService')
 const { incrementPromoUsage } = require('../service/promoUsageService')
 const {
   enqueueAccountingJob,
@@ -2152,19 +2152,9 @@ const awardEarnedPoints = async (
   transaction
 ) => {
   if (!customerId) return
-  const productIds = [...new Set(items.map((i) => i.product || i.productId))]
-  const products = await Product.findAll({
-    where: { id: productIds },
-    attributes: ['id', 'point'],
-    transaction
-  })
-  const pointMap = Object.fromEntries(
-    products.map((p) => [p.id, Number(p.point) || 0])
-  )
-  const pointsEarned = items.reduce((sum, item) => {
-    const pid = item.product || item.productId
-    return sum + (pointMap[pid] || 0) * Number(item.quantity)
-  }, 0)
+  // Approved formula lives in loyaltyService; this wrapper preserves the
+  // counter-creation call shape (atomic paid-at-creation award).
+  const pointsEarned = await computeEarnedPoints(items, transaction)
   if (pointsEarned <= 0) return
 
   const result = await adjustMemberPoints({
@@ -3038,6 +3028,23 @@ exports.updateOrderStatus = async (req, res) => {
               t
             })
           }
+          // DR-16: earned points land at successful payment, exactly once
+          // per order. The helper checks the durable ledger history inside
+          // this transaction (order row already UPDATE-locked above), so a
+          // retried or concurrent settlement cannot award twice; refused
+          // settlements never reach here.
+          const settleItems = await db.order_item.findAll({
+            where: { order: id },
+            transaction: t
+          })
+          await awardEarnedPointsOnce({
+            orderId: id,
+            orderNumber: lockedOrder.orderNumber,
+            memberId: lockedOrder.customerId,
+            items: settleItems,
+            userId: changedBy || req.user?.id,
+            transaction: t
+          })
         }
       }
 
@@ -3326,6 +3333,27 @@ exports.updateOrderStatus = async (req, res) => {
             }
           }
         }
+
+        // DR-16: reverse previously earned points for the cancelled/voided
+        // purchase. Derived from the durable ledger history in-transaction:
+        // a cancel (allowed only with nothing collected) finds nothing
+        // earned and is a safe no-op; a void reverses up to the original
+        // award, never more. Existing redemption restoration above is
+        // untouched — earned reversal and redemption restore are distinct
+        // ledger entries.
+        const cancelItems = await db.order_item.findAll({
+          where: { order: id },
+          transaction: t
+        })
+        await reverseEarnedPoints({
+          orderId: id,
+          orderNumber: lockedOrder.orderNumber,
+          memberId: lockedOrder.customerId,
+          items: cancelItems,
+          userId: req.user?.id || null,
+          transaction: t,
+          reason: isVoiding ? 'void' : 'cancel'
+        })
 
         retiredSplits = await retirePendingSplits(id, t)
         retiredSplitReason = isVoiding ? 'VOIDED' : 'CANCELLED'
@@ -4307,35 +4335,10 @@ exports.createCustomerOrder = async (req, res) => {
         }
       }
 
-      if (member) {
-        const productIds = [...new Set(items.map((i) => i.productId))]
-        const products = await Product.findAll({
-          where: { id: productIds },
-          attributes: ['id', 'point'],
-          transaction: t
-        })
-        const pointMap = Object.fromEntries(
-          products.map((p) => [p.id, Number(p.point) || 0])
-        )
-        const pointsEarned = items.reduce((sum, item) => {
-          return sum + (pointMap[item.productId] || 0) * Number(item.quantity)
-        }, 0)
-
-        if (pointsEarned > 0) {
-          const pointsResult = await adjustMemberPoints({
-            memberId: member.id,
-            deltaPoints: pointsEarned,
-            deltaLifetimePoints: pointsEarned,
-            referenceId: createdOrder.id,
-            notes: `Earned ${pointsEarned} points from order ${orderNumber}`,
-            transaction: t
-          })
-          if (pointsResult) {
-            await maybeUpgradeMemberTier({ member: pointsResult.member, transaction: t })
-          }
-        }
-      }
-
+      // DR-16: QR orders are created unpaid, so placement awards nothing.
+      // Earned points land at successful payment/settlement (see the
+      // settlement hook in updateOrderStatus and the split-pay completion
+      // hook), guarded durably against duplicate awards.
       if (deductStock) {
         accountingJobs = await enqueueOrderAccountingJobs(
           createdOrder,

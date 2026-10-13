@@ -287,7 +287,7 @@ describe('P0-1 — no under-settlement / stale outstanding', () => {
     const member = await makeMember(store.id)
     const { order, pendingSplit } = await makePartiallyPaid({ customerId: member.id })
     const before = await snapshot(order.id, member.id)
-    expect(before.pointRows).toBe(1) // legacy QR earn at creation (P1-5, untouched)
+    expect(before.pointRows).toBe(0) // DR-16: QR placement awards nothing
 
     const res = await updateStatus(adminToken, {
       id: order.id,
@@ -317,7 +317,7 @@ describe('P0-1 — no under-settlement / stale outstanding', () => {
     // Exactly-once side effects.
     expect(before.stock - after.stock).toBe(QTY)
     expect(await db.accounting_outbox.count({ where: { referenceType: 'order', referenceId: order.id, jobType: 'order_journal' } })).toBe(1)
-    expect(after.pointRows).toBe(before.pointRows) // no second earn
+    expect(after.pointRows).toBe(before.pointRows + 1) // completing settlement awards exactly once
   })
 })
 

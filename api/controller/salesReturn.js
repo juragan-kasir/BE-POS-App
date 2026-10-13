@@ -14,6 +14,7 @@ const {
 } = require('../service/accountingOutboxService')
 const { normalizePaymentMethod } = require('../service/canonicalPayment')
 const { resolveAttributedRegister } = require('../service/settlementAttribution')
+const { reverseEarnedPoints } = require('../service/loyaltyService')
 
 const salesReturnController = {
   async getAll(req, res) {
@@ -759,6 +760,23 @@ const salesReturnController = {
           },
           { transaction }
         )
+
+        // DR-16: reverse earned points for the returned units, using the
+        // same approved product.point x quantity formula applied to this
+        // return's lines. Derived from the durable ledger history in this
+        // transaction (order row locked above): reverses at most the
+        // remaining award, so multiple partial approvals can never
+        // double-reverse, and a return on an order that never earned is a
+        // safe no-op. Redemption handling is untouched.
+        await reverseEarnedPoints({
+          orderId: ret.order,
+          orderNumber: order.orderNumber,
+          memberId: order.customerId,
+          items: (ret.items || []).map((i) => ({ productId: i.product, quantity: i.qty })),
+          userId: req.user?.id || null,
+          transaction,
+          reason: `sales return ${ret.returnNumber}`
+        })
 
         // 4. Recompute Order Payment Status
         const updatedOrder = await db.order.findByPk(ret.order, {
