@@ -63,8 +63,10 @@ const parseStoreCandidates = (req) => {
     raw.push(v)
   }
   if (req?.query?.store !== undefined) push(req.query.store)
+  if (req?.query?.location !== undefined) push(req.query.location)
   if (req?.body?.store !== undefined) push(req.body.store)
   if (req?.body?.storeId !== undefined) push(req.body.storeId)
+  if (req?.body?.location !== undefined) push(req.body.location)
   if (req?.cookies?.store !== undefined) push(req.cookies.store)
   if (req?.cookies?.activeStore !== undefined) push(req.cookies.activeStore)
   const merged = []
@@ -160,14 +162,20 @@ const authorizedStoreIds = (req) => {
   if (userRole !== 'super_admin' && Number.isFinite(userStore) && userStore > 0) {
     // Single-store tenant: authoritative writes may go to exactly {req.storeId}.
     const hasBodyStore =
-      req.body && (req.body.store !== undefined || req.body.storeId !== undefined)
-    const hasQueryStore = req.query && req.query.store !== undefined
+      req.body &&
+      (req.body.store !== undefined || req.body.storeId !== undefined || req.body.location !== undefined)
+    const hasQueryStore =
+      req.query && (req.query.store !== undefined || req.query.location !== undefined)
     const supplied = hasBodyStore
       ? req.body.store !== undefined
         ? req.body.store
-        : req.body.storeId
+        : req.body.storeId !== undefined
+          ? req.body.storeId
+          : req.body.location
       : hasQueryStore
-        ? req.query.store
+        ? req.query.store !== undefined
+          ? req.query.store
+          : req.query.location
         : undefined
 
     // Omitted / empty / 'all' store -> default to own store. This is the
@@ -249,12 +257,32 @@ const validateStoreAccess = (req, res, next) => {
   }
   const userRole = req.user.roleType
   const userStore = req.user.store
-  const supplied =
-    req.query.store !== undefined
-      ? req.query.store
-      : req.body.store !== undefined
-        ? req.body.store
-        : req.body.storeId
+  
+  // Collect ALL store candidates from all parameters (not just the first)
+  // to detect conflicts like ?store=10&location=11
+  const allCandidates = []
+  if (req.query?.store !== undefined) allCandidates.push(...normalizeStoreIds(req.query.store))
+  if (req.query?.location !== undefined) allCandidates.push(...normalizeStoreIds(req.query.location))
+  if (req.body?.store !== undefined) allCandidates.push(...normalizeStoreIds(req.body.store))
+  if (req.body?.storeId !== undefined) allCandidates.push(...normalizeStoreIds(req.body.storeId))
+  if (req.body?.location !== undefined) allCandidates.push(...normalizeStoreIds(req.body.location))
+  
+  // Deduplicate and check for conflicts
+  const uniqueCandidates = [...new Set(allCandidates)]
+  
+  if (userRole === 'super_admin') {
+    req.storeId = uniqueCandidates[0] ?? null
+    return next()
+  }
+  
+  // If multiple distinct stores were supplied, fail closed (ambiguous/conflicting)
+  if (uniqueCandidates.length > 1) {
+    return res.status(403).json({
+      message: 'Anda hanya dapat mengakses data di toko Anda'
+    })
+  }
+  
+  const supplied = uniqueCandidates[0] ?? null
 
   // Defense-in-depth: normalize WITHOUT parseInt coercion tricks. This closes
   // the latent array/JSON-string collapse gap (parseInt([own,foreign]) -> own,
