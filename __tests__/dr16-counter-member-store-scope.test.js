@@ -270,3 +270,72 @@ describe('DR-16 settlement attachment member scope (PUT /order/update-status)', 
     expect((await memberState(member.id)).totalPoints).toBe(POINT)
   })
 })
+
+// Review finding on #196: updateOrderStatus persists `customerId` on ANY
+// status change when the order has no member yet. The scope check must
+// guard every such attach, not only the paid branch — otherwise a foreign
+// member attached by a fulfilment update is later awarded at settlement.
+describe('DR-16 member scope on non-settlement status changes', () => {
+  async function updateStatus(order, status, customerId) {
+    return request(app)
+      .put('/order/update-status')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ id: order.id, store: store.id, status, customerId })
+  }
+
+  test('foreign member cannot be attached by a fulfilment update, and earns nothing at settlement', async () => {
+    const foreign = await makeMember({ storeId: otherStore.id })
+    const before = await memberState(foreign.id)
+    const order = await makeAnonymousQrOrder()
+
+    const res = await updateStatus(order, 'confirmed', foreign.id)
+
+    expect(res.status).toBe(422)
+    expect(res.body.code).toBe('MEMBER_OUT_OF_SCOPE')
+    const afterUpdate = await db.order.findByPk(order.id)
+    expect(afterUpdate.customerId).toBeNull()
+    expect(afterUpdate.status).toBe('pending')
+
+    const settle = await request(app)
+      .put('/order/update-status')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ id: order.id, store: store.id, status: 'paid', paymentMethod: 'cash', cashAmount: order.totalPrice, changeAmount: 0 })
+    expect(settle.status).toBe(200)
+    expect(await memberState(foreign.id)).toEqual(before)
+  })
+
+  test('foreign member cannot be attached through cancellation', async () => {
+    const foreign = await makeMember({ storeId: otherStore.id })
+    const order = await makeAnonymousQrOrder()
+
+    const res = await updateStatus(order, 'cancelled', foreign.id)
+
+    expect(res.status).toBe(422)
+    expect(res.body.code).toBe('MEMBER_OUT_OF_SCOPE')
+    const after = await db.order.findByPk(order.id)
+    expect(after.customerId).toBeNull()
+    expect(after.status).toBe('pending')
+  })
+
+  test('unknown member id cannot be attached by a fulfilment update', async () => {
+    const order = await makeAnonymousQrOrder()
+
+    const res = await updateStatus(order, 'confirmed', 2147480004)
+
+    expect(res.status).toBe(422)
+    expect(res.body.code).toBe('MEMBER_NOT_FOUND')
+    expect((await db.order.findByPk(order.id)).customerId).toBeNull()
+  })
+
+  test('same-store member still attaches on a fulfilment update (preserved)', async () => {
+    const member = await makeMember({ storeId: store.id })
+    const order = await makeAnonymousQrOrder()
+
+    const res = await updateStatus(order, 'confirmed', member.id)
+
+    expect(res.status).toBe(200)
+    const after = await db.order.findByPk(order.id)
+    expect(Number(after.customerId)).toBe(member.id)
+    expect(after.status).toBe('confirmed')
+  })
+})
