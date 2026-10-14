@@ -1180,13 +1180,16 @@ const fetchFullOrder = async (orderId) =>
     ]
   })
 
-exports.createOrder = async (req, res) => {
+// Store a counter sale (or its quote) is authorized for: super_admin names
+// it, everyone else is pinned to their own store and any supplied store
+// must match it. Returns { store } or { status, body } to send as-is.
+const resolveCounterStore = (req) => {
   const authorizedStore = req.user?.roleType === 'super_admin'
     ? (req.body.store !== undefined ? Number(req.body.store) : Number(req.query?.store))
     : req.storeId
 
   if (authorizedStore === null || !Number.isInteger(authorizedStore) || authorizedStore <= 0) {
-    return res.status(400).json({ message: 'Invalid or missing store authorization' })
+    return { status: 400, body: { message: 'Invalid or missing store authorization' } }
   }
 
   if (req.user?.roleType !== 'super_admin') {
@@ -1194,9 +1197,126 @@ exports.createOrder = async (req, res) => {
       .filter((v) => v !== undefined && v !== null && v !== '')
       .map((v) => Number(v))
     if (suppliedStores.some((v) => !Number.isInteger(v) || v !== Number(authorizedStore))) {
-      return res.status(401).json({ message: 'Unauthorized store access' })
+      return { status: 401, body: { message: 'Unauthorized store access' } }
     }
   }
+  return { store: authorizedStore }
+}
+
+// One server resolver for what a counter sale charges (DR-11: the
+// server-resolved price is the price of record; DR-17: displayed rate =
+// charged rate). createOrder prices the sale it persists with it, and
+// quoteOrder shows the cashier the same numbers before commitment.
+// Read-only — it never writes. Refusals come back as { ok: false,
+// status, body } for the caller to send unchanged; thrown errors carry
+// their own statusCode/code.
+const priceCounterOrder = async ({
+  items,
+  store,
+  user,
+  discountId,
+  promoCode,
+  customerId,
+  redeemedPoints,
+  useTax
+}) => {
+  const discount = await resolveOrderDiscount({
+    discountId,
+    promoCode,
+    customerId,
+    redeemedPoints,
+    store
+  })
+
+  const pricing = await loadAndPriceOrderItems(items, store, user)
+  if (!pricing.ok) {
+    // W3-2: the price-mismatch conflict keeps its exact locked body and
+    // must never collapse into the generic error shape.
+    if (pricing.statusCode === 409 && pricing.mismatches) {
+      return { ok: false, status: 409, body: buildPriceMismatchBody(pricing.mismatches) }
+    }
+    return { ok: false, status: pricing.statusCode || 400, body: { message: pricing.message } }
+  }
+
+  const useTaxFlag = useTax === undefined ? true : Boolean(useTax)
+  const taxRate = useTaxFlag ? await getActiveTaxRate(store) : 0
+  const serviceChargeRate = await getServiceChargeRate(store)
+
+  const final = await calculateFinalTotals({
+    items,
+    store,
+    customerId,
+    discountValue: discount.discountValue,
+    discountType: discount.discountType,
+    appliedDiscountId: discount.appliedDiscountId,
+    appliedDiscountMeta: discount.appliedDiscountMeta,
+    pointDiscountAmount: discount.pointDiscountAmount,
+    taxRate,
+    serviceChargeRate
+  })
+
+  return { ok: true, discount, pricing, taxRate, serviceChargeRate, ...final }
+}
+
+// Which rule produced the order-level discount, in resolveOrderDiscount /
+// calculateFinalTotals precedence: explicit discount or promo code, else a
+// promo campaign, else the member's tier.
+const discountSourceOf = (priced) => {
+  if (priced.discount.appliedDiscountId) return 'discount'
+  if (priced.appliedCampaignId) return 'campaign'
+  if (Number(priced.discount.discountValue) > 0) return 'tier'
+  return 'none'
+}
+
+// POST /order/quote — the server's answer to "what will this counter sale
+// charge?" for the exact payload /order/create would receive. Read-only:
+// no order, ledger, stock, loyalty or journal effect.
+exports.quoteOrder = async (req, res) => {
+  const scope = resolveCounterStore(req)
+  if (!scope.store) return res.status(scope.status).json(scope.body)
+
+  const { items, discountId, promoCode, customerId, redeemedPoints, useTax } = req.body
+  try {
+    const priced = await priceCounterOrder({
+      items,
+      store: scope.store,
+      user: req.user,
+      discountId,
+      promoCode,
+      customerId,
+      redeemedPoints,
+      useTax
+    })
+    if (!priced.ok) return res.status(priced.status).json(priced.body)
+
+    const { totals, discount, taxRate, serviceChargeRate } = priced
+    return res.status(200).json({
+      data: {
+        subTotal: totals.subTotal,
+        discountAmount: totals.discountAmount,
+        discountSource: discountSourceOf(priced),
+        pointDiscountAmount: discount.pointDiscountAmount,
+        redeemedPoints: discount.redeemedPointsUsed,
+        taxRate,
+        taxAmount: totals.taxAmount,
+        serviceChargeRate,
+        serviceChargeAmount: totals.serviceChargeAmount,
+        totalPrice: totals.totalPrice,
+        totalQuantity: totals.totalQuantity
+      }
+    })
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({
+      error: error.statusCode ? error.message : 'Internal Server Error',
+      ...(error.code ? { code: error.code } : {})
+    })
+  }
+}
+
+exports.createOrder = async (req, res) => {
+  const scope = resolveCounterStore(req)
+  if (!scope.store) return res.status(scope.status).json(scope.body)
+  const authorizedStore = scope.store
 
   const {
     tableId,
@@ -1265,47 +1385,30 @@ exports.createOrder = async (req, res) => {
       return res.status(400).json({ message: tableCheck.message })
     }
 
-    const discount = await resolveOrderDiscount({
+    // DR-11 / DR-17: priced by the same resolver the quote endpoint uses,
+    // so what the cashier was shown is what this sale charges.
+    const priced = await priceCounterOrder({
+      items,
+      store: authorizedStore,
+      user: req.user,
       discountId,
       promoCode,
       customerId,
       redeemedPoints,
-      store: authorizedStore
+      useTax
     })
-    const { discountValue, discountType, appliedDiscountId } = discount
-
-    const pricing = await loadAndPriceOrderItems(items, authorizedStore, req.user)
-    if (!pricing.ok) {
-      // W3-2: the price-mismatch conflict keeps its exact locked body and
-      // must never collapse into the generic error shape below.
-      if (pricing.statusCode === 409 && pricing.mismatches) {
-        return res.status(409).json(buildPriceMismatchBody(pricing.mismatches))
-      }
-      return res.status(pricing.statusCode || 400).json({ message: pricing.message })
-    }
-    const { bundleMap, productById } = pricing
-
-    const useTaxFlag = useTax === undefined ? true : Boolean(useTax)
-    const taxRate = useTaxFlag ? await getActiveTaxRate(authorizedStore) : 0
-    const serviceChargeRate = await getServiceChargeRate(authorizedStore)
-
+    if (!priced.ok) return res.status(priced.status).json(priced.body)
     const {
+      discount,
+      taxRate,
+      serviceChargeRate,
       totals,
       promoDiscountAmount,
       appliedCampaignId,
       campaignWithSubtotal
-    } = await calculateFinalTotals({
-      items,
-      store: authorizedStore,
-      customerId,
-      discountValue,
-      discountType,
-      appliedDiscountId,
-      appliedDiscountMeta: discount.appliedDiscountMeta,
-      pointDiscountAmount: discount.pointDiscountAmount,
-      taxRate,
-      serviceChargeRate
-    })
+    } = priced
+    const { discountValue, discountType, appliedDiscountId } = discount
+    const { bundleMap, productById } = priced.pricing
 
     // F-PAY-1: a paid order must always carry its payment-ledger row.
     // paymentMethod is optional in the schema and recordOrderPayment skips
