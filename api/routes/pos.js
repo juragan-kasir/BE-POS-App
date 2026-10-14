@@ -4,6 +4,7 @@ const posController = require('../controller/pos')
 const authorization = require('../../utils/authorization')
 const { requireRole } = require('../../utils/authorization')
 const { validateStoreAccess } = require('../../utils/storeValidation')
+const { requireCapability } = require('../../utils/financialCapabilities')
 const { validate } = require('../middleware/validate')
 const {
   createPosTransferSchema,
@@ -87,7 +88,7 @@ router.post(
   '/order/:id/return',
   authorization,
   validateStoreAccess,
-  requireRole('super_admin', 'admin'),
+  requireCapability('refund.request', { entity: 'sales_return', entityIdFrom: (req) => req.params.id }),
   validate(createSalesReturnSchema),
   posController.returnSalesOrder
 )

@@ -10,6 +10,11 @@ const { Op } = require('sequelize')
 const { fetchActiveTaxRows } = require('../../utils/taxResolution')
 const { createNotification } = require('../../utils/createNotification')
 const { createAudit, redactAndAudit, AUDIT_ACTIONS } = require('../../utils/auditLog')
+const {
+  hasCapability,
+  auditCapabilityDenial,
+  denialBody
+} = require('../../utils/financialCapabilities')
 const { emitItemStatusUpdate, emitNewOrder } = require('../service/socket')
 const batchService = require('../service/batchService')
 const { adjustMemberPoints, maybeUpgradeMemberTier, computeEarnedPoints, awardEarnedPointsOnce, reverseEarnedPoints } = require('../service/loyaltyService')
@@ -37,7 +42,14 @@ const { resolveAttributedRegister } = require('../service/settlementAttribution'
 
 // DR-23 interim compatibility mapping for the elevated `order.void`
 // capability (DR-12 memberships are not wired yet): legacy admin roles only.
-const VOID_CAPABLE_ROLES = Object.freeze(['admin', 'super_admin'])
+// DR-23 §J: capability required to move an order to a financial status
+// (interim legacy-role mapping lives in utils/financialCapabilities).
+// Fulfilment-only transitions are not capability-gated here.
+const STATUS_CAPABILITY = Object.freeze({
+  paid: 'payment.collect',
+  cancelled: 'order.cancel',
+  void: 'order.void'
+})
 // An order created by createCustomerOrder (QR/BISA-MAKAN): it always writes
 // source 'qr' and never sets createdBy, while createOrder (POS) always
 // records the authenticated creator — and accepts a client-supplied source,
@@ -2794,22 +2806,32 @@ exports.updateOrderStatus = async (req, res) => {
       ? req.storeId || req.body.store || null
       : req.storeId || req.user?.store || null
 
-  // DR-23 / DR-08: void is a financial reversal requiring an elevated
-  // capability (interim compatibility mapping: legacy admin/super_admin).
+  // DR-23 §J / DR-08: settling, cancelling and voiding are capability-
+  // controlled (void elevated). Staff hold none of them by default.
   // Refused before any read or mutation; the denial is audited (DR-20),
   // outside any transaction.
-  if (status === 'void' && !VOID_CAPABLE_ROLES.includes(req.user?.roleType)) {
-    await redactAndAudit(req, {
-      action: AUDIT_ACTIONS.VOID,
+  const requiredCapability = STATUS_CAPABILITY[status]
+  if (requiredCapability && !hasCapability(req.user, requiredCapability)) {
+    if (status === 'void') {
+      await redactAndAudit(req, {
+        action: AUDIT_ACTIONS.VOID,
+        entity: 'order',
+        entityId: id,
+        description: `Void of order ${id} denied: elevated capability (order.void) required`,
+        newValues: { result: 'DENIED', roleType: req.user?.roleType || null }
+      })
+      return res.status(403).json({
+        error: 'Voiding an order requires an elevated capability (order.void)',
+        code: 'FORBIDDEN'
+      })
+    }
+    await auditCapabilityDenial(req, {
+      capability: requiredCapability,
       entity: 'order',
       entityId: id,
-      description: `Void of order ${id} denied: elevated capability (order.void) required`,
-      newValues: { result: 'DENIED', roleType: req.user?.roleType || null }
+      action: status === 'paid' ? AUDIT_ACTIONS.PAYMENT : AUDIT_ACTIONS.UPDATE
     })
-    return res.status(403).json({
-      error: 'Voiding an order requires an elevated capability (order.void)',
-      code: 'FORBIDDEN'
-    })
+    return res.status(403).json(denialBody(requiredCapability))
   }
 
   // Split rows retired by this transition; audited after commit.
@@ -3044,6 +3066,18 @@ exports.updateOrderStatus = async (req, res) => {
       })
       const oldStatus = lockedOrder.status
       const oldPaymentStatus = lockedOrder.paymentStatus
+      // DR-16 / DR-01: the order update below attaches `customerId` on ANY
+      // status change when the order has no member yet, so a supplied
+      // member must resolve inside this order's store before anything is
+      // written — on every transition, not only on settlement.
+      if (
+        sentCustomerId !== undefined &&
+        sentCustomerId !== null &&
+        (lockedOrder.customerId === null || lockedOrder.customerId === undefined)
+      ) {
+        const scoped = await resolveStoreScopedMember(sentCustomerId, lockedOrder.store, t)
+        if (!scoped.member) throw financialError(422, scoped.code, scoped.message)
+      }
       // DR-23 (BA §35.10): every financial decision below is taken on the
       // aggregates recomputed from the ledger under THIS order lock — never
       // on a pre-lock read, a cached paymentStatus, or the order's gross
@@ -3136,12 +3170,8 @@ exports.updateOrderStatus = async (req, res) => {
               // Different existing member: refuse and never silently replace
               throw financialError(409, 'MEMBER_MISMATCH', 'Cannot attach a different member ID to an already-attached order')
             }
-            // DR-16 / DR-01: a newly attached member must resolve inside
-            // this order's store, before any tender, award or write.
-            if (!orderHasExistingMember && sentCustomerId !== null) {
-              const scoped = await resolveStoreScopedMember(sentCustomerId, lockedOrder.store, t)
-              if (!scoped.member) throw financialError(422, scoped.code, scoped.message)
-            }
+            // A newly attached member was already store-scoped right after
+            // the order lock (see below the lockedOrder read).
             // Either (a) no existing member → attach the supplied member,
             // or (b) same existing member → idempotent (fall through, points awarded once)
           }
