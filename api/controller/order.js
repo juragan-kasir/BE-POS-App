@@ -3050,6 +3050,13 @@ exports.updateOrderStatus = async (req, res) => {
           // this transaction (order row already UPDATE-locked above), so a
           // retried or concurrent settlement cannot award twice; refused
           // settlements never reach here.
+          // Staff attachment: the award follows the effective member — the
+          // newly attached ID when supplied at settlement, otherwise the
+          // order's existing member. Using lockedOrder.customerId alone
+          // would skip the award for first-time attachments (anonymous
+          // order + customerId at settlement).
+          const effectiveMemberId =
+            sentCustomerId !== undefined ? sentCustomerId : lockedOrder.customerId
           const settleItems = await db.order_item.findAll({
             where: { order: id },
             transaction: t
@@ -3057,7 +3064,7 @@ exports.updateOrderStatus = async (req, res) => {
           await awardEarnedPointsOnce({
             orderId: id,
             orderNumber: lockedOrder.orderNumber,
-            memberId: lockedOrder.customerId,
+            memberId: effectiveMemberId,
             items: settleItems,
             userId: changedBy || req.user?.id,
             transaction: t

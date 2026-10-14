@@ -66,7 +66,11 @@ async function makeQrOrder({ member, qty = 2 } = {}) {
   return res.body.data
 }
 
-async function settleCash(order, amount) {
+async function settleCash(order, amount, ...rest) {
+  // rest.length distinguishes omitted customerId (no key sent) from explicit
+  // null (key sent as null) vs a concrete member id. Existing 18 timing
+  // tests call with 0-2 args and stay on the omitted path unchanged.
+  const hasCustomerId = rest.length > 0
   return request(app)
     .put('/order/update-status')
     .set('Authorization', `Bearer ${adminToken}`)
@@ -76,6 +80,7 @@ async function settleCash(order, amount) {
       status: 'paid',
       paymentMethod: 'cash',
       ...(amount !== undefined ? { amount } : {}),
+      ...(hasCustomerId ? { customerId: rest[0] } : {}),
       cashAmount: amount !== undefined ? amount : order.totalPrice,
       changeAmount: 0
     })
@@ -521,58 +526,81 @@ describe('DR-16 free-text name grants nothing', () => {
 })
 
 describe('DR-16 staff attachment behavior', () => {
-  // Each test creates its own order to avoid state conflicts
+  // Each test builds its own order/member fixture via makeMember/makeQrOrder
+  // (tracked in createdMemberIds/createdOrderIds for afterAll cleanup), so no
+  // state leaks between tests. settleCash omits customerId unless a third
+  // argument is passed, preserving the omitted-vs-explicit-null contract.
 
   test('first-time member attachment persists member ID and awards points', async () => {
-    const member = await makeMember(0);
-    const order = await makeQrOrder({ qty: 2 });
-    const row = await db.order.findByPk(order.id);
-    const settleRes = await settleCash(row, undefined, member.id);
-    expect(settleRes.status).toBe(200);
-    expect(Number(await db.order.findByPk(row.id).customerId)).toBe(member.id);
-    expect(await memberPoints(member.id)).toBe(20);
-  });
+    const member = await makeMember(0)
+    const order = await makeQrOrder({ qty: 2 })
+    const settleRes = await settleCash(order, undefined, member.id)
+    expect(settleRes.status).toBe(200)
+    const fresh = await db.order.findByPk(order.id)
+    expect(Number(fresh.customerId)).toBe(member.id)
+    expect(await memberPoints(member.id)).toBe(20)
+    const t = await earnedTotal(member.id, order.id)
+    expect(t.earned).toBe(20)
+    expect(t.rows).toBe(1)
+  })
 
   test('settlement without customerId omitted remains anonymous', async () => {
-    const order = await makeQrOrder({ qty: 2 });
-    const row = await db.order.findByPk(order.id);
-    const settleRes = await settleCash(row);
-    expect(settleRes.status).toBe(200);
-    expect(Number(row.customerId)).toBeNull();
-    expect(await memberPoints(member.id)).toBe(0);
-  });
+    const order = await makeQrOrder({ qty: 2 })
+    const settleRes = await settleCash(order)
+    expect(settleRes.status).toBe(200)
+    const fresh = await db.order.findByPk(order.id)
+    expect(fresh.customerId).toBeNull()
+    const rows = await db.member_point_history.findAll({
+      where: { transactionId: String(order.id) }
+    })
+    expect(rows.length).toBe(0)
+  })
 
   test('explicit null customerId when no existing member clears member', async () => {
-    const member = await makeMember(0);
-    const order = await makeQrOrder({ qty: 2 });
-    const row = await db.order.findByPk(order.id);
-    const settleRes = await settleCash(row, undefined, null);
-    expect(settleRes.status).toBe(200);
-    expect(Number(await db.order.findByPk(row.id).customerId)).toBeNull();
-    expect(await memberPoints(member.id)).toBe(0);
-  });
+    const member = await makeMember(0)
+    const order = await makeQrOrder({ qty: 2 })
+    const settleRes = await settleCash(order, undefined, null)
+    expect(settleRes.status).toBe(200)
+    const fresh = await db.order.findByPk(order.id)
+    // BA DR-16 approved contract: explicit null on an anonymous order is a
+    // no-op that preserves anonymous settlement (no member, no points).
+    expect(fresh.customerId).toBeNull()
+    expect(await memberPoints(member.id)).toBe(0)
+    expect((await earnedTotal(member.id, order.id)).rows).toBe(0)
+  })
 
   test('same member ID is idempotent (points awarded once)', async () => {
-    const member = await makeMember(0);
-    const order = await makeQrOrder({ qty: 2 });
-    const row = await db.order.findByPk(order.id);
-    // First attachment
-    await settleCash(row, undefined, member.id);
-    // Same member retry should be idempotent
-    await settleCash(row, undefined, member.id);
-    expect(await memberPoints(member.id)).toBe(20);
-  });
+    const member = await makeMember(0)
+    const order = await makeQrOrder({ qty: 2 })
+    const first = await settleCash(order, undefined, member.id)
+    expect(first.status).toBe(200)
+    // Same-terminal retry on a paid order is refused without a second award.
+    const retry = await settleCash(order, undefined, member.id)
+    expect(retry.status).toBe(409)
+    expect(await memberPoints(member.id)).toBe(20)
+    const t = await earnedTotal(member.id, order.id)
+    expect(t.earned).toBe(20)
+    expect(t.rows).toBe(1)
+    const fresh = await db.order.findByPk(order.id)
+    expect(Number(fresh.customerId)).toBe(member.id)
+  })
 
   test('different member ID returns 409 MEMBER_MISMATCH', async () => {
-    const memberA = await makeMember(0);
-    const order = await makeQrOrder({ qty: 2 });
-    const row = await db.order.findByPk(order.id);
-    // First attach memberA
-    await settleCash(row, undefined, memberA.id);
-    // Then try memberB - should return 409
-    const memberB = await makeMember(0);
-    const settleRes = await settleCash(row, undefined, memberB.id);
-    expect(settleRes.status).toBe(409);
-    expect(Number(await db.order.findByPk(row.id).customerId)).toBe(memberA.id);
-  });
-});
+    const memberA = await makeMember(0)
+    const memberB = await makeMember(0)
+    // Pre-attach memberA at placement so the settlement attempt with memberB
+    // reaches the MEMBER_MISMATCH guard while outstanding > 0. Two
+    // settlements on one order cannot reach it (the second fails with
+    // OUTSTANDING_CHANGED first).
+    const order = await makeQrOrder({ member: memberA, qty: 2 })
+    const settleRes = await settleCash(order, undefined, memberB.id)
+    expect(settleRes.status).toBe(409)
+    expect(settleRes.body.code).toBe('MEMBER_MISMATCH')
+    const fresh = await db.order.findByPk(order.id)
+    expect(Number(fresh.customerId)).toBe(memberA.id)
+    expect(await memberPoints(memberA.id)).toBe(0)
+    expect(await memberPoints(memberB.id)).toBe(0)
+    expect((await earnedTotal(memberA.id, order.id)).rows).toBe(0)
+    expect((await earnedTotal(memberB.id, order.id)).rows).toBe(0)
+  })
+})
