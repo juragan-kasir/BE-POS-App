@@ -2,8 +2,8 @@ const express = require('express')
 const router = express.Router()
 const salesReturnController = require('../controller/salesReturn')
 const authorization = require('../../utils/authorization')
-const { requireRole } = require('../../utils/authorization')
 const { validateStoreAccess } = require('../../utils/storeValidation')
+const { requireCapability } = require('../../utils/financialCapabilities')
 const { validate } = require('../middleware/validate')
 const {
   approveSalesReturnSchema,
@@ -28,7 +28,7 @@ router.patch(
   '/approve/:id',
   authorization,
   validateStoreAccess,
-  requireRole('super_admin', 'admin'),
+  requireCapability('refund.approve', { entity: 'sales_return', entityIdFrom: (req) => req.params.id }),
   validate(approveSalesReturnSchema),
   salesReturnController.approve
 )
@@ -37,7 +37,7 @@ router.patch(
   '/reject/:id',
   authorization,
   validateStoreAccess,
-  requireRole('super_admin', 'admin'),
+  requireCapability('refund.approve', { entity: 'sales_return', entityIdFrom: (req) => req.params.id }),
   validate(rejectSalesReturnSchema),
   salesReturnController.reject
 )
