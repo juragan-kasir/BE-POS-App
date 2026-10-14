@@ -2963,6 +2963,18 @@ exports.updateOrderStatus = async (req, res) => {
       })
       const oldStatus = lockedOrder.status
       const oldPaymentStatus = lockedOrder.paymentStatus
+      // DR-16 / DR-01: the order update below attaches `customerId` on ANY
+      // status change when the order has no member yet, so a supplied
+      // member must resolve inside this order's store before anything is
+      // written — on every transition, not only on settlement.
+      if (
+        sentCustomerId !== undefined &&
+        sentCustomerId !== null &&
+        (lockedOrder.customerId === null || lockedOrder.customerId === undefined)
+      ) {
+        const scoped = await resolveStoreScopedMember(sentCustomerId, lockedOrder.store, t)
+        if (!scoped.member) throw financialError(422, scoped.code, scoped.message)
+      }
       // DR-23 (BA §35.10): every financial decision below is taken on the
       // aggregates recomputed from the ledger under THIS order lock — never
       // on a pre-lock read, a cached paymentStatus, or the order's gross
@@ -3055,12 +3067,8 @@ exports.updateOrderStatus = async (req, res) => {
               // Different existing member: refuse and never silently replace
               throw financialError(409, 'MEMBER_MISMATCH', 'Cannot attach a different member ID to an already-attached order')
             }
-            // DR-16 / DR-01: a newly attached member must resolve inside
-            // this order's store, before any tender, award or write.
-            if (!orderHasExistingMember && sentCustomerId !== null) {
-              const scoped = await resolveStoreScopedMember(sentCustomerId, lockedOrder.store, t)
-              if (!scoped.member) throw financialError(422, scoped.code, scoped.message)
-            }
+            // A newly attached member was already store-scoped right after
+            // the order lock (see below the lockedOrder read).
             // Either (a) no existing member → attach the supplied member,
             // or (b) same existing member → idempotent (fall through, points awarded once)
           }
