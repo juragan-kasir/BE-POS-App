@@ -5,6 +5,7 @@ const { ipKeyGenerator } = rateLimit
 const orderController = require('../controller/order')
 const authorization = require('../../utils/authorization')
 const { validateStoreAccess } = require('../../utils/storeValidation')
+const { requireCapability } = require('../../utils/financialCapabilities')
 const { validate } = require('../middleware/validate')
 const {
   createOrderSchema,
@@ -50,6 +51,7 @@ router.post(
   '/create',
   authorization,
   validateStoreAccess,
+  requireCapability('payment.collect', { entity: 'order' }),
   validate(createOrderSchema),
   orderController.createOrder
 )

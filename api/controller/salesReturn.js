@@ -4,6 +4,10 @@ const { createAudit } = require('../../utils/auditLog')
 const { scalarStoreScope } = require('../../utils/tenantScope')
 const { withDeadlockRetry } = require('../../utils/deadlockRetry')
 const {
+  computeOrderFinancials,
+  legacyPaymentStatusFor
+} = require('../service/orderFinancials')
+const {
   adjustIngredientStockBatch,
   resolveBomIngredientRequirements
 } = require('../service/stockMutationService')
@@ -778,26 +782,22 @@ const salesReturnController = {
           reason: `sales return ${ret.returnNumber}`
         })
 
-        // 4. Recompute Order Payment Status
-        const updatedOrder = await db.order.findByPk(ret.order, {
-          include: [{ model: db.transaction, as: 'transactions' }],
-          transaction
-        })
+        // 4. Recompute Order Payment Status — DR-23 §C/§G: derived from the
+        // ledger under this transaction, so a full return ends REFUNDED
+        // (never 'unpaid') and a partial return PARTIALLY_REFUNDED. The
+        // persisted enum is legacy (MC-2 pending): PARTIALLY_REFUNDED maps
+        // to 'partial'. An INVALID (unreconciled legacy) state has no legacy
+        // mapping and is left untouched — never auto-rewritten.
+        const updatedOrder = await db.order.findByPk(ret.order, { transaction })
         if (updatedOrder) {
-          const totalPaid = updatedOrder.transactions.reduce(
-            (sum, t) => sum + Number(t.amount),
-            0
-          )
-          let newPaymentStatus = 'unpaid'
-          if (totalPaid >= updatedOrder.totalPrice) {
-            newPaymentStatus = 'paid'
-          } else if (totalPaid > 0) {
-            newPaymentStatus = 'partial'
+          const fin = await computeOrderFinancials(updatedOrder, transaction)
+          const newPaymentStatus = legacyPaymentStatusFor(fin.state)
+          if (newPaymentStatus) {
+            await updatedOrder.update(
+              { paymentStatus: newPaymentStatus },
+              { transaction }
+            )
           }
-          await updatedOrder.update(
-            { paymentStatus: newPaymentStatus },
-            { transaction }
-          )
         }
 
         // Durable inside the same transaction as the refund ledger row and
