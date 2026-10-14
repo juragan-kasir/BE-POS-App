@@ -55,6 +55,15 @@ router.post(
   validate(createOrderSchema),
   orderController.createOrder
 )
+// DR-11 / DR-17: read-only server quote for the counter checkout — the
+// same resolver as /create, so the displayed total is the charged total.
+router.post(
+  '/quote',
+  authorization,
+  validateStoreAccess,
+  validate(createOrderSchema),
+  orderController.quoteOrder
+)
 router.get(
   '/get-orders',
   authorization,
