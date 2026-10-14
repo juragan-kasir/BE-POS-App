@@ -733,6 +733,25 @@ const checkTableAvailable = async (tableId, store) => {
   return { ok: true }
 }
 
+// DR-16 / DR-01: a staff-supplied member identity resolves only inside the
+// order's store — the rule counter points redemption already applies (a
+// member of this store, or a store-less legacy member). A foreign or
+// unknown id unlocks no tier discount, earns no points and is never
+// persisted on the order. Returns { member } or { code, message }.
+const MEMBER_SCOPE_ERRORS = {
+  MEMBER_NOT_FOUND: 'Member not found',
+  MEMBER_OUT_OF_SCOPE: 'Member does not belong to this store'
+}
+const resolveStoreScopedMember = async (customerId, store, transaction) => {
+  const member = await db.member.findByPk(customerId, transaction ? { transaction } : {})
+  let code = null
+  if (!member) code = 'MEMBER_NOT_FOUND'
+  else if (member.store !== null && Number(member.store) !== Number(store)) {
+    code = 'MEMBER_OUT_OF_SCOPE'
+  }
+  return code ? { member: null, code, message: MEMBER_SCOPE_ERRORS[code] } : { member }
+}
+
 // Resolves which discount applies before promo campaigns are evaluated, in
 // priority order: explicit discountId > promo code > member tier auto-discount
 // > point redemption (on top, applied later in calculateFinalTotals).
@@ -747,6 +766,18 @@ const resolveOrderDiscount = async ({
   let discountType = 'none'
   let appliedDiscountId = null
   let appliedDiscountMeta = null
+
+  let member = null
+  if (customerId) {
+    const scoped = await resolveStoreScopedMember(customerId, store)
+    if (!scoped.member) {
+      const e = new Error(scoped.message)
+      e.statusCode = scoped.code === 'MEMBER_NOT_FOUND' ? 404 : 403
+      e.code = scoped.code
+      throw e
+    }
+    member = scoped.member
+  }
 
   if (discountId) {
     const discount = await Discount.findOne({ where: { id: discountId, store } })
@@ -777,10 +808,9 @@ const resolveOrderDiscount = async ({
     }
   }
 
-  if (!appliedDiscountId && customerId) {
+  if (!appliedDiscountId && member) {
     try {
-      const member = await db.member.findByPk(customerId)
-      if (member && member.tier) {
+      if (member.tier) {
         const tier = await db.member_tier.findByPk(member.tier)
         if (tier && tier.discountPercent > 0) {
           discountValue = tier.discountPercent
@@ -808,29 +838,14 @@ const resolveOrderDiscount = async ({
         e.statusCode = 400
         throw e
       }
-      try {
-        const member = await db.member.findByPk(customerId)
-        if (!member) {
-          const e = new Error('Member not found')
-          e.statusCode = 404
-          throw e
-        }
-        if (member.store !== null && Number(member.store) !== Number(store)) {
-          const e = new Error('Member does not belong to this store')
-          e.statusCode = 403
-          throw e
-        }
-        if ((member.totalPoints || 0) < rp) {
-          const e = new Error('Insufficient point balance')
-          e.statusCode = 400
-          throw e
-        }
-        pointDiscountAmount = rp * POINT_VALUE
-        redeemedPointsUsed = rp
-      } catch (e) {
-        if (e.statusCode) throw e
-        console.error('Point redemption error:', e.message)
+      // `member` is already resolved and store-scoped above.
+      if ((member.totalPoints || 0) < rp) {
+        const e = new Error('Insufficient point balance')
+        e.statusCode = 400
+        throw e
       }
+      pointDiscountAmount = rp * POINT_VALUE
+      redeemedPointsUsed = rp
     }
   }
 
@@ -3017,6 +3032,12 @@ exports.updateOrderStatus = async (req, res) => {
             if (orderHasExistingMember && Number(sentCustomerId) !== Number(lockedOrder.customerId)) {
               // Different existing member: refuse and never silently replace
               throw financialError(409, 'MEMBER_MISMATCH', 'Cannot attach a different member ID to an already-attached order')
+            }
+            // DR-16 / DR-01: a newly attached member must resolve inside
+            // this order's store, before any tender, award or write.
+            if (!orderHasExistingMember && sentCustomerId !== null) {
+              const scoped = await resolveStoreScopedMember(sentCustomerId, lockedOrder.store, t)
+              if (!scoped.member) throw financialError(422, scoped.code, scoped.message)
             }
             // Either (a) no existing member → attach the supplied member,
             // or (b) same existing member → idempotent (fall through, points awarded once)
