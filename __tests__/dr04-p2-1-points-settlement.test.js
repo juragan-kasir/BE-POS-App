@@ -11,11 +11,14 @@ const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 // DR-04 P2-1: PUT /order/update-status { status: 'paid', paymentMethod:
 // 'points' } atomically redeems the order's full totalPrice (1 point = Rp1)
 // from the member already attached to the order, together with the
-// settlement itself. Member identity and amount are server-derived only;
-// business failures are 422 with nothing persisted; a replay never deducts
-// twice; settlement awards nothing here because this file's product carries
-// point: 0 (earn-on-settlement for point-bearing products is covered by the
-// dr16-loyalty-earn-on-payment suite).
+// settlement itself. Non-contract fields (memberId, redeemedPoints) are
+// stripped and ignored; amount is server-derived. customerId follows the
+// DR-16 attachment contract: omitted/same member settles, a different member
+// is rejected 409 MEMBER_MISMATCH with nothing persisted (never silently
+// replaced). Business failures are 422 with nothing persisted; a replay never
+// deducts twice; settlement awards nothing here because this file's product
+// carries point: 0 (earn-on-settlement for point-bearing products is covered
+// by the dr16-loyalty-earn-on-payment suite).
 
 const unique = (prefix) => `${prefix}_${Date.now()}_${Math.floor(Math.random() * 1e6)}`
 
@@ -161,6 +164,9 @@ afterAll(async () => {
   const orderIds = (
     await db.order.findAll({ where: { store: stores }, attributes: ['id'] })
   ).map((o) => o.id)
+  // The split-paid test leaves a live paid split row; remove it before the
+  // order so cleanup does not depend on the DB-level ON DELETE CASCADE.
+  await db.split_bill.destroy({ where: { order: orderIds }, force: true })
   await db.transaction.destroy({ where: { order: orderIds }, force: true })
   await db.order_item.destroy({ where: { order: orderIds }, force: true })
   await db.order_status.destroy({ where: { order: orderIds }, force: true })
@@ -235,7 +241,9 @@ describe('DR-04 P2-1 points settlement — success', () => {
     expect((await db.order.findByPk(order.id)).paymentStatus).toBe('paid')
   })
 
-  test('client-supplied customerId/memberId/redeemedPoints are ignored', async () => {
+  test('client-supplied memberId/redeemedPoints are ignored', async () => {
+    // memberId / redeemedPoints are not part of the update-status contract
+    // (unknown keys are stripped): settlement uses the order's member.
     const orderMember = await makeMember({ storeId: store.id, totalPoints: PRICE * 2 })
     const decoy = await makeMember({ storeId: store.id, totalPoints: PRICE * 5 })
     const order = await makeQrOrder({ customerId: orderMember.id })
@@ -245,13 +253,35 @@ describe('DR-04 P2-1 points settlement — success', () => {
       store: store.id,
       status: 'paid',
       paymentMethod: 'points',
-      customerId: decoy.id,
       memberId: decoy.id,
       redeemedPoints: 1
     })
     expect(res.status).toBe(200)
     expect(await memberPoints(orderMember.id)).toBe(PRICE)
     expect(await memberPoints(decoy.id)).toBe(PRICE * 5)
+    expect(await historyRows(decoy.id)).toHaveLength(0)
+  })
+
+  test('client-supplied different customerId is rejected with 409 MEMBER_MISMATCH', async () => {
+    // DR-16 fail-closed attachment: a different member is never silently
+    // substituted; the settlement is refused with nothing persisted.
+    const orderMember = await makeMember({ storeId: store.id, totalPoints: PRICE * 2 })
+    const decoy = await makeMember({ storeId: store.id, totalPoints: PRICE * 5 })
+    const order = await makeQrOrder({ customerId: orderMember.id })
+    const before = await snapshot(order.id, orderMember.id)
+    const beforeDecoyPoints = await memberPoints(decoy.id)
+
+    const res = await settlePaid({
+      id: order.id,
+      store: store.id,
+      status: 'paid',
+      paymentMethod: 'points',
+      customerId: decoy.id
+    })
+    expect(res.status).toBe(409)
+    expect(res.body.code).toBe('MEMBER_MISMATCH')
+    expect(await snapshot(order.id, orderMember.id)).toEqual(before)
+    expect(await memberPoints(decoy.id)).toBe(beforeDecoyPoints)
     expect(await historyRows(decoy.id)).toHaveLength(0)
   })
 })
