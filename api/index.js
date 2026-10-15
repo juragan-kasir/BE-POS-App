@@ -104,6 +104,7 @@ const thermalPrinterRoutes = require('./routes/thermalPrinter')
 const goodsRequestRoutes = require('./routes/goodsRequest')
 const businessTripRoutes = require('./routes/businessTrip')
 const regionRoutes = require('./routes/region')
+const internalRoutes = require('./routes/internal')
 const shiftTemplateRoutes = require('./routes/shiftTemplate')
 const shiftSwapRoutes = require('./routes/shiftSwap')
 const attendanceRoutes = require('./routes/attendance')
@@ -207,6 +208,8 @@ const routes = [
   { path: '/location', route: locationRoutes },
   { path: '/member', route: memberRoutes },
   { path: '/order', route: orderRoutes },
+  // DR-10: cron-authenticated scheduler endpoints (inert without CRON_SECRET).
+  { path: '/internal', route: internalRoutes },
   { path: '/table', route: tableRoutes },
   { path: '/discount', route: discountRoutes },
   { path: '/shift', route: shiftRoutes },

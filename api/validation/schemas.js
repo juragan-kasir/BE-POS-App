@@ -317,7 +317,18 @@ exports.createOrderSchema = z.object({
   changeAmount: z.any().transform((v) =>
     v === '' || v === null || v === undefined ? null : Number(v)
   ).optional(),
-  useTax: z.boolean().optional().default(true)
+  useTax: z.boolean().optional().default(true),
+  // DR-23 §M TOTAL_CHANGED: optional payable the client showed the customer
+  // (e.g. its server quote's totalPrice). Comparison-only, never persisted:
+  // a differing server payable is refused with 409 before any write.
+  // Absent/null/'' = not enrolled (legacy clients unaffected).
+  expectedTotal: z
+    .any()
+    .optional()
+    .transform((v) => (v === undefined || v === null || v === '' ? undefined : Number(v)))
+    .refine((v) => v === undefined || (Number.isInteger(v) && v >= 0), {
+      message: 'expectedTotal must be an integer >= 0'
+    })
 })
 
 exports.updateOrderStatusSchema = z.object({

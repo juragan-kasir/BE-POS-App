@@ -188,8 +188,41 @@ async function drainAccountingOutbox({ limit = 50 } = {}) {
   return { processed, posted, failed }
 }
 
+// DR-10 (journals: "failures observable and recoverable"): an operational
+// snapshot of the outbox — counts and ages only, never payloads or error
+// text (which can carry business data). `oldestPendingAgeSeconds` is the
+// journal-lag signal; `failed` rows have exhausted their retries and need
+// an operator (they are also reported to Sentry when they exhaust).
+async function getAccountingOutboxHealth({ failedSampleLimit = 20 } = {}) {
+  const [[counts]] = await db.sequelize.query(
+    `SELECT
+       COUNT(*) FILTER (WHERE status = 'pending')::int AS pending,
+       COUNT(*) FILTER (WHERE status = 'pending' AND attempts > 0)::int AS "retrying",
+       COUNT(*) FILTER (WHERE status = 'failed')::int AS failed,
+       EXTRACT(EPOCH FROM (NOW() - MIN("createdAt") FILTER (WHERE status = 'pending')))::bigint
+         AS "oldestPendingAgeSeconds"
+     FROM accounting_outbox`
+  )
+  const failedJobs = await db.accounting_outbox.findAll({
+    where: { status: 'failed' },
+    attributes: ['id', 'jobType', 'referenceType', 'referenceId', 'attempts', 'updatedAt'],
+    order: [['updatedAt', 'DESC']],
+    limit: failedSampleLimit
+  })
+  return {
+    pending: Number(counts.pending) || 0,
+    retrying: Number(counts.retrying) || 0,
+    failed: Number(counts.failed) || 0,
+    oldestPendingAgeSeconds:
+      counts.oldestPendingAgeSeconds === null ? null : Number(counts.oldestPendingAgeSeconds),
+    maxAttempts: MAX_ATTEMPTS,
+    failedJobs: failedJobs.map((row) => row.get({ plain: true }))
+  }
+}
+
 module.exports = {
   MAX_ATTEMPTS,
+  getAccountingOutboxHealth,
   JOB_HANDLERS,
   enqueueAccountingJob,
   attemptJob,
