@@ -145,7 +145,7 @@ describe.each([
   test(`void of a ${canonical}-settled order refunds ${canonical} with correct register and actor`, async () => {
     const order = await makeQrOrder()
     const settled = await updateStatus(adminToken, {
-      id: order.id, store: store.id, status: 'paid', paymentMethod: alias
+      id: order.id, store: store.id, status: 'paid', paymentMethod: alias, referenceNumber: `P1I-SALE-${canonical}`
     })
     expect(settled.status).toBe(200)
     expect((await ledgerRows(order.id))[0].typePayment).toBe(canonical)
@@ -213,7 +213,9 @@ describe.each([
 ])('SALES RETURN — canonical %s tender refunds with register and reference', (canonical, alias) => {
   test(`approve on a ${canonical}-settled order preserves tender, register and reference`, async () => {
     const order = await makeQrOrder()
-    expect((await updateStatus(adminToken, { id: order.id, store: store.id, status: 'paid', paymentMethod: alias })).status).toBe(200)
+    expect((await updateStatus(adminToken, {
+      id: order.id, store: store.id, status: 'paid', paymentMethod: alias, referenceNumber: `P1I-SALE-${canonical}`
+    })).status).toBe(200)
 
     const items = await db.order_item.findAll({ where: { order: order.id } })
     const created = await request(app).post(`/pos/order/${order.id}/return`).set(auth(adminToken)).send({
