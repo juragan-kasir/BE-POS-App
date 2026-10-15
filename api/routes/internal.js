@@ -1,0 +1,85 @@
+'use strict'
+const crypto = require('crypto')
+const express = require('express')
+const db = require('../../db/models')
+const { tryAcquireSchedulerLock } = require('../../utils/schedulerLock')
+const {
+  drainAccountingOutbox,
+  getAccountingOutboxHealth
+} = require('../service/accountingOutboxService')
+
+const router = express.Router()
+
+// DR-10 / BA TP-04: on Vercel the in-process schedulers never start
+// (api/index.js runs them only when !process.env.VERCEL), so a journal whose
+// immediate post-commit attempt failed has no retry. These endpoints let an
+// external scheduler — Vercel Cron, which calls with GET and
+// `Authorization: Bearer $CRON_SECRET` — drain the accounting outbox and
+// read its health.
+//
+// Fail closed: without a configured CRON_SECRET (min. 32 chars) every call
+// is refused with 503, so deploying this code changes nothing until the
+// secret and the cron schedule are deliberately configured.
+const MIN_SECRET_LENGTH = 32
+const LEASE_MS = 55000
+
+const digest = (value) => crypto.createHash('sha256').update(String(value)).digest()
+
+const requireCronSecret = (req, res, next) => {
+  const secret = process.env.CRON_SECRET
+  if (!secret || secret.length < MIN_SECRET_LENGTH) {
+    return res.status(503).json({
+      code: 'CRON_NOT_CONFIGURED',
+      message: 'Internal scheduler endpoints are not configured'
+    })
+  }
+  const header = req.get('authorization') || ''
+  const presented = header.startsWith('Bearer ') ? header.slice('Bearer '.length) : ''
+  if (!presented || !crypto.timingSafeEqual(digest(presented), digest(secret))) {
+    return res.status(401).json({ code: 'UNAUTHORIZED', message: 'Unauthorized' })
+  }
+  return next()
+}
+
+// One drain per lease window, shared with the in-process scheduler's lease
+// name, so a cron call and a long-running server never drain concurrently
+// (row claims are additionally FOR UPDATE SKIP LOCKED, and journal posting
+// is idempotent per source).
+router.get('/accounting-outbox/drain', requireCronSecret, async (req, res) => {
+  try {
+    const gotLease = await tryAcquireSchedulerLock(db, 'accounting-outbox', LEASE_MS)
+    if (!gotLease) {
+      return res.status(200).json({ skipped: true, reason: 'LEASE_HELD' })
+    }
+    const result = await drainAccountingOutbox({ limit: 50 })
+    const health = await getAccountingOutboxHealth()
+    if (result.processed > 0 || health.failed > 0) {
+      console.log(
+        JSON.stringify({
+          level: health.failed > 0 ? 'error' : 'info',
+          service: 'pos-api',
+          event: 'accounting_outbox_drain',
+          ...result,
+          pending: health.pending,
+          failed: health.failed,
+          oldestPendingAgeSeconds: health.oldestPendingAgeSeconds
+        })
+      )
+    }
+    return res.status(200).json({ skipped: false, ...result, health })
+  } catch (error) {
+    console.error('Accounting outbox drain failed:', error)
+    return res.status(500).json({ code: 'INTERNAL_ERROR', message: 'Drain failed' })
+  }
+})
+
+router.get('/accounting-outbox/health', requireCronSecret, async (req, res) => {
+  try {
+    return res.status(200).json(await getAccountingOutboxHealth())
+  } catch (error) {
+    console.error('Accounting outbox health failed:', error)
+    return res.status(500).json({ code: 'INTERNAL_ERROR', message: 'Health check failed' })
+  }
+})
+
+module.exports = router

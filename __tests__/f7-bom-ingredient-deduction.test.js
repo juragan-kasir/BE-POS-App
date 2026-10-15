@@ -671,6 +671,80 @@ describe('F7 — tenant isolation', () => {
   })
 })
 
+// Client contract (docs/order-create-client-contract.md §4): the
+// insufficient-ingredient refusal carries a stable code so clients never
+// mistake it for an idempotency conflict. Status and message are unchanged;
+// it is raised inside the sale transaction, after the key lookup, so it
+// writes nothing and does not consume the key.
+describe('F7 — INGREDIENT_STOCK_CONFLICT contract', () => {
+  test('counter sale: 409 + code, unchanged message, no order/stock/ledger/journal effect, key not consumed', async () => {
+    const ing = await makeIngredient(storeA.id, { stock: 2 })
+    const product = await makeProduct({ inventoryMode: 'make_to_order', stock: 20 })
+    await makeBom(storeA.id, product.id, [{ ingredientId: ing.id, qty: 5 }])
+    const key = `${nextTag()}-key`
+    const body = {
+      store: storeA.id,
+      items: [{ product: product.id, quantity: 1 }],
+      paymentMethod: 'cash',
+      cashierName: 'F7 Code',
+      idempotencyKey: key
+    }
+    const [ledgerBefore, outboxBefore] = [await db.transaction.count(), await db.accounting_outbox.count()]
+
+    const res = await createOrder(tokenA, body)
+    expect(res.status).toBe(409)
+    // exactly the existing body plus the code (message format unchanged)
+    expect(Object.keys(res.body).sort()).toEqual(['code', 'error'])
+    expect(res.body.code).toBe('INGREDIENT_STOCK_CONFLICT')
+    expect(res.body.error).toMatch(
+      new RegExp(`^Stok bahan baku "${ing.name}" tidak mencukupi\\. Tersedia: 2(\\.0+)?, dibutuhkan: 5$`)
+    )
+    expect(await db.order.count({ where: { idempotencyKey: key } })).toBe(0)
+    expect(Number((await db.ingredient.findByPk(ing.id)).stock)).toBe(2)
+    expect(await db.stock_history.count({ where: { ingredient: ing.id } })).toBe(0)
+    expect(await db.transaction.count()).toBe(ledgerBefore)
+    expect(await db.accounting_outbox.count()).toBe(outboxBefore)
+
+    // same key, stock refilled: the sale is created once (nothing was
+    // recorded under the key by the refusal)
+    await db.ingredient.update({ stock: 10 }, { where: { id: ing.id } })
+    const retry = await createOrder(tokenA, body)
+    expect(retry.status).toBe(201)
+    expect(await db.order.count({ where: { idempotencyKey: key } })).toBe(1)
+    expect(Number((await db.ingredient.findByPk(ing.id)).stock)).toBe(5)
+  })
+
+  test('unrelated BOM 409s keep their existing code-less shape', async () => {
+    const product = await makeProduct({ inventoryMode: 'make_to_order', stock: 20 })
+    const res = await createOrder(tokenA, {
+      store: storeA.id,
+      items: [{ product: product.id, quantity: 1 }],
+      paymentMethod: 'cash',
+      cashierName: 'F7 Code'
+    })
+    expect(res.status).toBe(409)
+    expect(res.body.code).toBeUndefined()
+  })
+
+  test('deferred paid transition carries the same code and rolls back', async () => {
+    const ing = await makeIngredient(storeA.id, { stock: 1 })
+    const product = await makeProduct({ inventoryMode: 'make_to_order', stock: 20 })
+    await makeBom(storeA.id, product.id, [{ ingredientId: ing.id, qty: 3 }])
+    const { order } = await makeUnpaidOrderWithItem({ store: storeA.id, product, quantity: 1 })
+    const res = await updateOrderStatus(tokenA, {
+      id: order.id,
+      store: storeA.id,
+      status: 'paid',
+      paymentMethod: 'cash'
+    })
+    expect(res.status).toBe(409)
+    expect(res.body.code).toBe('INGREDIENT_STOCK_CONFLICT')
+    expect((await db.order.findByPk(order.id)).paymentStatus).toBe('unpaid')
+    expect(await db.transaction.count({ where: { order: order.id } })).toBe(0)
+    expect(Number((await db.ingredient.findByPk(ing.id)).stock)).toBe(1)
+  })
+})
+
 describe('F7 — concurrency', () => {
   test('two concurrent orders consuming the same ingredient, combined demand > stock: exactly one succeeds', async () => {
     const ing = await makeIngredient(storeA.id, { stock: 10 })

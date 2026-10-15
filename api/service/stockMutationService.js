@@ -277,6 +277,10 @@ async function adjustIngredientStockBatch({
         `Stok bahan baku "${ing.name}" tidak mencukupi. Tersedia: ${ing.stock}, dibutuhkan: ${-delta}`
       )
       e.statusCode = 409
+      // Stable machine-readable refusal (docs/order-create-client-contract
+      // §4): raised inside the sale transaction, after the idempotency-key
+      // lookup — nothing is written, and it is never a key conflict.
+      e.code = 'INGREDIENT_STOCK_CONFLICT'
       throw e
     }
   }

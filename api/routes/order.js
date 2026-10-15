@@ -5,6 +5,7 @@ const { ipKeyGenerator } = rateLimit
 const orderController = require('../controller/order')
 const authorization = require('../../utils/authorization')
 const { validateStoreAccess } = require('../../utils/storeValidation')
+const { requireCapability } = require('../../utils/financialCapabilities')
 const { validate } = require('../middleware/validate')
 const {
   createOrderSchema,
@@ -50,8 +51,18 @@ router.post(
   '/create',
   authorization,
   validateStoreAccess,
+  requireCapability('payment.collect', { entity: 'order' }),
   validate(createOrderSchema),
   orderController.createOrder
+)
+// DR-11 / DR-17: read-only server quote for the counter checkout — the
+// same resolver as /create, so the displayed total is the charged total.
+router.post(
+  '/quote',
+  authorization,
+  validateStoreAccess,
+  validate(createOrderSchema),
+  orderController.quoteOrder
 )
 router.get(
   '/get-orders',

@@ -317,7 +317,18 @@ exports.createOrderSchema = z.object({
   changeAmount: z.any().transform((v) =>
     v === '' || v === null || v === undefined ? null : Number(v)
   ).optional(),
-  useTax: z.boolean().optional().default(true)
+  useTax: z.boolean().optional().default(true),
+  // DR-23 §M TOTAL_CHANGED: optional payable the client showed the customer
+  // (e.g. its server quote's totalPrice). Comparison-only, never persisted:
+  // a differing server payable is refused with 409 before any write.
+  // Absent/null/'' = not enrolled (legacy clients unaffected).
+  expectedTotal: z
+    .any()
+    .optional()
+    .transform((v) => (v === undefined || v === null || v === '' ? undefined : Number(v)))
+    .refine((v) => v === undefined || (Number.isInteger(v) && v >= 0), {
+      message: 'expectedTotal must be an integer >= 0'
+    })
 })
 
 exports.updateOrderStatusSchema = z.object({
@@ -361,8 +372,11 @@ exports.updateOrderStatusSchema = z.object({
   changeAmount: z.any().transform((v) =>
     v === '' || v === null || v === undefined ? null : Number(v)
   ).optional(),
-  // P1: optional client reference for non-cash settlement, persisted on
-  // the immutable ledger row (never trusted for cash math).
+  // P1: client reference for non-cash settlement, persisted (trimmed) on the
+  // immutable ledger row, never trusted for cash math. Shape only here: the
+  // tender may come from the order itself, so "required for every tender
+  // but CASH and POINTS" (DR-23 §D) is enforced in
+  // resolvePaidSettlement after normalization (422 REFERENCE_REQUIRED).
   referenceNumber: z.string().max(255).optional().nullable(),
   // DR-23 (BA §35.10): explicit settlement amount — must equal the current
   // outstanding amount (validated under the order lock, 409/422 in the
@@ -623,8 +637,13 @@ const assertOperationalStoreTenant = (context, storeInput) => {
     }
     // Platform-wide context: it carries no tenant of its own, so an
     // operational store must name one explicitly. A non-operational store may
-    // stay tenantless until the production cutover gate.
-    if (requestedTenantId.value === null) {
+    // stay tenantless until the production cutover gate. An existing store
+    // that already belongs to a tenant needs no restatement: its persisted
+    // owner is the target (never a reassignment; approval is still checked
+    // by the caller).
+    if (requestedTenantId.value === null && persistedTenantId.value !== null) {
+      tenantId = persistedTenantId.value
+    } else if (requestedTenantId.value === null) {
       if (requestsOperational) {
         return lifecycleRejection(
           'TARGET_TENANT_REQUIRED',
@@ -1545,7 +1564,25 @@ exports.createBomSchema = z.object({
     .min(1, 'At least one ingredient is required')
 })
 
-exports.updateBomSchema = exports.createBomSchema.partial()
+// Explicit (not createBomSchema.partial()): under zod 4 a partial schema still
+// applies the create defaults, so an update that omitted `status`/`name`
+// silently re-activated a draft BOM and blanked its name. Omitted = unchanged.
+exports.updateBomSchema = z.object({
+  name: z.string().optional(),
+  notes: z.string().optional(),
+  status: z.string().optional(),
+  lines: z
+    .array(
+      z.object({
+        ingredientId: strToNum(),
+        qty: z.union([z.number(), strToNum()]),
+        unit: z.string().optional().default('pcs'),
+        notes: z.string().optional().default('')
+      })
+    )
+    .min(1, 'At least one ingredient is required')
+    .optional()
+})
 
 // ===================== Stock Transfer =====================
 exports.createStockTransferSchema = z.object({

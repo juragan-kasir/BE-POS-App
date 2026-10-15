@@ -308,7 +308,8 @@ describe('paid-order reversal (void) requires a reason and an elevated capabilit
     const res = await request(app)
       .put('/order/update-status')
       .set('Authorization', `Bearer ${kasirToken}`)
-      .send({ id: pending.id, status: 'paid', store: location.id })
+      // DR-23 §D: the order's QRIS tender requires a settlement reference.
+      .send({ id: pending.id, status: 'paid', store: location.id, referenceNumber: 'VOIDRSN-QR-1' })
     expect(res.status).toBe(200)
     const txn = await db.transaction.findOne({ where: { order: pending.id } })
     expect(txn).not.toBeNull()

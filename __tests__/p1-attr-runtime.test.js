@@ -186,7 +186,9 @@ describe('CANON — canonical write boundary', () => {
   test('CANON-02: locked aliases normalize on settlement (debit→CARD, transfer→BANK_TRANSFER, ewallet→E_WALLET, qris→QRIS)', async () => {
     for (const [input, expected] of [['debit', 'CARD'], ['transfer', 'BANK_TRANSFER'], ['ewallet', 'E_WALLET'], ['qris', 'QRIS']]) {
       const order = await makeQrOrder()
-      const res = await updateStatus(adminToken, { id: order.id, store: store.id, status: 'paid', paymentMethod: input })
+      const res = await updateStatus(adminToken, {
+        id: order.id, store: store.id, status: 'paid', paymentMethod: input, referenceNumber: `CANON-02-${expected}`
+      })
       expect(res.status).toBe(200)
       expect((await ledgerRows(order.id))[0].typePayment).toBe(expected)
     }

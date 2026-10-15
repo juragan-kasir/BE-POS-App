@@ -1,5 +1,6 @@
 'use strict'
 const db = require('../../db/models')
+const { reportingBucket } = require('./canonicalPayment')
 
 const DEFAULT_ACCOUNTS = [
   {
@@ -367,6 +368,40 @@ async function createReversalEntry({
   })
 }
 
+// DR-23 §L (BA §35.10): a sale journal debits the account class of its
+// tender — CASH → 1000 Cash; CARD, BANK_TRANSFER, E_WALLET, QRIS → 1400
+// Bank & E-Wallet. POINTS and OTHER have no decided account ([DEFERRED
+// CONFIG]); they, and any unresolvable legacy tender, keep the pre-DR-23
+// class 1000 rather than an invented account.
+const NON_CASH_CLEARING_METHODS = new Set(['CARD', 'BANK_TRANSFER', 'E_WALLET', 'QRIS'])
+const tenderAccountCode = (method) =>
+  NON_CASH_CLEARING_METHODS.has(reportingBucket(method)) ? '1400' : '1000'
+
+// The journal is a projection of the ledger: one debit per tender class,
+// from the order's settlement rows (mixed tender via splits → one line per
+// class). When the settlement rows do not sum exactly to the sale total
+// (legacy orders without ledger rows), the order's declared tender carries
+// the whole total, as before — only its account class changes.
+async function saleDebitsByAccountCode({ orderId, total, paymentMethod }) {
+  const rows = orderId
+    ? await db.transaction.findAll({
+        where: { order: orderId },
+        attributes: ['typePayment', 'amount']
+      })
+    : []
+  const byCode = new Map()
+  let settled = 0
+  for (const row of rows) {
+    const amount = toNumber(row.amount)
+    if (amount <= 0) continue
+    const code = tenderAccountCode(row.typePayment)
+    byCode.set(code, toNumber((byCode.get(code) || 0) + amount))
+    settled = toNumber(settled + amount)
+  }
+  if (settled !== total) return new Map([[tenderAccountCode(paymentMethod), total]])
+  return byCode
+}
+
 async function postOrderJournal({
   store,
   orderId,
@@ -377,8 +412,8 @@ async function postOrderJournal({
   serviceChargeAmount,
   totalPrice,
   date,
-  createdBy,
-  paymentMethod
+  paymentMethod,
+  createdBy
 }) {
   const sub = toNumber(subTotal)
   const disc = toNumber(discountAmount)
@@ -389,24 +424,21 @@ async function postOrderJournal({
   const revenueAmount = toNumber(sub - disc)
   if (total <= 0) return null
 
-  // DR-04/DR-23: the debit follows the settled tender — cash sales debit
-  // 1000 Cash, QR/non-cash sales debit 1400 Bank & E-Wallet (same rule as
-  // the refund leg and payoutAccountCode helper). `paymentMethod` arrives
-  // via the outbox payload (already canonical at the settlement boundary);
-  // absent/legacy values fall back to cash behavior, never throw here.
-  const debitCode = payoutAccountCode(paymentMethod)
-  const cashEntry = await findOrCreateAccount(store, debitCode)
   const revenueEntry = await findOrCreateAccount(store, '4000')
-  if (!cashEntry || !revenueEntry) return null
+  if (!revenueEntry) return null
 
-  const lines = [
-    {
-      account: cashEntry.id,
-      debit: total,
+  const lines = []
+  const debits = await saleDebitsByAccountCode({ orderId, total, paymentMethod })
+  for (const [code, amount] of [...debits].sort(([a], [b]) => a.localeCompare(b))) {
+    const debitAcc = await findOrCreateAccount(store, code)
+    if (!debitAcc) return null
+    lines.push({
+      account: debitAcc.id,
+      debit: amount,
       credit: 0,
       description: `Payment received for ${orderNumber}`
-    }
-  ]
+    })
+  }
   if (revenueAmount > 0) {
     lines.push({
       account: revenueEntry.id,
