@@ -377,7 +377,8 @@ async function postOrderJournal({
   serviceChargeAmount,
   totalPrice,
   date,
-  createdBy
+  createdBy,
+  paymentMethod
 }) {
   const sub = toNumber(subTotal)
   const disc = toNumber(discountAmount)
@@ -388,7 +389,13 @@ async function postOrderJournal({
   const revenueAmount = toNumber(sub - disc)
   if (total <= 0) return null
 
-  const cashEntry = await findOrCreateAccount(store, '1000')
+  // DR-04/DR-23: the debit follows the settled tender — cash sales debit
+  // 1000 Cash, QR/non-cash sales debit 1400 Bank & E-Wallet (same rule as
+  // the refund leg and payoutAccountCode helper). `paymentMethod` arrives
+  // via the outbox payload (already canonical at the settlement boundary);
+  // absent/legacy values fall back to cash behavior, never throw here.
+  const debitCode = payoutAccountCode(paymentMethod)
+  const cashEntry = await findOrCreateAccount(store, debitCode)
   const revenueEntry = await findOrCreateAccount(store, '4000')
   if (!cashEntry || !revenueEntry) return null
 
