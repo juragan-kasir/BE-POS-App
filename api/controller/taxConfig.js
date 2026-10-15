@@ -3,7 +3,7 @@ const { Op } = require('sequelize')
 const ExcelJS = require('exceljs')
 const { createAudit } = require('../../utils/auditLog')
 const { enrichAuditFields } = require('../../utils/auditFields')
-const { fetchActiveTaxRows } = require('../../utils/taxResolution')
+const { fetchActiveTaxRows, pickAppliedPpn } = require('../../utils/taxResolution')
 
 const taxConfigController = {
   async getPublic(req, res) {
@@ -100,8 +100,10 @@ const taxConfigController = {
         rate: Number(r.rate),
         scope: r.store === null || r.store === undefined ? 'global' : 'outlet'
       })
-      const ppnRows = rows.ppn.map(toRow)
-      const ppnRate = ppnRows.reduce((sum, r) => sum + r.rate, 0)
+      // D3 (decided 2026-10-16): one applied PPN row, never a sum.
+      const appliedPpn = pickAppliedPpn(rows.ppn)
+      const ppnRows = rows.ppn.map((r) => ({ ...toRow(r), applied: r.id === appliedPpn.id }))
+      const ppnRate = Number(appliedPpn.rate)
 
       const findings = []
       const scopesPresent = new Set(ppnRows.map((r) => r.scope))
@@ -117,9 +119,9 @@ const taxConfigController = {
             severity: 'warning',
             message:
               `${group.length} active PPN rows share the ${scope} scope; ` +
-              'the effective rate is their sum under current checkout behavior',
+              'only the applied row is charged (use "Gunakan di Kasir & BISA" to keep one)',
             policyRef: 'D3',
-            decision: 'undecided'
+            decision: 'decided'
           })
         }
       }
@@ -127,11 +129,9 @@ const taxConfigController = {
         findings.push({
           code: 'GLOBAL_AND_OUTLET_COMBINED',
           severity: 'info',
-          message:
-            'global and outlet PPN rows both contribute; the effective ' +
-            'rate is their sum under current checkout behavior',
+          message: 'the outlet PPN row overrides the global default; the global row is not charged',
           policyRef: 'D3',
-          decision: 'undecided'
+          decision: 'decided'
         })
       }
       if (ppnRate === 0) {
@@ -320,6 +320,79 @@ const taxConfigController = {
         success: false,
         message: 'Internal server error'
       })
+    }
+  },
+
+  // "Gunakan di Kasir & BISA" (D3): make one PPN row THE applied rate of its
+  // scope — it becomes active and every other active PPN row of the same
+  // scope (same outlet, or global) is set inactive, in one transaction.
+  // Checkout then charges exactly this rate, counter and QR alike (an
+  // outlet row still overrides the global default). Same access rules as
+  // update: an outlet admin may apply its own outlet's rows; a global row
+  // only a global super_admin.
+  async apply(req, res) {
+    try {
+      const { id } = req.params
+      const store = req.storeId ?? req.user?.store
+      const tax = await db.taxConfig.findOne({
+        where: {
+          id,
+          ...(store ? { [Op.or]: [{ store }, { store: null }] } : {})
+        }
+      })
+      if (!tax) {
+        return res.status(404).json({ success: false, message: 'Tax config not found' })
+      }
+      if (
+        (tax.store === null || tax.store === undefined) &&
+        !(req.user?.roleType === 'super_admin' && req.user?.store == null)
+      ) {
+        return res.status(403).json({
+          success: false,
+          message: 'Anda hanya dapat mengakses data di toko Anda'
+        })
+      }
+      if (tax.type !== 'ppn') {
+        return res.status(400).json({
+          success: false,
+          code: 'TAX_APPLY_PPN_ONLY',
+          message: 'Hanya pajak PPN yang bisa dipakai di kasir & aplikasi QR'
+        })
+      }
+
+      const modifiedBy = req.user?.id || null
+      const deactivated = await db.sequelize.transaction(async (t) => {
+        const [count] = await db.taxConfig.update(
+          { status: 'inactive', modifiedBy },
+          {
+            where: {
+              id: { [Op.ne]: tax.id },
+              type: 'ppn',
+              status: 'active',
+              store: tax.store ?? null
+            },
+            transaction: t
+          }
+        )
+        await tax.update({ status: 'active', modifiedBy }, { transaction: t })
+        return count
+      })
+      createAudit(
+        req,
+        'update',
+        'tax_config',
+        id,
+        `Applied tax_config ${id} at checkout; deactivated ${deactivated} other PPN row(s) in the same scope`
+      )
+
+      return res.status(200).json({
+        success: true,
+        message: 'Pajak dipakai di kasir & aplikasi QR',
+        data: { applied: tax, deactivated }
+      })
+    } catch (error) {
+      console.error('apply tax config error:', error)
+      return res.status(500).json({ success: false, message: 'Internal server error' })
     }
   },
 

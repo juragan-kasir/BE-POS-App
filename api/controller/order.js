@@ -7,7 +7,7 @@ const Table = db.table
 const Product = db.product
 const Discount = db.discount
 const { Op } = require('sequelize')
-const { fetchActiveTaxRows } = require('../../utils/taxResolution')
+const { fetchActiveTaxRows, pickAppliedPpn } = require('../../utils/taxResolution')
 const { createNotification } = require('../../utils/createNotification')
 const { createAudit, redactAndAudit, AUDIT_ACTIONS } = require('../../utils/auditLog')
 const {
@@ -438,7 +438,8 @@ const getActiveTaxRate = async (store) => {
     e.code = 'PPN_MISSING'
     throw e
   }
-  return taxConfigs.reduce((sum, t) => sum + Number(t.rate), 0)
+  // D3: one applied PPN row (outlet overrides global), never a sum.
+  return Number(pickAppliedPpn(taxConfigs).rate)
 }
 
 const getServiceChargeRate = async (store) => {
@@ -1338,13 +1339,14 @@ const replayCounterOrder = async (res, orderId, body, store) => {
   let activeTaxRate = null
   let activeTaxSetUnchangedSinceCreation = false
   if (fullOrder && Number(fullOrder.taxRate) === 0 && body.useTax !== false) {
-    // Same row set getActiveTaxRate sums (fetchActiveTaxRows scope), with
-    // updatedAt as evidence that the set is unchanged since the order.
+    // Same row set and D3 resolution as getActiveTaxRate (fetchActiveTaxRows
+    // scope), with updatedAt as evidence the set is unchanged since the order.
     const rows = await db.taxConfig.findAll({
       where: { [Op.or]: [{ store }, { store: null }], type: 'ppn', status: 'active' },
-      attributes: ['rate', 'updatedAt']
+      attributes: ['id', 'rate', 'store', 'updatedAt']
     })
-    activeTaxRate = rows.reduce((sum, row) => sum + Number(row.rate), 0)
+    const applied = pickAppliedPpn(rows.map((row) => row.get({ plain: true })))
+    activeTaxRate = applied ? Number(applied.rate) : 0
     activeTaxSetUnchangedSinceCreation =
       rows.length > 0 &&
       rows.every((row) => new Date(row.updatedAt) <= new Date(fullOrder.createdAt))

@@ -8,11 +8,9 @@ const db = require('../db/models')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
-// T2 (design D3): two active global PPN 11% rows currently resolve to a
-// combined 22% rate (stacking). This test pins that observable behavior so
-// the duplicate-configuration risk is visible and any future resolution
-// (priority, rejection, or approved stacking) must update it deliberately.
-// It asserts current behavior only — not business approval of stacking.
+// T2 (design D3, decided by the owner 2026-10-16): PPN never stacks. Two
+// active global PPN 11% rows (a duplicate default) charge 11%, not 22% —
+// exactly one applied row is used (see utils/taxResolution pickAppliedPpn).
 let store = null
 let category = null
 let product = null
@@ -67,7 +65,7 @@ afterAll(async () => {
 })
 
 describe('duplicate global PPN exposure (T2)', () => {
-  test('two active global 11% rows combine to a 22% effective rate', async () => {
+  test('two active global 11% rows charge 11%, never a stacked 22%', async () => {
     const res = await request(app)
       .post('/order/create')
       .set('Authorization', `Bearer ${cashierToken}`)
@@ -78,8 +76,8 @@ describe('duplicate global PPN exposure (T2)', () => {
         cashierName: 'T2 Dup'
       })
     expect(res.status).toBe(201)
-    // 10000 base with two stacked global 11% rows: 22% combined.
-    expect(Number(res.body.data.taxAmount)).toBe(2200)
-    expect(Number(res.body.data.totalPrice)).toBe(12200)
+    // 10000 base, one applied 11% row.
+    expect(Number(res.body.data.taxAmount)).toBe(1100)
+    expect(Number(res.body.data.totalPrice)).toBe(11100)
   })
 })

@@ -96,7 +96,7 @@ describe('tax config resolution contract (F-SMOKE-01)', () => {
     expect(Number(res.body.data.totalPrice)).toBe(10700)
   })
 
-  test('global and per-store active PPN rates stack, matching the tax list the UI fetches', async () => {
+  test('a per-store active PPN overrides the global default (D3: never stacked)', async () => {
     await db.taxConfig.destroy({ where: { store: null, name: 'TEST_GLOBAL_PPN' }, force: true })
     await db.taxConfig.destroy({ where: { store: location.id, name: 'TEST_STORE_PPN' }, force: true })
     await db.taxConfig.create({
@@ -117,10 +117,10 @@ describe('tax config resolution contract (F-SMOKE-01)', () => {
     const res = await orderOne()
 
     expect(res.status).toBe(201)
-    // GET /tax-config returns store rows OR global rows — so the UI sums 16%;
-    // the order price must never diverge from what the UI displayed.
-    expect(Number(res.body.data.taxAmount)).toBe(1600)
-    expect(Number(res.body.data.totalPrice)).toBe(11600)
+    // D3 (decided 2026-10-16): the outlet's own 9% replaces the global 7%;
+    // the UI shows the same applied rate (GET /order/customer-tax-rate).
+    expect(Number(res.body.data.taxAmount)).toBe(900)
+    expect(Number(res.body.data.totalPrice)).toBe(10900)
   })
 
   test('legacy percentage-typed rows are never treated as PPN — missing PPN setup fails explicitly instead of the removed 11% fallback', async () => {
