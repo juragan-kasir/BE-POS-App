@@ -116,3 +116,28 @@ describe('reportingBucket', () => {
     }
   )
 })
+
+// DR-23 §D: which canonical tenders a manually confirmed settlement must
+// carry a reference for — every tender but CASH and POINTS.
+describe('settlement reference requirement', () => {
+  test('lists exactly the non-cash, non-points canonical tenders, frozen', () => {
+    const { REFERENCE_REQUIRED_METHODS, CANONICAL_PAYMENT_METHODS } = loadService()
+    expect([...REFERENCE_REQUIRED_METHODS].sort()).toEqual(
+      CANONICAL_PAYMENT_METHODS.filter((m) => m !== 'CASH' && m !== 'POINTS').sort()
+    )
+    expect(Object.isFrozen(REFERENCE_REQUIRED_METHODS)).toBe(true)
+  })
+
+  test.each([
+    ['CASH', false],
+    ['POINTS', false],
+    ['CARD', true],
+    ['BANK_TRANSFER', true],
+    ['E_WALLET', true],
+    ['QRIS', true],
+    ['OTHER', true],
+    [null, false]
+  ])('%p requires a reference: %p', (method, expected) => {
+    expect(loadService().requiresTenderReference(method)).toBe(expected)
+  })
+})

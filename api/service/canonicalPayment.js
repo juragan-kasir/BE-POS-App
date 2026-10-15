@@ -56,6 +56,23 @@ const ALIAS_TO_CANONICAL = Object.freeze({
   other: 'OTHER'
 })
 
+// DR-23 §D (BA §35.10): manually confirmed tenders that must carry a
+// reference — CARD, BANK_TRANSFER, E_WALLET and QRIS (external transaction
+// reference, entered by hand while the gateway is FUTURE, DR-19) and OTHER
+// (its description). CASH needs none; POINTS is an internal loyalty entry.
+// Same set the split payment and void refund paths already require a
+// reference for (every tender except CASH and POINTS).
+const REFERENCE_REQUIRED_METHODS = Object.freeze([
+  'CARD',
+  'BANK_TRANSFER',
+  'E_WALLET',
+  'QRIS',
+  'OTHER'
+])
+
+// `method` is a canonical value (the output of normalizePaymentMethod).
+const requiresTenderReference = (method) => REFERENCE_REQUIRED_METHODS.includes(method)
+
 function normalizePaymentMethod(value) {
   if (value === null || value === undefined) return null
   if (typeof value !== 'string') {
@@ -129,6 +146,8 @@ function bucketCashFlowTenders(paymentRows) {
 module.exports = {
   CANONICAL_PAYMENT_METHODS,
   CANONICAL_METHOD_ORDER,
+  REFERENCE_REQUIRED_METHODS,
+  requiresTenderReference,
   normalizePaymentMethod,
   reportingBucket,
   bucketCashFlowTenders

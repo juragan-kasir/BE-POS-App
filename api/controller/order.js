@@ -37,7 +37,7 @@ const {
   financialError,
   retirePendingSplits
 } = require('../service/orderFinancials')
-const { normalizePaymentMethod } = require('../service/canonicalPayment')
+const { normalizePaymentMethod, requiresTenderReference } = require('../service/canonicalPayment')
 const {
   counterOrderMismatches,
   customerOrderMismatches,
@@ -2235,12 +2235,29 @@ const resolvePaidSettlement = async ({
     amountDue
   })
   const register = await resolveAttributedRegister(effectiveStore, t)
+
+  // DR-23 §D / §M: a manually confirmed non-cash settlement (every tender
+  // but CASH and POINTS) carries its reference, as a split payment and a
+  // void refund already do. Enforced here, not in updateOrderStatusSchema:
+  // the tender may come from the order itself and is canonical only after
+  // normalizePaymentMethod. Whitespace-only counts as missing; the stored
+  // reference is trimmed. Thrown inside the settlement transaction, so the
+  // refusal writes nothing.
+  const reference = typeof referenceNumber === 'string' ? referenceNumber.trim() : ''
+  if (requiresTenderReference(method) && reference === '') {
+    throw financialError(
+      422,
+      'REFERENCE_REQUIRED',
+      `referenceNumber is required for ${method} settlement`
+    )
+  }
+
   return {
     method,
     cashReceived,
     changeGiven,
     registerId: register.id,
-    referenceNumber: method === 'CASH' ? null : referenceNumber ?? null,
+    referenceNumber: method === 'CASH' || reference === '' ? null : reference,
     amountDue
   }
 }

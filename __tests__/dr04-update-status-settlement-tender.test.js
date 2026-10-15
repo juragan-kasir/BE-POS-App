@@ -172,7 +172,14 @@ describe('DR-04 update-status settlement tender', () => {
   test('non-cash persists the selected method with no fabricated cash fields', async () => {
     const order = await makeQrOrder({ storeId: store.id, paymentMethod: 'qris' })
 
-    const res = await settlePaid({ id: order.id, store: store.id, status: 'paid', paymentMethod: 'qris' })
+    // DR-23 §D: a manually confirmed QRIS settlement carries its reference.
+    const res = await settlePaid({
+      id: order.id,
+      store: store.id,
+      status: 'paid',
+      paymentMethod: 'qris',
+      referenceNumber: 'QR-DR04-1'
+    })
     expect(res.status).toBe(200)
 
     const settled = await db.order.findByPk(order.id)

@@ -372,8 +372,11 @@ exports.updateOrderStatusSchema = z.object({
   changeAmount: z.any().transform((v) =>
     v === '' || v === null || v === undefined ? null : Number(v)
   ).optional(),
-  // P1: optional client reference for non-cash settlement, persisted on
-  // the immutable ledger row (never trusted for cash math).
+  // P1: client reference for non-cash settlement, persisted (trimmed) on the
+  // immutable ledger row, never trusted for cash math. Shape only here: the
+  // tender may come from the order itself, so "required for every tender
+  // but CASH and POINTS" (DR-23 §D) is enforced in
+  // resolvePaidSettlement after normalization (422 REFERENCE_REQUIRED).
   referenceNumber: z.string().max(255).optional().nullable(),
   // DR-23 (BA §35.10): explicit settlement amount — must equal the current
   // outstanding amount (validated under the order lock, 409/422 in the
