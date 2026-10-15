@@ -38,6 +38,7 @@ const productRoutes = require('./routes/product')
 const authRoutes = require('./routes/auth')
 const authorizationContextRoutes = require('./routes/authorizationContext')
 const membershipRoutes = require('./routes/membership')
+const tenantRoutes = require('./routes/tenant')
 const assignmentRoutes = require('./routes/assignment')
 const effectiveScopeRoutes = require('./routes/effectiveScope')
 const categoryRoutes = require('./routes/category')
@@ -201,6 +202,8 @@ const routes = [
   { path: '/auth', route: authorizationContextRoutes },
   // T-03B canonical membership / assignment / effective-scope API.
   { path: '/memberships', route: membershipRoutes },
+  // Platform tenant administration (tenant.manage).
+  { path: '/tenants', route: tenantRoutes },
   { path: '/assignments', route: assignmentRoutes },
   { path: '/effective-scope', route: effectiveScopeRoutes },
   { path: '/product', route: productRoutes },

@@ -962,6 +962,11 @@ const loadAndPriceOrderItems = async (items, store, user = null) => {
             message: `Bundle not available: ${item.bundleName || item.bundleId}`
           }
         }
+        // F7: a make_to_order component's own stock is not authoritative —
+        // its recipe ingredients are checked (and refused with
+        // INGREDIENT_STOCK_CONFLICT) inside the sale transaction. Same rule
+        // as the customer (QR) path.
+        if (prod.inventoryMode === 'make_to_order') continue
         const needed = bi.quantity * bundleQty
         const avail = await getEffectiveStock(prod, store)
         if (avail !== null && avail < needed) {
@@ -1039,7 +1044,9 @@ const loadAndPriceOrderItems = async (items, store, user = null) => {
     item.unitPrice = serverPrice
     item.subtotal = serverPrice * qty
 
-    const avail = await getEffectiveStock(prod, store)
+    // F7: see the bundle branch — a make_to_order product is limited by its
+    // recipe ingredients, never by its own (usually zero) product stock.
+    const avail = prod.inventoryMode === 'make_to_order' ? null : await getEffectiveStock(prod, store)
     if (avail !== null && avail < qty) {
       return {
         ok: false,
