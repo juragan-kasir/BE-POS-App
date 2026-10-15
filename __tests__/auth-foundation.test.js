@@ -429,6 +429,33 @@ describe('AUTH-2 store lifecycle vocabulary', () => {
     expect(result.tenantId).toBeNull()
   })
 
+  test('a platform actor activating a store that already has a tenant targets that tenant', () => {
+    const publish = assertOperationalStoreTenant(platformContext(null), {
+      currentStatus: 'draft',
+      requestedStatus: 'active',
+      persistedTenantId: tenantA.id
+    })
+    expect(publish.ok).toBe(true)
+    expect(publish.tenantId).toBe(tenantA.id)
+    expect(publish.becomesOperational).toBe(true)
+
+    // restating the same owner is fine; naming another is still refused
+    const same = assertOperationalStoreTenant(platformContext(null), {
+      currentStatus: 'draft',
+      requestedStatus: 'active',
+      persistedTenantId: tenantA.id,
+      tenantId: tenantA.id
+    })
+    expect(same.ok).toBe(true)
+    const other = assertOperationalStoreTenant(platformContext(null), {
+      currentStatus: 'draft',
+      requestedStatus: 'active',
+      persistedTenantId: tenantA.id,
+      tenantId: tenantB.id
+    })
+    expect(other.code).toBe('TENANT_REASSIGNMENT_NOT_PERMITTED')
+  })
+
   test('existing tenant ownership is never rewritten by a request', () => {
     const result = assertOperationalStoreTenant(platformContext(tenantB.id), {
       currentStatus: 'active',

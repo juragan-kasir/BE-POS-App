@@ -2,6 +2,77 @@ const db = require('../../db/models')
 const { Op } = require('sequelize')
 const { enrichAuditFields } = require('../../utils/auditFields')
 
+// Thrown inside the authoring transaction to refuse a BOM with a 400 —
+// nothing is written.
+class BomAuthoringError extends Error {}
+
+// Authoring validation shared by create and update, run before any write so
+// a refused request leaves the previous, still-valid BOM untouched. Mirrors
+// the deduction-time checks (stockMutationService.resolveBomIngredientRequirements)
+// so a recipe that would refuse every sale is caught here instead:
+//   - at least one line, each qty a positive whole number (bom_line.qty is
+//     INTEGER; a fraction would silently truncate),
+//   - every ingredient exists and belongs to the BOM's own store,
+//   - BASE-UNIT-ONLY: bom_line.unit === ingredient.baseUnit.
+const validateBomLines = async (lines, store, transaction) => {
+  if (!Array.isArray(lines) || lines.length === 0) {
+    throw new BomAuthoringError('At least one ingredient is required')
+  }
+  const bomLines = lines.map((l) => ({
+    ingredientId: Number(l.ingredientId),
+    qty: Number(l.qty),
+    unit: l.unit || 'pcs',
+    notes: l.notes
+  }))
+  for (const line of bomLines) {
+    if (!Number.isInteger(line.qty) || line.qty <= 0) {
+      throw new BomAuthoringError('Ingredient quantity must be a positive whole number')
+    }
+  }
+  const ingredientIds = [...new Set(bomLines.map((l) => l.ingredientId))]
+  const ingredients = await db.ingredient.findAll({ where: { id: ingredientIds }, transaction })
+  const ingredientById = new Map(ingredients.map((i) => [i.id, i]))
+  for (const line of bomLines) {
+    const ing = ingredientById.get(line.ingredientId)
+    if (!ing) {
+      throw new BomAuthoringError(`Ingredient ${line.ingredientId} not found`)
+    }
+    if (ing.store == null || Number(ing.store) !== Number(store)) {
+      throw new BomAuthoringError(`Ingredient "${ing.name}" does not belong to this store`)
+    }
+    if (line.unit !== ing.baseUnit) {
+      throw new BomAuthoringError(
+        `Unit mismatch for ingredient "${ing.name}": BOM line uses "${line.unit}", ingredient base unit is "${ing.baseUnit}"`
+      )
+    }
+  }
+  return { bomLines, ingredients }
+}
+
+// HPP / food-cost / composition snapshot onto the product, from the BOM's
+// current lines and the ingredients' current cost.
+const refreshProductCosting = async (productId, bomLines, ingredients, transaction) => {
+  const prod = await db.product.findByPk(productId, { transaction })
+  if (!prod || bomLines.length === 0) return
+  const costMap = Object.fromEntries(ingredients.map((i) => [i.id, Number(i.costPrice || 0)]))
+  const hpp = bomLines.reduce((sum, l) => sum + (costMap[l.ingredientId] || 0) * l.qty, 0)
+  const price = Number(prod.price || 0)
+  const foodCostPersen =
+    hpp > 0 && price > 0 ? Math.min(999.99, parseFloat(((hpp / price) * 100).toFixed(2))) : 0
+  const marginPersen =
+    hpp > 0 && price > 0 ? Math.max(0, parseFloat(((1 - hpp / price) * 100).toFixed(2))) : 0
+  const composition = bomLines.map((l) => {
+    const ing = ingredients.find((i) => i.id === l.ingredientId)
+    return {
+      ingredientId: l.ingredientId,
+      name: ing?.name || 'Unknown',
+      qty: l.qty,
+      unit: ing?.unit || l.unit || 'pcs'
+    }
+  })
+  await prod.update({ hppPerPorsi: hpp, foodCostPersen, marginPersen, composition }, { transaction })
+}
+
 const bomController = {
   async getAll(req, res) {
     try {
@@ -150,100 +221,38 @@ const bomController = {
           .status(400)
           .json({ success: false, message: 'productId and lines are required' })
       }
-
-      const existing = await db.bom_header.findOne({
-        where: { productId, store }
-      })
-      if (existing) {
-        return res.status(400).json({
-          success: false,
-          message: 'BOM already exists for this product'
-        })
+      // A storeless BOM is never found at sale time (deduction looks it up
+      // by the order's store), so a global caller must name the store.
+      if (store == null) {
+        return res
+          .status(400)
+          .json({ success: false, message: 'store is required to create a BOM' })
       }
 
-      const bomLines = lines.map((l) => ({
-        ingredientId: l.ingredientId,
-        qty: l.qty || 0,
-        unit: l.unit || 'pcs',
-        notes: l.notes
-      }))
+      const created = await db.sequelize.transaction(async (t) => {
+        const existing = await db.bom_header.findOne({ where: { productId, store }, transaction: t })
+        if (existing) throw new BomAuthoringError('BOM already exists for this product')
 
-      // F7: BASE-UNIT-ONLY contract — a BOM line's unit must match its
-      // ingredient's baseUnit at authoring time (deduction time
-      // independently re-verifies this against live data; this check
-      // exists so misconfiguration is caught immediately rather than
-      // only discovered at the next sale).
-      const authoringIngIds = [...new Set(bomLines.map((l) => l.ingredientId))]
-      const authoringIngs = await db.ingredient.findAll({
-        where: { id: authoringIngIds }
-      })
-      const authoringIngById = new Map(authoringIngs.map((i) => [i.id, i]))
-      for (const line of bomLines) {
-        const ing = authoringIngById.get(line.ingredientId)
-        if (!ing) {
-          return res.status(400).json({
-            success: false,
-            message: `Ingredient ${line.ingredientId} not found`
-          })
-        }
-        if (line.unit !== ing.baseUnit) {
-          return res.status(400).json({
-            success: false,
-            message: `Unit mismatch for ingredient "${ing.name}": BOM line uses "${line.unit}", ingredient base unit is "${ing.baseUnit}"`
-          })
-        }
-      }
-
-      const bom = await db.bom_header.create({
-        store,
-        productId,
-        name: name || `BOM-${Date.now()}`,
-        notes,
-        status: req.body.status || 'active'
+        const { bomLines, ingredients } = await validateBomLines(lines, store, t)
+        const bom = await db.bom_header.create(
+          {
+            store,
+            productId,
+            name: name || `BOM-${Date.now()}`,
+            notes,
+            status: req.body.status || 'active'
+          },
+          { transaction: t }
+        )
+        await db.bom_line.bulkCreate(
+          bomLines.map((l) => ({ ...l, bomHeaderId: bom.id })),
+          { transaction: t }
+        )
+        await refreshProductCosting(productId, bomLines, ingredients, t)
+        return bom
       })
 
-      await db.bom_line.bulkCreate(
-        bomLines.map((l) => ({ ...l, bomHeaderId: bom.id }))
-      )
-
-      // ——— Auto-calculate HPP ———
-      const ings = authoringIngs
-      const costMap = Object.fromEntries(
-        ings.map((i) => [i.id, Number(i.costPrice || 0)])
-      )
-      const hpp = bomLines.reduce(
-        (sum, l) => sum + (costMap[l.ingredientId] || 0) * l.qty,
-        0
-      )
-      const prod = await db.product.findByPk(productId)
-      if (prod) {
-        const price = Number(prod.price || 0)
-        const foodCostPersen =
-          hpp > 0 && price > 0
-            ? Math.min(999.99, parseFloat(((hpp / price) * 100).toFixed(2)))
-            : 0
-        const marginPersen =
-          hpp > 0 && price > 0
-            ? Math.max(0, parseFloat(((1 - hpp / price) * 100).toFixed(2)))
-            : 0
-        const composition = bomLines.map((l) => {
-          const ing = ings.find((i) => i.id === l.ingredientId)
-          return {
-            ingredientId: l.ingredientId,
-            name: ing?.name || 'Unknown',
-            qty: l.qty,
-            unit: ing?.unit || l.unit || 'pcs'
-          }
-        })
-        await prod.update({
-          hppPerPorsi: hpp,
-          foodCostPersen,
-          marginPersen,
-          composition
-        })
-      }
-
-      const result = await db.bom_header.findByPk(bom.id, {
+      const result = await db.bom_header.findByPk(created.id, {
         include: [
           { model: db.product, as: 'productData' },
           { model: db.bom_line, as: 'lines' }
@@ -254,6 +263,9 @@ const bomController = {
         .status(201)
         .json({ success: true, message: 'BOM created', data: result })
     } catch (error) {
+      if (error instanceof BomAuthoringError) {
+        return res.status(400).json({ success: false, message: error.message })
+      }
       console.error('Error =>', error)
       return res
         .status(500)
@@ -269,95 +281,44 @@ const bomController = {
 
       const where = { id }
       if (store) where.store = store
-      const bom = await db.bom_header.findOne({ where })
-      if (!bom)
+
+      const outcome = await db.sequelize.transaction(async (t) => {
+        const bom = await db.bom_header.findOne({ where, transaction: t, lock: t.LOCK.UPDATE })
+        if (!bom) return null
+
+        // Lines are validated against the BOM's OWN store before anything is
+        // written; a refused update leaves header and lines untouched.
+        const validated = lines !== undefined ? await validateBomLines(lines, bom.store, t) : null
+
+        // Only what the request carries changes; an empty name keeps the old.
+        const updateData = {}
+        if (typeof name === 'string' && name.trim() !== '') updateData.name = name
+        if (notes !== undefined) updateData.notes = notes
+        if (status) updateData.status = status
+        if (Object.keys(updateData).length) await bom.update(updateData, { transaction: t })
+
+        if (validated) {
+          await db.bom_line.destroy({ where: { bomHeaderId: bom.id }, transaction: t })
+          await db.bom_line.bulkCreate(
+            validated.bomLines.map((l) => ({ ...l, bomHeaderId: bom.id })),
+            { transaction: t }
+          )
+        }
+
+        // ——— Recalculate HPP from the current lines and ingredient cost ———
+        const currentLines = await db.bom_line.findAll({ where: { bomHeaderId: bom.id }, transaction: t })
+        if (currentLines.length > 0) {
+          const ingIds = [...new Set(currentLines.map((l) => l.ingredientId))]
+          const ings = await db.ingredient.findAll({ where: { id: ingIds }, transaction: t })
+          await refreshProductCosting(bom.productId, currentLines, ings, t)
+        }
+        return bom
+      })
+
+      if (!outcome) {
         return res
           .status(404)
           .json({ success: false, message: 'BOM not found' })
-
-      const updateData = { name, notes }
-      if (status) updateData.status = status
-      await bom.update(updateData)
-
-      if (lines) {
-        const bomLines = lines.map((l) => ({
-          ingredientId: l.ingredientId,
-          qty: l.qty || 0,
-          unit: l.unit || 'pcs',
-          notes: l.notes
-        }))
-
-        // F7: BASE-UNIT-ONLY contract, validated before touching any
-        // existing bom_line row — a rejected update must leave the
-        // previous, still-valid BOM untouched.
-        const authoringIngIds = [...new Set(bomLines.map((l) => l.ingredientId))]
-        const authoringIngs = await db.ingredient.findAll({
-          where: { id: authoringIngIds }
-        })
-        const authoringIngById = new Map(authoringIngs.map((i) => [i.id, i]))
-        for (const line of bomLines) {
-          const ing = authoringIngById.get(line.ingredientId)
-          if (!ing) {
-            return res.status(400).json({
-              success: false,
-              message: `Ingredient ${line.ingredientId} not found`
-            })
-          }
-          if (line.unit !== ing.baseUnit) {
-            return res.status(400).json({
-              success: false,
-              message: `Unit mismatch for ingredient "${ing.name}": BOM line uses "${line.unit}", ingredient base unit is "${ing.baseUnit}"`
-            })
-          }
-        }
-
-        await db.bom_line.destroy({ where: { bomHeaderId: id } })
-        await db.bom_line.bulkCreate(
-          bomLines.map((l) => ({ ...l, bomHeaderId: id }))
-        )
-      }
-
-      // ——— Recalculate HPP ———
-      const currentLines = await db.bom_line.findAll({
-        where: { bomHeaderId: id }
-      })
-      if (currentLines.length > 0) {
-        const ingIds = [...new Set(currentLines.map((l) => l.ingredientId))]
-        const ings = await db.ingredient.findAll({ where: { id: ingIds } })
-        const costMap = Object.fromEntries(
-          ings.map((i) => [i.id, Number(i.costPrice || 0)])
-        )
-        const hpp = currentLines.reduce(
-          (sum, l) => sum + (costMap[l.ingredientId] || 0) * l.qty,
-          0
-        )
-        const prod = await db.product.findByPk(bom.productId)
-        if (prod) {
-          const price = Number(prod.price || 0)
-          const foodCostPersen =
-            hpp > 0 && price > 0
-              ? Math.min(999.99, parseFloat(((hpp / price) * 100).toFixed(2)))
-              : 0
-          const marginPersen =
-            hpp > 0 && price > 0
-              ? Math.max(0, parseFloat(((1 - hpp / price) * 100).toFixed(2)))
-              : 0
-          const composition = currentLines.map((l) => {
-            const ing = ings.find((i) => i.id === l.ingredientId)
-            return {
-              ingredientId: l.ingredientId,
-              name: ing?.name || 'Unknown',
-              qty: l.qty,
-              unit: ing?.unit || l.unit || 'pcs'
-            }
-          })
-          await prod.update({
-            hppPerPorsi: hpp,
-            foodCostPersen,
-            marginPersen,
-            composition
-          })
-        }
       }
 
       const result = await db.bom_header.findByPk(id, {
@@ -371,6 +332,9 @@ const bomController = {
         .status(200)
         .json({ success: true, message: 'BOM updated', data: result })
     } catch (error) {
+      if (error instanceof BomAuthoringError) {
+        return res.status(400).json({ success: false, message: error.message })
+      }
       console.error('Error =>', error)
       return res
         .status(500)

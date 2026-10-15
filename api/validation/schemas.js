@@ -637,8 +637,13 @@ const assertOperationalStoreTenant = (context, storeInput) => {
     }
     // Platform-wide context: it carries no tenant of its own, so an
     // operational store must name one explicitly. A non-operational store may
-    // stay tenantless until the production cutover gate.
-    if (requestedTenantId.value === null) {
+    // stay tenantless until the production cutover gate. An existing store
+    // that already belongs to a tenant needs no restatement: its persisted
+    // owner is the target (never a reassignment; approval is still checked
+    // by the caller).
+    if (requestedTenantId.value === null && persistedTenantId.value !== null) {
+      tenantId = persistedTenantId.value
+    } else if (requestedTenantId.value === null) {
       if (requestsOperational) {
         return lifecycleRejection(
           'TARGET_TENANT_REQUIRED',
@@ -1559,7 +1564,25 @@ exports.createBomSchema = z.object({
     .min(1, 'At least one ingredient is required')
 })
 
-exports.updateBomSchema = exports.createBomSchema.partial()
+// Explicit (not createBomSchema.partial()): under zod 4 a partial schema still
+// applies the create defaults, so an update that omitted `status`/`name`
+// silently re-activated a draft BOM and blanked its name. Omitted = unchanged.
+exports.updateBomSchema = z.object({
+  name: z.string().optional(),
+  notes: z.string().optional(),
+  status: z.string().optional(),
+  lines: z
+    .array(
+      z.object({
+        ingredientId: strToNum(),
+        qty: z.union([z.number(), strToNum()]),
+        unit: z.string().optional().default('pcs'),
+        notes: z.string().optional().default('')
+      })
+    )
+    .min(1, 'At least one ingredient is required')
+    .optional()
+})
 
 // ===================== Stock Transfer =====================
 exports.createStockTransferSchema = z.object({
