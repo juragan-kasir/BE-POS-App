@@ -23,7 +23,7 @@ async function fetchActiveTaxRows(store) {
   const [ppn, serviceCharge] = await Promise.all([
     db.taxConfig.findAll({
       where: { ...scopeFilter, type: 'ppn', status: 'active' },
-      attributes: ['id', 'name', 'rate', 'store'],
+      attributes: ['id', 'name', 'rate', 'store', 'updatedAt'],
       order: [['id', 'ASC']]
     }),
     db.taxConfig.findAll({
@@ -38,6 +38,23 @@ async function fetchActiveTaxRows(store) {
   }
 }
 
+// D3 (decided by the owner, 2026-10-16): PPN never stacks. Exactly one PPN
+// row is applied at checkout (counter and QR alike): the outlet's own active
+// row when it has one — it overrides the global default — otherwise the
+// global active row. Within one scope the most recently applied row wins
+// ("Gunakan di Kasir & BISA" activates it and deactivates the rest; legacy
+// duplicates resolve to the latest updated, then the highest id). Two active
+// 11% rows therefore charge 11%, never 22%.
+function pickAppliedPpn(ppnRows) {
+  if (!ppnRows || ppnRows.length === 0) return null
+  const outlet = ppnRows.filter((r) => r.store !== null && r.store !== undefined)
+  const pool = outlet.length > 0 ? outlet : ppnRows
+  return [...pool].sort(
+    (a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0) || Number(b.id) - Number(a.id)
+  )[0]
+}
+
 module.exports = {
-  fetchActiveTaxRows
+  fetchActiveTaxRows,
+  pickAppliedPpn
 }

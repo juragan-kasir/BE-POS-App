@@ -47,6 +47,14 @@ router.put(
   validate(updateTaxConfigSchema),
   taxConfigController.update
 )
+// "Gunakan di Kasir & BISA": make this PPN row the applied rate of its scope.
+router.put(
+  '/apply/:id',
+  authorization,
+  validateStoreAccess,
+  requireRole('super_admin', 'admin'),
+  taxConfigController.apply
+)
 router.delete(
   '/delete-tax-config/:id',
   authorization,

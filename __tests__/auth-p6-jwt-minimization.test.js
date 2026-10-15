@@ -207,7 +207,7 @@ describe('P6 B: login response unchanged', () => {
     expect(Object.keys(res.body).sort()).toEqual(['message', 'token', 'user'])
     const { user } = res.body
     expect(Object.keys(user).sort()).toEqual(
-      await expectedKeys(u, ['roleName', 'accessMenu', 'storeName', 'positionName'])
+      await expectedKeys(u, ['roleName', 'accessMenu', 'accessMenuScoped', 'storeName', 'positionName'])
     )
     expect(user.password).toBeUndefined()
     expect(user.id).toBe(u.id)
@@ -219,6 +219,8 @@ describe('P6 B: login response unchanged', () => {
     expect(user.store).toBe(storeA.id)
     expect(user.userType).toBe('admin')
     expect(Array.isArray(user.accessMenu)).toBe(true)
+    // only a super_admin with its own accessMenu is menu-scoped
+    expect(user.accessMenuScoped).toBe(false)
     expect(user.roleName).toBe('Staff/Karyawan')
     expect(user.storeName).toBe(storeA.name)
     expect(typeof user.positionName).toBe('string')
@@ -230,7 +232,9 @@ describe('P6 B: login response unchanged', () => {
     expect(res.status).toBe(200)
     expect(res.body.message).toBe('Success Login')
     const { user } = res.body
-    expect(Object.keys(user).sort()).toEqual(await expectedKeys(u, ['roleName', 'accessMenu']))
+    expect(Object.keys(user).sort()).toEqual(
+      await expectedKeys(u, ['roleName', 'accessMenu', 'accessMenuScoped'])
+    )
     expect(user.password).toBeUndefined()
     expect(user.userName).toBe(u.userName)
     expect(user.fullName).toBe(u.fullName)

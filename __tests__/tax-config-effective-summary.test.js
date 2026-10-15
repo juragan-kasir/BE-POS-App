@@ -11,8 +11,8 @@ const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 // P1: read-only effective-tax summary. Reports the active configuration
 // applying to a requested outlet using the same resolution as checkout,
 // without changing checkout behavior. Findings are factual observations
-// (multiplicity, scope interaction) — never verdicts on validity; D3
-// stacking semantics stay explicitly undecided.
+// (multiplicity, scope interaction). D3 decided 2026-10-16: PPN never
+// stacks — one applied row per checkout (outlet overrides global).
 let storeA = null
 let storeB = null
 let adminAToken = null
@@ -92,51 +92,53 @@ describe('P1 effective-tax summary', () => {
     expect(res.body.data.ppn.status).toBe('configured')
     expect(res.body.data.ppn.rate).toBe(11)
     expect(res.body.data.ppn.rows).toEqual([
-      { id: row.id, name: 'T4_G1', rate: 11, scope: 'global' }
+      { id: row.id, name: 'T4_G1', rate: 11, scope: 'global', applied: true }
     ])
   })
 
-  test('two global 11% rows: 22% reported with multiplicity finding, D3 undecided', async () => {
+  test('two global 11% rows: 11% applied (never 22%) with a multiplicity finding, D3 decided', async () => {
     await clearTax()
     await makeTax({ name: 'T4_GA', rate: 11 })
     await makeTax({ name: 'T4_GB', rate: 11 })
     const res = await quote(`/tax-config/effective?store=${storeA.id}`, adminAToken)
     expect(res.status).toBe(200)
-    expect(res.body.data.ppn.rate).toBe(22)
+    expect(res.body.data.ppn.rate).toBe(11)
     expect(res.body.data.ppn.rows).toHaveLength(2)
+    expect(res.body.data.ppn.rows.filter((r) => r.applied)).toHaveLength(1)
     const finding = res.body.data.findings.find(
       (f) => f.code === 'MULTIPLE_ACTIVE_SAME_SCOPE'
     )
     expect(finding).toBeDefined()
     expect(finding.severity).toBe('warning')
     expect(finding.policyRef).toBe('D3')
-    expect(finding.decision).toBe('undecided')
+    expect(finding.decision).toBe('decided')
     expect(JSON.stringify(res.body)).not.toMatch(/invalid/i)
   })
 
-  test('multiple outlet rows resolve per checkout and carry outlet scope', async () => {
+  test('multiple outlet rows: the latest applied row is charged, outlet scope kept', async () => {
     await clearTax()
     await makeTax({ name: 'T4_O1', rate: 10, store: storeA.id })
-    await makeTax({ name: 'T4_O2', rate: 5, store: storeA.id })
+    const latest = await makeTax({ name: 'T4_O2', rate: 5, store: storeA.id })
     const res = await quote(`/tax-config/effective?store=${storeA.id}`, adminAToken)
     expect(res.status).toBe(200)
-    expect(res.body.data.ppn.rate).toBe(15)
+    expect(res.body.data.ppn.rate).toBe(5)
+    expect(res.body.data.ppn.rows.find((r) => r.applied).id).toBe(latest.id)
     expect(res.body.data.ppn.rows.every((r) => r.scope === 'outlet')).toBe(true)
   })
 
-  test('global plus outlet rows combine exactly as checkout, D3 undecided', async () => {
+  test('an outlet row overrides the global row exactly as checkout, D3 decided', async () => {
     await clearTax()
     await makeTax({ name: 'T4_GC', rate: 11 })
     await makeTax({ name: 'T4_OC', rate: 5, store: storeA.id })
     const res = await quote(`/tax-config/effective?store=${storeA.id}`, adminAToken)
     expect(res.status).toBe(200)
-    expect(res.body.data.ppn.rate).toBe(16)
+    expect(res.body.data.ppn.rate).toBe(5)
     const finding = res.body.data.findings.find(
       (f) => f.code === 'GLOBAL_AND_OUTLET_COMBINED'
     )
     expect(finding).toBeDefined()
     expect(finding.policyRef).toBe('D3')
-    expect(finding.decision).toBe('undecided')
+    expect(finding.decision).toBe('decided')
   })
 
   test('inactive, draft, and soft-deleted rows are excluded', async () => {
