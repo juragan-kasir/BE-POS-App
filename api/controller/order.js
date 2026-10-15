@@ -1766,11 +1766,15 @@ const deductStockForOrder = async (
         // stock.
         product.stock = newStock
 
+        // Seed a missing shadow row at the just-locked product baseline
+        // (same convention as adjustProductStock) — seeding at 0 would
+        // leave the per-store stock permanently diverged from product.stock,
+        // since every later mutation only tracks deltas.
         await db.sequelize.query(
           `INSERT INTO product_store_stock (product, store, stock, "createdAt", "updatedAt")
-           VALUES ($1, $2, 0, NOW(), NOW())
+           VALUES ($1, $2, $3, NOW(), NOW())
            ON CONFLICT (product, store) DO NOTHING`,
-          { bind: [product.id, store], transaction: t }
+          { bind: [product.id, store, oldStock], transaction: t }
         )
         await db.product_store_stock.update(
           { stock: db.sequelize.literal(`GREATEST(stock - ${deductQty}, 0)`) },
@@ -2798,12 +2802,14 @@ exports.updateOrderStatus = async (req, res) => {
           { transaction: t }
         )
 
-        // ponytail: atomic restore per-store stock
+        // Same seed-at-baseline convention as the sale path above: a
+        // missing shadow row starts from the just-locked global stock so
+        // the restore lands the per-store stock on the same value.
         await db.sequelize.query(
           `INSERT INTO product_store_stock (product, store, stock, "createdAt", "updatedAt")
-           VALUES ($1, $2, 0, NOW(), NOW())
+           VALUES ($1, $2, $3, NOW(), NOW())
            ON CONFLICT (product, store) DO NOTHING`,
-          { bind: [productId, effectiveStore], transaction: t }
+          { bind: [productId, effectiveStore, oldStock], transaction: t }
         )
         await db.product_store_stock.update(
           { stock: db.sequelize.literal(`stock + ${restoreQty}`) },
