@@ -549,6 +549,13 @@ exports.login = async (req, res) => {
       }
     }
 
+    // A super_admin normally sees every menu (it also inherits the Super
+    // Admin role's full list). A super_admin account that carries its OWN
+    // accessMenu is menu-scoped: the client shows only those menus. UX only —
+    // server-side authority of a super_admin is unchanged.
+    const accessMenuScoped =
+      findUser.roleType === 'super_admin' && parseAccessMenu(findUser.accessMenu).length > 0
+
     // D8: never disclose the credential verifier. Strip the bcrypt hash
     // from the user object before embedding it in either login response
     // below (same boundary already applied to register/get-all-user).
@@ -564,7 +571,8 @@ exports.login = async (req, res) => {
           ...safeUser,
           roleType: findUser.roleType || 'user',
           roleName: roleData?.name || 'Staff/Karyawan',
-          accessMenu: parseAccessMenu(accessMenu)
+          accessMenu: parseAccessMenu(accessMenu),
+          accessMenuScoped
         }
       })
     }
@@ -583,6 +591,7 @@ exports.login = async (req, res) => {
         roleType: findUser.roleType || 'user',
         roleName: roleData?.name || 'Staff/Karyawan',
         accessMenu: parseAccessMenu(accessMenu),
+        accessMenuScoped,
         storeName: location?.name ?? '',
         positionName: position?.name ?? ''
       }
