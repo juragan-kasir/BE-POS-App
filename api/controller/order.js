@@ -38,6 +38,12 @@ const {
   retirePendingSplits
 } = require('../service/orderFinancials')
 const { normalizePaymentMethod } = require('../service/canonicalPayment')
+const {
+  counterOrderMismatches,
+  customerOrderMismatches,
+  idempotencyMismatchBody,
+  existingOrderSummary
+} = require('../service/orderIdempotency')
 const { resolveAttributedRegister } = require('../service/settlementAttribution')
 
 // DR-23 interim compatibility mapping for the elevated `order.void`
@@ -193,16 +199,8 @@ const isOrderReplayRelevantUniqueError = (error) =>
     error?.parent?.constraint || error?.original?.constraint
   )
 
-// F-IDEM-1: a same-key retry must carry the same intent. Compare the
-// canonical item set of an incoming payload against the persisted
-// order_item rows — bundle-vs-product identity + quantity only, since
-// prices are server-derived and cosmetic fields (names, notes) are
-// irrelevant to what was sold. Used by both createOrder and
-// createCustomerOrder fast-path and race-catch replays; a mismatch answers
-// 409 like the sales-return / split-bill / parked-cart flows instead of
-// silently replaying a different order. No schema change required.
-const IDEMPOTENCY_MISMATCH_MESSAGE =
-  'idempotencyKey already used with a different payload'
+// F-IDEM-1 / DR-23 §K: same-key intent comparison lives in
+// service/orderIdempotency.js (replayCounterOrder / replayCustomerOrder below).
 
 // W3-2: client/server price-mismatch contract. items[].expectedPrice is an
 // optional client echo of the final charged unit price for that line
@@ -230,20 +228,6 @@ const parseExpectedPrice = (value) => {
     return { present: true, valid: false }
   }
   return { present: true, valid: true, value: n }
-}
-const canonicalOrderItemKey = (item) => {
-  const qty = Number(item.quantity)
-  if (item.bundleId !== null && item.bundleId !== undefined) {
-    return `b:${item.bundleId}:${qty}`
-  }
-  return `p:${item.product || item.productId}:${qty}`
-}
-const orderItemsMatchPayload = (storedItems, incomingItems) => {
-  if (!Array.isArray(storedItems) || !Array.isArray(incomingItems)) return false
-  if (storedItems.length !== incomingItems.length) return false
-  const a = storedItems.map(canonicalOrderItemKey).sort()
-  const b = incomingItems.map(canonicalOrderItemKey).sort()
-  return a.every((key, i) => key === b[i])
 }
 
 // Single source of truth for the "store row wins, else base stock" rule used
@@ -736,6 +720,7 @@ const checkTableAvailable = async (tableId, store) => {
   if (table && ['occupied', 'reserved', 'maintenance'].includes(table.status)) {
     return {
       ok: false,
+      code: table.status === 'occupied' ? 'TABLE_OCCUPIED' : 'TABLE_NOT_AVAILABLE',
       message:
         table.status === 'occupied'
           ? 'Table is already occupied'
@@ -898,12 +883,12 @@ const loadAndPriceOrderItems = async (items, store, user = null) => {
     const item = items[index]
     const qty = Number(item.quantity)
     if (!Number.isFinite(qty) || qty <= 0) {
-      return { ok: false, message: `Quantity must be greater than 0` }
+      return { ok: false, code: 'INVALID_QUANTITY', message: `Quantity must be greater than 0` }
     }
     const hasPriceOverride = item.priceOverride !== undefined && item.priceOverride !== null
     if (item.bundleId) {
       if (hasPriceOverride) {
-        return { ok: false, message: `Price override not supported for bundle items` }
+        return { ok: false, code: 'PRICE_OVERRIDE_NOT_ALLOWED', message: `Price override not supported for bundle items` }
       }
       const bundle = await db.product_bundle.findByPk(item.bundleId, {
         include: [
@@ -917,6 +902,7 @@ const loadAndPriceOrderItems = async (items, store, user = null) => {
       if (!bundle) {
         return {
           ok: false,
+          code: 'BUNDLE_NOT_FOUND',
           message: `Bundle not found: ${item.bundleName || item.bundleId}`
         }
       }
@@ -932,7 +918,7 @@ const loadAndPriceOrderItems = async (items, store, user = null) => {
           bundle.store !== undefined &&
           !isBundleOrderableAtStore(bundle, store))
       ) {
-        return { ok: false, message: `Bundle "${bundle.name}" is not available` }
+        return { ok: false, code: 'BUNDLE_NOT_AVAILABLE', message: `Bundle "${bundle.name}" is not available` }
       }
       bundleMap[item.bundleId] = bundle
 
@@ -945,7 +931,7 @@ const loadAndPriceOrderItems = async (items, store, user = null) => {
       // identified by bundleId, never productId.
       const bundleExpected = parseExpectedPrice(item.expectedPrice)
       if (bundleExpected.present && !bundleExpected.valid) {
-        return { ok: false, statusCode: 400, message: `expectedPrice must be an integer >= 0` }
+        return { ok: false, statusCode: 400, code: 'INVALID_EXPECTED_PRICE', message: `expectedPrice must be an integer >= 0` }
       }
       if (bundleExpected.present && bundleExpected.value !== bundlePrice) {
         priceMismatches.push({
@@ -962,6 +948,7 @@ const loadAndPriceOrderItems = async (items, store, user = null) => {
         if (!prod) {
           return {
             ok: false,
+            code: 'BUNDLE_NOT_AVAILABLE',
             message: `Product in bundle "${bundle.name}" not found`
           }
         }
@@ -971,6 +958,7 @@ const loadAndPriceOrderItems = async (items, store, user = null) => {
         if (!(await isProductOrderableAtStore(prod.id, store))) {
           return {
             ok: false,
+            code: 'BUNDLE_NOT_AVAILABLE',
             message: `Bundle not available: ${item.bundleName || item.bundleId}`
           }
         }
@@ -979,6 +967,7 @@ const loadAndPriceOrderItems = async (items, store, user = null) => {
         if (avail !== null && avail < needed) {
           return {
             ok: false,
+            code: 'INSUFFICIENT_STOCK',
             message: `Stok "${prod.nameProduct}" tidak mencukupi untuk bundle "${bundle.name}". Tersedia: ${avail}, dibutuhkan: ${needed}`
           }
         }
@@ -993,6 +982,7 @@ const loadAndPriceOrderItems = async (items, store, user = null) => {
     if (!prod) {
       return {
         ok: false,
+        code: 'PRODUCT_NOT_FOUND',
         message: `Product not found: ${item.productName || item.product || item.productId}`
       }
     }
@@ -1003,6 +993,7 @@ const loadAndPriceOrderItems = async (items, store, user = null) => {
     if (!(await isProductOrderableAtStore(prod.id, store))) {
       return {
         ok: false,
+        code: 'PRODUCT_NOT_FOUND',
         message: `Product not found: ${item.productName || item.product || item.productId}`
       }
     }
@@ -1014,11 +1005,11 @@ const loadAndPriceOrderItems = async (items, store, user = null) => {
     const catalogPrice = await resolveCatalogBase(prod, store)
     if (hasPriceOverride) {
       if (!isAdminRoleForOrder(user)) {
-        return { ok: false, statusCode: 403, message: `Price override requires admin privileges` }
+        return { ok: false, statusCode: 403, code: 'FORBIDDEN', message: `Price override requires admin privileges` }
       }
       const overridePrice = Number(item.priceOverride)
       if (!Number.isFinite(overridePrice) || overridePrice < 0 || !Number.isInteger(overridePrice)) {
-        return { ok: false, message: `Invalid priceOverride` }
+        return { ok: false, code: 'INVALID_PRICE_OVERRIDE', message: `Invalid priceOverride` }
       }
       serverPrice = overridePrice
       item._priceOverridden = true
@@ -1032,7 +1023,7 @@ const loadAndPriceOrderItems = async (items, store, user = null) => {
       // would become order_item.price (catalog + option markup).
       const expected = parseExpectedPrice(item.expectedPrice)
       if (expected.present && !expected.valid) {
-        return { ok: false, statusCode: 400, message: `expectedPrice must be an integer >= 0` }
+        return { ok: false, statusCode: 400, code: 'INVALID_EXPECTED_PRICE', message: `expectedPrice must be an integer >= 0` }
       }
       if (expected.present && expected.value !== serverPrice) {
         priceMismatches.push({
@@ -1052,6 +1043,7 @@ const loadAndPriceOrderItems = async (items, store, user = null) => {
     if (avail !== null && avail < qty) {
       return {
         ok: false,
+        code: 'INSUFFICIENT_STOCK',
         message: `Stok "${prod.nameProduct}" tidak mencukupi. Tersedia: ${avail}, diminta: ${item.quantity}`
       }
     }
@@ -1247,7 +1239,11 @@ const priceCounterOrder = async ({
     if (pricing.statusCode === 409 && pricing.mismatches) {
       return { ok: false, status: 409, body: buildPriceMismatchBody(pricing.mismatches) }
     }
-    return { ok: false, status: pricing.statusCode || 400, body: { message: pricing.message } }
+    return {
+      ok: false,
+      status: pricing.statusCode || 400,
+      body: { message: pricing.message, ...(pricing.code ? { code: pricing.code } : {}) }
+    }
   }
 
   const useTaxFlag = useTax === undefined ? true : Boolean(useTax)
@@ -1325,6 +1321,63 @@ exports.quoteOrder = async (req, res) => {
   }
 }
 
+// DR-23 §K: a same-key request replays the original order (200, no new
+// effect) unless the persisted evidence proves it carries a different intent;
+// then it is refused with 409 IDEMPOTENCY_MISMATCH and the fields that differ
+// (see orderIdempotency for the evidence rules). The active PPN rows are read
+// only to disambiguate a 0 % order.
+const replayCounterOrder = async (res, orderId, body, store) => {
+  const fullOrder = await fetchFullOrder(orderId)
+  let activeTaxRate = null
+  let activeTaxSetUnchangedSinceCreation = false
+  if (fullOrder && Number(fullOrder.taxRate) === 0 && body.useTax !== false) {
+    // Same row set getActiveTaxRate sums (fetchActiveTaxRows scope), with
+    // updatedAt as evidence that the set is unchanged since the order.
+    const rows = await db.taxConfig.findAll({
+      where: { [Op.or]: [{ store }, { store: null }], type: 'ppn', status: 'active' },
+      attributes: ['rate', 'updatedAt']
+    })
+    activeTaxRate = rows.reduce((sum, row) => sum + Number(row.rate), 0)
+    activeTaxSetUnchangedSinceCreation =
+      rows.length > 0 &&
+      rows.every((row) => new Date(row.updatedAt) <= new Date(fullOrder.createdAt))
+  }
+  let requestedDiscountResolvedAtCreation = false
+  if (fullOrder && body.discountId && String(body.discountId) !== String(fullOrder.discountId)) {
+    const requested = await Discount.findOne({ where: { id: body.discountId, store } })
+    requestedDiscountResolvedAtCreation = Boolean(
+      requested && new Date(requested.createdAt) <= new Date(fullOrder.createdAt)
+    )
+  }
+  const fields = fullOrder
+    ? counterOrderMismatches(fullOrder, body, {
+        validateCashTender,
+        activeTaxRate,
+        activeTaxSetUnchangedSinceCreation,
+        requestedDiscountResolvedAtCreation
+      })
+    : ['order']
+  if (fields.length) {
+    return res
+      .status(409)
+      .json(idempotencyMismatchBody(fields, fullOrder ? existingOrderSummary(fullOrder) : {}))
+  }
+  return res.status(200).json({
+    message: 'Order already exists for this idempotency key',
+    data: fullOrder
+  })
+}
+
+const replayCustomerOrder = async (res, orderId, body) => {
+  const fullOrder = await fetchFullOrder(orderId)
+  const fields = fullOrder ? customerOrderMismatches(fullOrder, body) : ['order']
+  if (fields.length) return res.status(409).json(idempotencyMismatchBody(fields))
+  return res.status(200).json({
+    message: 'Order already exists for this idempotency key',
+    data: fullOrder
+  })
+}
+
 exports.createOrder = async (req, res) => {
   const scope = resolveCounterStore(req)
   if (!scope.store) return res.status(scope.status).json(scope.body)
@@ -1351,7 +1404,8 @@ exports.createOrder = async (req, res) => {
     idempotencyKey,
     cashAmount,
     changeAmount,
-    referenceNumber
+    referenceNumber,
+    expectedTotal
   } = req.body
 
   try {
@@ -1362,16 +1416,7 @@ exports.createOrder = async (req, res) => {
     // (store, idempotencyKey), enforced below if two such requests race.
      if (idempotencyKey) {
        const existing = await Order.findOne({ where: { store: authorizedStore, idempotencyKey } })
-      if (existing) {
-        const fullOrder = await fetchFullOrder(existing.id)
-        if (!orderItemsMatchPayload(fullOrder?.items, items)) {
-          return res.status(409).json({ message: IDEMPOTENCY_MISMATCH_MESSAGE })
-        }
-        return res.status(200).json({
-          message: 'Order already exists for this idempotency key',
-          data: fullOrder
-        })
-      }
+      if (existing) return replayCounterOrder(res, existing.id, req.body, authorizedStore)
     }
 
     const orderNumber = generateOrderNumber()
@@ -1383,18 +1428,9 @@ exports.createOrder = async (req, res) => {
       // fresh table read) sees "occupied" here — replay it, not a 400.
       if (idempotencyKey) {
         const existing = await Order.findOne({ where: { store: authorizedStore, idempotencyKey } })
-        if (existing) {
-          const fullOrder = await fetchFullOrder(existing.id)
-          if (!orderItemsMatchPayload(fullOrder?.items, items)) {
-            return res.status(409).json({ message: IDEMPOTENCY_MISMATCH_MESSAGE })
-          }
-          return res.status(200).json({
-            message: 'Order already exists for this idempotency key',
-            data: fullOrder
-          })
-        }
+        if (existing) return replayCounterOrder(res, existing.id, req.body, authorizedStore)
       }
-      return res.status(400).json({ message: tableCheck.message })
+      return res.status(400).json({ message: tableCheck.message, code: tableCheck.code })
     }
 
     // DR-11 / DR-17: priced by the same resolver the quote endpoint uses,
@@ -1421,6 +1457,25 @@ exports.createOrder = async (req, res) => {
     } = priced
     const { discountValue, discountType, appliedDiscountId } = discount
     const { bundleMap, productById } = priced.pricing
+
+    // DR-23 §M TOTAL_CHANGED (applies BA LOCK DR-17): a client that states
+    // the payable it showed the customer (`expectedTotal`, e.g. its server
+    // quote) is refused — before any write — when the server's payable now
+    // differs (a discount, promo or campaign that stopped applying, a tax or
+    // price change). The client re-quotes; nothing was charged. Omitting it
+    // keeps the legacy behaviour.
+    if (expectedTotal !== undefined && Number(expectedTotal) !== Number(totals.totalPrice)) {
+      return res.status(409).json({
+        code: 'TOTAL_CHANGED',
+        message: 'The order total changed. Please review the updated total and resubmit.',
+        expectedTotal: Number(expectedTotal),
+        totalPrice: totals.totalPrice,
+        subTotal: totals.subTotal,
+        discountAmount: totals.discountAmount,
+        taxAmount: totals.taxAmount,
+        serviceChargeAmount: totals.serviceChargeAmount
+      })
+    }
 
     // F-PAY-1: a paid order must always carry its payment-ledger row.
     // paymentMethod is optional in the schema and recordOrderPayment skips
@@ -1513,6 +1568,7 @@ exports.createOrder = async (req, res) => {
         if (!lockedTable) {
           const err = new Error('Table not found')
           err.statusCode = 400
+          err.code = 'TABLE_NOT_FOUND'
           throw err
         }
         if (lockedTable.status !== 'available') {
@@ -1535,6 +1591,7 @@ exports.createOrder = async (req, res) => {
               : 'Table is not available'
           )
           err.statusCode = 400
+          err.code = lockedTable.status === 'occupied' ? 'TABLE_OCCUPIED' : 'TABLE_NOT_AVAILABLE'
           throw err
         }
         await lockedTable.update({ status: 'occupied' }, { transaction: t })
@@ -1641,75 +1698,80 @@ exports.createOrder = async (req, res) => {
       })
     )
 
-    const fullOrder = await Order.findOne({
-      where: { id: order.id },
-      include: [
-        { model: OrderItem, as: 'items' },
-        { model: db.transaction, as: 'transactions' },
-        { model: Table, as: 'table' }
-      ]
-    })
-
-    createNotification({
-      type: 'payment_received',
-      store: authorizedStore,
-      referenceId: order.id,
-      referenceType: 'order',
-      params: [orderNumber, totals.totalPrice],
-      createdBy: req.user?.fullName || 'System'
-    }).catch(console.error)
-    createAudit(
-      req,
-      'create',
-      'order',
-      order.id,
-      `Created order: ${orderNumber}`
-    )
-    // Price override audit — transient, per-order, admin-only override
-    const overriddenItems = items.filter((i) => i._priceOverridden)
-    if (overriddenItems.length) {
+    // The sale is committed from here on. No post-commit step (re-read,
+    // notification, audit, realtime emit, immediate journal attempt) may turn
+    // it into a failure response — a client told "failed" would re-sell an
+    // order that exists. Failures are logged; an unposted journal stays
+    // `pending` in the accounting outbox for the retry drain.
+    let fullOrder = null
+    try {
+      fullOrder = await fetchFullOrder(order.id)
+    } catch (postCommitError) {
+      console.error(`createOrder: re-read failed for committed order ${order.id}:`, postCommitError)
+    }
+    try {
+      createNotification({
+        type: 'payment_received',
+        store: authorizedStore,
+        referenceId: order.id,
+        referenceType: 'order',
+        params: [orderNumber, totals.totalPrice],
+        createdBy: req.user?.fullName || 'System'
+      }).catch(console.error)
       createAudit(
         req,
-        'update',
+        'create',
         'order',
         order.id,
-        `Price override applied to ${overriddenItems.length} item(s)`,
-        {
-          items: overriddenItems.map((i) => ({
-            product: i.product || i.productId,
-            catalogPrice: i._originalCatalogPrice ?? i.basePrice
-          }))
-        },
-        {
-          items: overriddenItems.map((i) => ({
-            product: i.product || i.productId,
-            overriddenPrice: i.price,
-            quantity: i.quantity
-          }))
-        }
+        `Created order: ${orderNumber}`
+      )
+      // Price override audit — transient, per-order, admin-only override
+      const overriddenItems = items.filter((i) => i._priceOverridden)
+      if (overriddenItems.length) {
+        createAudit(
+          req,
+          'update',
+          'order',
+          order.id,
+          `Price override applied to ${overriddenItems.length} item(s)`,
+          {
+            items: overriddenItems.map((i) => ({
+              product: i.product || i.productId,
+              catalogPrice: i._originalCatalogPrice ?? i.basePrice
+            }))
+          },
+          {
+            items: overriddenItems.map((i) => ({
+              product: i.product || i.productId,
+              overriddenPrice: i.price,
+              quantity: i.quantity
+            }))
+          }
+        )
+      }
+
+      emitNewOrder(authorizedStore, fullOrder || order)
+    } catch (postCommitError) {
+      console.error(`createOrder: post-commit side effect failed for order ${order.id}:`, postCommitError)
+    }
+    try {
+      await attemptOrderAccountingEntries(accountingJobs)
+    } catch (postCommitError) {
+      console.error(
+        `createOrder: immediate journal attempt failed for order ${order.id}; left in the outbox:`,
+        postCommitError
       )
     }
 
-     emitNewOrder(authorizedStore, fullOrder)
-
-     await attemptOrderAccountingEntries(accountingJobs)
-
     return res.status(201).json({
       message: 'Order created successfully',
-      data: fullOrder
+      data: fullOrder || order
     })
   } catch (error) {
     // Same-key retry that lost the table row lock to its own winner (see
     // the dine-in table claim above) — replay, same as the paths below.
     if (error.idempotencyReplayOrderId) {
-      const fullOrder = await fetchFullOrder(error.idempotencyReplayOrderId)
-      if (!orderItemsMatchPayload(fullOrder?.items, items)) {
-        return res.status(409).json({ message: IDEMPOTENCY_MISMATCH_MESSAGE })
-      }
-      return res.status(200).json({
-        message: 'Order already exists for this idempotency key',
-        data: fullOrder
-      })
+      return replayCounterOrder(res, error.idempotencyReplayOrderId, req.body, authorizedStore)
     }
     // Two requests with the same idempotencyKey can both pass the earlier
     // findOne check and both attempt to create — the unique index on
@@ -1718,20 +1780,20 @@ exports.createOrder = async (req, res) => {
     // fast-path replay above. Scoped (F-04) to that specific constraint only.
     if (isOrderReplayRelevantUniqueError(error) && idempotencyKey) {
       const existing = await Order.findOne({ where: { store: authorizedStore, idempotencyKey } })
-      if (existing) {
-        const fullOrder = await fetchFullOrder(existing.id)
-        if (!orderItemsMatchPayload(fullOrder?.items, items)) {
-          return res.status(409).json({ message: IDEMPOTENCY_MISMATCH_MESSAGE })
-        }
-        return res.status(200).json({
-          message: 'Order already exists for this idempotency key',
-          data: fullOrder
-        })
-      }
+      if (existing) return replayCounterOrder(res, existing.id, req.body, authorizedStore)
     }
     console.error('Error:', error)
-    return res.status(error.statusCode || 500).json({
-      error: error.message || 'Internal Server Error',
+    // An unexpected error never echoes its internal message (SQL, stack
+    // context). Every write is in the transaction above and post-commit
+    // failures are handled before this point, so this is almost always a
+    // rolled-back request — but a connection lost at COMMIT can leave the
+    // outcome unknown. The safe recovery is a retry with the SAME
+    // idempotencyKey: it replays a committed sale or creates it once.
+    if (!error.statusCode) {
+      return res.status(500).json({ error: 'Internal Server Error', code: 'INTERNAL_ERROR' })
+    }
+    return res.status(error.statusCode).json({
+      error: error.message,
       ...(error.code ? { code: error.code } : {})
     })
   }
@@ -3150,11 +3212,15 @@ exports.updateOrderStatus = async (req, res) => {
           // Zero-payable order: completes without a tender (INV-PAY-09).
           zeroPayableCompletion = true
         } else if (fin.O <= 0 || requested !== fin.O) {
+          // DR-23 §K/§M: a retry whose first attempt already settled (its
+          // response lost) lands here with O = 0. The ledger-derived state
+          // lets the client tell "already settled" from "amount stale"
+          // without parsing the message; nothing is changed either way.
           throw financialError(
             409,
             'OUTSTANDING_CHANGED',
             `Settlement amount ${requested} does not equal the current outstanding amount ${fin.O}`,
-            { outstanding: fin.O }
+            { outstanding: fin.O, financialState: fin.state, netPayable: fin.P, collected: fin.C }
           )
         }
         if (!zeroPayableCompletion) {
@@ -4019,16 +4085,7 @@ exports.createCustomerOrder = async (req, res) => {
     // already created instead of creating a second one.
     if (idempotencyKey) {
       const existingOrder = await Order.findOne({ where: { store, idempotencyKey } })
-      if (existingOrder) {
-        const fullOrder = await fetchFullOrder(existingOrder.id)
-        if (!orderItemsMatchPayload(fullOrder?.items, items)) {
-          return res.status(409).json({ message: IDEMPOTENCY_MISMATCH_MESSAGE })
-        }
-        return res.status(200).json({
-          message: 'Order already exists for this idempotency key',
-          data: fullOrder
-        })
-      }
+      if (existingOrder) return replayCustomerOrder(res, existingOrder.id, req.body)
     }
 
     const orderNumber =
@@ -4567,14 +4624,7 @@ exports.createCustomerOrder = async (req, res) => {
     // in-transaction check above), so replay that order the same way the
     // unique-constraint race below does.
     if (error.idempotencyReplayOrderId) {
-      const fullOrder = await fetchFullOrder(error.idempotencyReplayOrderId)
-      if (!orderItemsMatchPayload(fullOrder?.items, items)) {
-        return res.status(409).json({ message: IDEMPOTENCY_MISMATCH_MESSAGE })
-      }
-      return res.status(200).json({
-        message: 'Order already exists for this idempotency key',
-        data: fullOrder
-      })
+      return replayCustomerOrder(res, error.idempotencyReplayOrderId, req.body)
     }
     // Two requests with the same idempotencyKey can both pass the earlier
     // findOne check and both attempt to create — the unique index on
@@ -4583,16 +4633,7 @@ exports.createCustomerOrder = async (req, res) => {
     // that specific constraint only.
     if (isOrderReplayRelevantUniqueError(error) && idempotencyKey) {
       const existingOrder = await Order.findOne({ where: { store, idempotencyKey } })
-      if (existingOrder) {
-        const fullOrder = await fetchFullOrder(existingOrder.id)
-        if (!orderItemsMatchPayload(fullOrder?.items, items)) {
-          return res.status(409).json({ message: IDEMPOTENCY_MISMATCH_MESSAGE })
-        }
-        return res.status(200).json({
-          message: 'Order already exists for this idempotency key',
-          data: fullOrder
-        })
-      }
+      if (existingOrder) return replayCustomerOrder(res, existingOrder.id, req.body)
     }
     console.error('Error:', error)
     // Mirror createOrder: surface fail-closed stock/BOM errors (409) and
