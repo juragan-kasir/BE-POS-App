@@ -20,7 +20,7 @@ const M3 = batches.M3_MIGRATION
 const M5 = '20261013000004-p1-register-close-snapshot.js'
 const B1 = batches.E2_BATCHES.B1.migrations
 const B2 = batches.E2_BATCHES.B2.migrations
-const ALL_E2 = [...B1, ...B2, ...batches.E2_BATCHES.B3.migrations]
+const ALL_E2 = [...B1, ...B2, ...batches.E2_BATCHES.B3.migrations, ...batches.E2_BATCHES.B4.migrations]
 const ledgerWith = (...ran) => FILES.filter((f) => !ALL_E2.includes(f) || ran.flat().includes(f))
 const BEFORE_B3 = ledgerWith(B1, B2)
 const AFTER_B3 = [...BEFORE_B3, M3]

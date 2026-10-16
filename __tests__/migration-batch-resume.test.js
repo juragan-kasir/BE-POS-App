@@ -23,7 +23,7 @@ const M1 = '20261013000001-p1-transaction-attribution.js'
 const B1 = batches.E2_BATCHES.B1.migrations
 const B2 = batches.E2_BATCHES.B2.migrations
 const B3 = batches.E2_BATCHES.B3.migrations
-const ALL_E2 = [...B1, ...B2, ...B3]
+const ALL_E2 = [...B1, ...B2, ...B3, ...batches.E2_BATCHES.B4.migrations]
 const B1_FIRST_12 = B1.slice(0, 12)
 
 // Production-like ledger: every non-E2 file recorded, plus the given E2 names.

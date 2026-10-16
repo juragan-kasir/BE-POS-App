@@ -89,10 +89,20 @@ const E2_BATCHES = Object.freeze({
     // authorization plus, per the D-08 record and RELEASING.md, an
     // execution-time restore point and fresh read-only preconditions.
     openGates: []
+  }),
+  B4: deepFreeze({
+    id: 'B4',
+    title: 'P1-5 goods_receipt.stockPosted posting flag',
+    expectedCount: 1,
+    migrations: ['20261016210748-add-stock-posted-to-goods-receipt.js'],
+    // Guarded add-if-missing BOOLEAN column (default TRUE preserves the
+    // pre-existing post-at-create accounting); replay is a SAFE_NOOP on
+    // migrated databases. No governance gate: schema-only, no data rewrite.
+    openGates: []
   })
 })
 
-const BATCH_ORDER = Object.freeze(['B1', 'B2', 'B3'])
+const BATCH_ORDER = Object.freeze(['B1', 'B2', 'B3', 'B4'])
 
 // D-08 B1 resume contracts. A resume finishes a batch whose earlier members
 // were recorded by an interrupted run; it never redefines the batch (the
