@@ -2455,18 +2455,27 @@ const recordPromoUsageIfApplied = async (
       : null,
     createdBy: userId,
     transaction,
-    // The discount was already computed and applied to this order's totals
-    // before checkout reached this point — a per-member cap collision here
-    // is a bookkeeping edge case, not a reason to refuse recording that the
-    // (already-honored) discount happened. Only maxUsageTotal, the actual
-    // "no more discounted orders allowed at all" cap, is worth knowing
-    // about below; skip the extra query for the per-member cap.
-    enforcePerMemberLimit: false
+    // P1-8: enforce the per-member cap inside the same transaction (the
+    // helper serializes on the locked campaign row). The evaluation-time
+    // check runs unlocked before this transaction, so concurrent
+    // checkouts for one member would otherwise all pass it and
+    // over-redeem. A hit here refuses the whole order (409) — the
+    // discount was already honored in this order's totals, so recording a
+    // usage the cap forbids would be a silent over-redemption.
+    enforcePerMemberLimit: true
   })
   if (result.limitReached) {
     console.error(
       `Promo usage for campaign ${appliedCampaignId} not recorded on order ${order.id}: maxUsageTotal reached`
     )
+  }
+  if (result.memberLimitReached) {
+    const err = new Error(
+      `Promo campaign usage limit per member reached`
+    )
+    err.statusCode = 409
+    err.code = 'PROMO_MEMBER_LIMIT'
+    throw err
   }
 }
 
@@ -4685,12 +4694,21 @@ exports.createCustomerOrder = async (req, res) => {
             : null,
           createdBy: req.user?.id,
           transaction: t,
-          enforcePerMemberLimit: false
+          // P1-8: same per-member enforcement as the counter path — a
+          // cap hit refuses the order so a discounted total can never
+          // settle without a recorded usage.
+          enforcePerMemberLimit: true
         })
         if (promoResult.limitReached) {
           console.error(
             `Promo usage for campaign ${appliedCampaignId} not recorded on order ${createdOrder.id}: maxUsageTotal reached`
           )
+        }
+        if (promoResult.memberLimitReached) {
+          const err = new Error(`Promo campaign usage limit per member reached`)
+          err.statusCode = 409
+          err.code = 'PROMO_MEMBER_LIMIT'
+          throw err
         }
       }
 
