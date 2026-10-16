@@ -21,5 +21,15 @@
          "cache-control": "no-cache, no-store, must-revalidate"
        }
     }
+  ],
+  "crons": [
+    {
+      "path": "/internal/accounting-outbox/drain",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/internal/qr-orders/expire",
+      "schedule": "*/10 * * * *"
+    }
   ]
 }
