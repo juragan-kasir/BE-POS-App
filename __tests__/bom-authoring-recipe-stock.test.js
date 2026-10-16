@@ -9,6 +9,7 @@ process.env.VERCEL = 'true'
 //   - create/update are atomic — a refused request writes nothing;
 //   - an update only changes what it carries (no silent re-activation).
 const request = require('supertest')
+const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
@@ -275,7 +276,7 @@ describe('client requirement — bakso stock per type, deducted by each menu rec
       expect(res.status).toBe(201)
     }
 
-    const sale = await http('post', '/order/create', adminToken).send({
+    const sale = await http('post', '/order/create', adminToken).send(withIdempotencyKey({
       store: storeA.id,
       items: [
         { product: menuHalus.id, quantity: 2 },
@@ -283,7 +284,7 @@ describe('client requirement — bakso stock per type, deducted by each menu rec
       ],
       paymentMethod: 'cash',
       cashierName: 'Kasir Bakso'
-    })
+    }))
     expect(sale.status).toBe(201)
 
     expect(await stockOf(halus)).toBe(100 - 5 * 2 - 2 * 1) // 88
@@ -317,12 +318,12 @@ describe('client requirement — bakso stock per type, deducted by each menu rec
       ).status
     ).toBe(201)
 
-    const sale = await http('post', '/order/create', adminToken).send({
+    const sale = await http('post', '/order/create', adminToken).send(withIdempotencyKey({
       store: storeA.id,
       items: [{ product: menu.id, quantity: 2 }],
       paymentMethod: 'cash',
       cashierName: 'Kasir Bakso'
-    })
+    }))
     expect(sale.status).toBe(409)
     expect(sale.body.code).toBe('INGREDIENT_STOCK_CONFLICT')
     expect(await stockOf(halus)).toBe(7)

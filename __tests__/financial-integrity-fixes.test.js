@@ -2,6 +2,7 @@ process.env.NODE_ENV = 'test'
 process.env.VERCEL = 'true'
 
 const request = require('supertest')
+const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
@@ -144,14 +145,14 @@ describe('Loyalty point balance — concurrency', () => {
     const res = await request(app)
       .post('/order/create')
       .set('Authorization', `Bearer ${cashierToken}`)
-      .send({
+      .send(withIdempotencyKey({
         store: store.id,
         items: [{ product: product.id, quantity: 1 }],
         paymentMethod: 'cash',
         cashierName: 'Fin Integrity Cashier',
         customerId: member.id,
         redeemedPoints: 100
-      })
+      }))
 
     expect(res.status).toBe(201)
 
@@ -242,12 +243,12 @@ describe('Accounting outbox — durability and retry', () => {
     const res = await request(app)
       .post('/order/create')
       .set('Authorization', `Bearer ${cashierToken}`)
-      .send({
+      .send(withIdempotencyKey({
         store: store.id,
         items: [{ product: product.id, quantity: 1 }],
         paymentMethod: 'cash',
         cashierName: 'Fin Integrity Outbox'
-      })
+      }))
     expect(res.status).toBe(201)
     const orderId = res.body.data.id
 

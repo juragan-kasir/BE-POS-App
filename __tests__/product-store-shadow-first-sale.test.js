@@ -2,6 +2,7 @@ process.env.NODE_ENV = 'test'
 process.env.VERCEL = 'true'
 
 const request = require('supertest')
+const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
@@ -98,12 +99,12 @@ describe('product_store_stock first-sale seeding', () => {
     const res = await request(app)
       .post('/order/create')
       .set('Authorization', `Bearer ${token}`)
-      .send({
+      .send(withIdempotencyKey({
         store: store.id,
         items: [{ product: product.id, quantity: 5 }],
         paymentMethod: 'cash',
         cashierName: 'PSS Test'
-      })
+      }))
     expect(res.status).toBe(201)
 
     const afterProduct = await db.product.findByPk(product.id)

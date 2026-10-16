@@ -2,6 +2,7 @@ process.env.NODE_ENV = 'test'
 process.env.VERCEL = 'true'
 
 const request = require('supertest')
+const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
@@ -134,12 +135,12 @@ describe('POST /order/create — core sale flow', () => {
     const res = await request(app)
       .post('/order/create')
       .set('Authorization', `Bearer ${cashierToken}`)
-      .send({
+      .send(withIdempotencyKey({
         store: location.id,
         items: [{ product: productA.id, quantity: 3 }],
         paymentMethod: 'cash',
         cashierName: 'Test Cashier'
-      })
+      }))
 
     expect(res.status).toBe(201)
     expect(res.body.data.status).toBe('paid')
@@ -174,12 +175,12 @@ describe('POST /order/create — core sale flow', () => {
     const res = await request(app)
       .post('/order/create')
       .set('Authorization', `Bearer ${cashierToken}`)
-      .send({
+      .send(withIdempotencyKey({
         store: location.id,
         items: [{ product: productA.id, quantity: 2 }],
         paymentMethod: 'cash',
         cashierName: 'Test Cashier'
-      })
+      }))
     expect(res.status).toBe(201)
 
     // Race-safe atomic upsert (unique index on productId/store) instead of
@@ -197,12 +198,12 @@ describe('POST /order/create — core sale flow', () => {
     const res = await request(app)
       .post('/order/create')
       .set('Authorization', `Bearer ${cashierToken}`)
-      .send({
+      .send(withIdempotencyKey({
         store: location.id,
         items: [{ product: productA.id, quantity: 9999 }],
         paymentMethod: 'cash',
         cashierName: 'Test Cashier'
-      })
+      }))
 
     expect(res.status).toBe(400)
 
@@ -214,13 +215,13 @@ describe('POST /order/create — core sale flow', () => {
     const res = await request(app)
       .post('/order/create')
       .set('Authorization', `Bearer ${cashierToken}`)
-      .send({
+      .send(withIdempotencyKey({
         store: location.id,
         items: [{ product: productA.id, quantity: 1 }],
         discountId: discount.id,
         paymentMethod: 'cash',
         cashierName: 'Test Cashier'
-      })
+      }))
 
     expect(res.status).toBe(201)
     expect(Number(res.body.data.discountAmount)).toBe(2000)
@@ -235,7 +236,7 @@ describe('POST /order/create — core sale flow', () => {
     const res = await request(app)
       .post('/order/create')
       .set('Authorization', `Bearer ${cashierToken}`)
-      .send({
+      .send(withIdempotencyKey({
         store: location.id,
         items: [
           {
@@ -247,7 +248,7 @@ describe('POST /order/create — core sale flow', () => {
         ],
         paymentMethod: 'cash',
         cashierName: 'Test Cashier'
-      })
+      }))
 
     expect(res.status).toBe(201)
     expect(res.body.data.items.length).toBe(1)
@@ -266,12 +267,12 @@ describe('GET /order/customer-order/:token and /order/receipt-html/:token — un
     const createRes = await request(app)
       .post('/order/create')
       .set('Authorization', `Bearer ${cashierToken}`)
-      .send({
+      .send(withIdempotencyKey({
         store: location.id,
         items: [{ product: productA.id, quantity: 1 }],
         paymentMethod: 'cash',
         cashierName: 'Test Cashier'
-      })
+      }))
     expect(createRes.status).toBe(201)
     const { id: orderId, publicToken } = createRes.body.data
 

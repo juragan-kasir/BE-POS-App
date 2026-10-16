@@ -2,6 +2,7 @@ process.env.NODE_ENV = 'test'
 process.env.VERCEL = 'true'
 
 const request = require('supertest')
+const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
@@ -176,14 +177,14 @@ describe('SNAP cash legs, isolated', () => {
       const res = await request(app)
         .post('/order/create')
         .set(auth(adminToken))
-        .send({
+        .send(withIdempotencyKey({
           store: store.id,
           items: [{ product: product.id, quantity: QTY }],
           paymentMethod: method,
           referenceNumber: ref,
           cashierName: 'P1M Cashier',
           idempotencyKey: unique('p1mcanon')
-        })
+        }))
       expect(res.status).toBe(201)
     }
     await closeRegister(registerId, 0)
