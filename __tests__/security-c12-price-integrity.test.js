@@ -29,6 +29,8 @@ beforeAll(async () => {
     stock: 100
   })
   await db.product_store.create({ product: product.id, store: store.id })
+  // DR-14: the outlet row is the authoritative stock.
+  await db.product_store_stock.create({ product: product.id, store: store.id, stock: 100 })
   // W3-3 (DR-17): PPN is explicit setup, never a fallback — seed the rate
   // so these price-integrity assertions exercise configured tax.
   await db.taxConfig.create({
@@ -44,6 +46,7 @@ afterAll(async () => {
   await db.taxConfig.destroy({ where: { store: store?.id }, force: true })
   await db.order_item.destroy({ where: { product: product?.id }, force: true })
   await db.order.destroy({ where: { store: store?.id }, force: true })
+  await db.product_store_stock.destroy({ where: { product: product?.id }, force: true })
   await db.product_store.destroy(
     { where: { product: product?.id }, force: true }
   )

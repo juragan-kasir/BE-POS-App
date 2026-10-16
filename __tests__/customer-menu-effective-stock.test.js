@@ -31,7 +31,8 @@ describe('F4-03 /order/customer-menu — authoritative per-store effective stock
     await db.product_store_stock.create({ product: productZ.id, store: storeB.id, stock: 20 })
 
     // productMissing: base stock 100, assigned to Store A only, NO
-    // product_store_stock row anywhere -> effective stock falls back to base.
+    // product_store_stock row anywhere -> the outlet has none of it (DR-14:
+    // the global stock is never an availability fallback).
     productMissing = await db.product.create({
       nameProduct: 'F403_PRODUCT_MISSING',
       category: category.id,
@@ -89,11 +90,11 @@ describe('F4-03 /order/customer-menu — authoritative per-store effective stock
     expect(Number(found.stock)).toBe(100)
   })
 
-  test('BE-3 — missing store row falls back to base stock (effectiveStock 100)', async () => {
+  test('BE-3 — missing store row is 0, never the base stock (DR-14, BA 027)', async () => {
     const products = await menuFor(storeA.id)
     const found = products.find((p) => String(p.id) === String(productMissing.id))
     expect(found).toBeDefined()
-    expect(found.effectiveStock).toBe(100)
+    expect(found.effectiveStock).toBe(0)
   })
 
   test('BE-4 — different stores produce different effective stock (A=0 vs B=20)', async () => {
@@ -126,18 +127,19 @@ describe('F4-03 /order/customer-menu — authoritative per-store effective stock
     expect(resZ.status).toBe(400)
     expect(resZ.body.message).toContain('Tersedia: 0')
 
-    // productMissing: menu effectiveStock 100 -> ordering 101 must be rejected with Tersedia: 100
+    // productMissing: menu effectiveStock 0 (no outlet row) -> ordering 1
+    // is rejected with Tersedia: 0, never judged against the base stock 100
     const resM = await request(app).post('/order/customer-create').send({
       store: storeA.id,
       tableId: tableA.id,
       paymentMethod: 'cash',
       customerName: 'F4-03 consistency',
       items: [
-        { productId: productMissing.id, productName: productMissing.nameProduct, quantity: 101 }
+        { productId: productMissing.id, productName: productMissing.nameProduct, quantity: 1 }
       ]
     })
     expect(resM.status).toBe(400)
-    expect(resM.body.message).toContain('Tersedia: 100')
+    expect(resM.body.message).toContain('Tersedia: 0')
   })
 
   test('BE-7 — products stay scoped to their store (no cross-store stock leak)', async () => {
