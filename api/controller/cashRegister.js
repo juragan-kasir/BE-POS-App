@@ -261,6 +261,7 @@ async function buildReportData({
   userData
 }) {
   const replacements = {
+    registerId: register.id,
     store,
     user,
     openedAt,
@@ -268,10 +269,11 @@ async function buildReportData({
   }
 
   // totalSales/totalSubtotal/totalDiscount/totalTax/totalServiceCharge and
-  // the payments-by-type breakdown below are UNCHANGED from pre-F2 — gross
-  // figures across every payment method, attributed by store+createdBy+
-  // time-window. Never used in the expectedCash formula; kept purely for
-  // backward-compatible display.
+  // the payments-by-type breakdown below are gross figures across every
+  // payment method, attributed to the REGISTER that collected the money
+  // (per-row cashRegisterId with order-header fallback — same membership
+  // rule as the cash ledger above), not to the opener. Never used in the
+  // expectedCash formula; kept purely for backward-compatible display.
   const [salesAgg, paymentRows, expCatRows] = await Promise.all([
     db.sequelize
       .query(
@@ -283,10 +285,15 @@ async function buildReportData({
                 COALESCE(SUM("totalQuantity"), 0) as "totalQuantity",
                 COALESCE(SUM("totalCovers"), 0) as "totalCovers",
                 COALESCE(SUM("totalPrice"), 0) as "totalSales"
-         FROM "order"
-         WHERE "store" = :store AND "createdBy" = :user
-           AND "createdAt" >= :openedAt AND "createdAt" <= :endAt
-           AND "paymentStatus" = 'paid'`,
+         FROM "order" o
+         WHERE "store" = :store
+           AND EXISTS (
+             SELECT 1 FROM "transaction" t2
+             WHERE t2."order" = o.id
+               AND COALESCE(t2."cashRegisterId", o."cashRegisterId") = :registerId
+           )
+           AND o."createdAt" >= :openedAt AND o."createdAt" <= :endAt
+           AND o."paymentStatus" = 'paid'`,
         { replacements, type: db.sequelize.QueryTypes.SELECT }
       )
       .then((r) => r[0]),
@@ -296,7 +303,8 @@ async function buildReportData({
                 COUNT(*)::int as "count"
          FROM "transaction" t
          JOIN "order" o ON o.id = t."order"
-         WHERE o."store" = :store AND o."createdBy" = :user
+         WHERE o."store" = :store
+           AND COALESCE(t."cashRegisterId", o."cashRegisterId") = :registerId
            AND o."createdAt" >= :openedAt AND o."createdAt" <= :endAt
            AND o."paymentStatus" = 'paid'
          GROUP BY t."typePayment"
@@ -442,23 +450,29 @@ async function buildCloseSnapshot({ registerId, store, user, openedAt, endAt, op
               COALESCE(SUM("totalQuantity"), 0) as "totalQuantity",
               COALESCE(SUM("totalCovers"), 0) as "totalCovers",
               COALESCE(SUM("totalPrice"), 0) as "totalSales"
-         FROM "order"
-        WHERE "store" = :store AND "createdBy" = :user
-          AND "createdAt" >= :openedAt AND "createdAt" <= :endAt
-          AND "paymentStatus" = 'paid'`,
+         FROM "order" o
+         WHERE "store" = :store
+           AND EXISTS (
+             SELECT 1 FROM "transaction" t2
+             WHERE t2."order" = o.id
+               AND COALESCE(t2."cashRegisterId", o."cashRegisterId") = :registerId
+           )
+           AND o."createdAt" >= :openedAt AND o."createdAt" <= :endAt
+           AND o."paymentStatus" = 'paid'`,
       queryOpts
     ).then((r) => r[0]),
     db.sequelize.query(
       `SELECT t."typePayment",
-              COALESCE(SUM(t."amount"), 0) as total,
-              COUNT(*)::int as "count"
+                COALESCE(SUM(t."amount"), 0) as total,
+                COUNT(*)::int as "count"
          FROM "transaction" t
          JOIN "order" o ON o.id = t."order"
-        WHERE o."store" = :store AND o."createdBy" = :user
-          AND o."createdAt" >= :openedAt AND o."createdAt" <= :endAt
-          AND o."paymentStatus" = 'paid'
-        GROUP BY t."typePayment"
-        ORDER BY total DESC, t."typePayment" ASC`,
+         WHERE o."store" = :store
+           AND COALESCE(t."cashRegisterId", o."cashRegisterId") = :registerId
+           AND o."createdAt" >= :openedAt AND o."createdAt" <= :endAt
+           AND o."paymentStatus" = 'paid'
+         GROUP BY t."typePayment"
+         ORDER BY total DESC, t."typePayment" ASC`,
       queryOpts
     ),
     db.sequelize.query(
