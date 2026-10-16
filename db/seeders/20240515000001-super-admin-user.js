@@ -1,6 +1,7 @@
 'use strict'
 
 const bcrypt = require('bcrypt')
+const { seedPassword } = require('../../utils/seedCredential')
 
 module.exports = {
   up: async (queryInterface, Sequelize) => {
@@ -17,12 +18,15 @@ module.exports = {
 
     const superAdminRoleId = roles[0].id
 
-    const hashedPasswordAngga = await bcrypt.hash('angga123', 10)
-    const hashedPasswordFebi = await bcrypt.hash('febi123', 10)
-    const hashedPasswordSurya = await bcrypt.hash('surya123', 10)
-    const hashedPasswordTegar = await bcrypt.hash('tegar123', 10)
-    const hashedPasswordLuthfi = await bcrypt.hash('luthfi123', 10)
-    const hashedPasswordSuperAdmin = await bcrypt.hash('superadmin123', 10)
+    // DR-06: never a known password — SEED_SUPER_ADMIN_PASSWORD, or a random
+    // one per account (set it with a password reset). Never logged.
+    const hashSeed = async () => bcrypt.hash(seedPassword('SEED_SUPER_ADMIN_PASSWORD').password, 10)
+    const hashedPasswordAngga = await hashSeed()
+    const hashedPasswordFebi = await hashSeed()
+    const hashedPasswordSurya = await hashSeed()
+    const hashedPasswordTegar = await hashSeed()
+    const hashedPasswordLuthfi = await hashSeed()
+    const hashedPasswordSuperAdmin = await hashSeed()
 
     const allUsers = [
       { userName: 'angga', fullName: 'angga', password: hashedPasswordAngga, email: 'angga@posapp.com', employeeID: 'EMP-0002' },

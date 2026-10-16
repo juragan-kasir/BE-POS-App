@@ -1,4 +1,5 @@
 require('dotenv').config({ path: __dirname + '/.env' })
+const { requireEnv } = require('../utils/seedCredential')
 const { Client } = require('pg')
 
 async function debug() {
@@ -6,7 +7,7 @@ async function debug() {
     user: process.env.DB_DEV_USERNAME || 'postgres',
     host: process.env.DB_DEV_HOST || 'localhost',
     database: process.env.DB_DEV_DATABASE || 'cashier_app',
-    password: process.env.DB_DEV_PASSWORD || 'teddyferdian98',
+    password: requireEnv('DB_DEV_PASSWORD'),
     port: process.env.DB_DEV_PORT || 5432
   })
 
