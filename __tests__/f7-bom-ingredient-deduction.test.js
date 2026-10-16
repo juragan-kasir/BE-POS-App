@@ -754,13 +754,15 @@ describe('F7 — INGREDIENT_STOCK_CONFLICT contract', () => {
     expect(await db.transaction.count({ where: { order: order.id } })).toBe(1)
     // Never below zero, and the uncovered amount is explicit, not clamped away.
     expect(Number((await db.ingredient.findByPk(ing.id)).stock)).toBe(0)
-    const history = await db.stock_history.findOne({
-      where: { referenceType: 'sale', referenceId: order.id, ingredient: ing.id }
+    const [history] = await db.stock_history.findAll({
+      where: { referenceType: 'sale', referenceId: order.id, ingredient: ing.id },
+      limit: 1
     })
     expect(Number(history.quantityChange)).toBe(-1)
     expect(history.notes).toMatch(/KURANG 2/)
-    const audit = await db.auditLog.findOne({
-      where: { entity: 'stock_shortage', entityId: order.id }
+    const [audit] = await db.auditLog.findAll({
+      where: { entity: 'stock_shortage', entityId: order.id },
+      limit: 1
     })
     expect(audit).not.toBeNull()
     expect(audit.newValues.shortages[0].shortfall).toBe(2)
@@ -993,10 +995,14 @@ describe('F7 — QR customer paid via trusted cashier transition (Phase 3.1)', (
     expect(paid.body.stockShortages).toEqual([
       expect.objectContaining({ type: 'product', id: product.id, required: 1, deducted: 0, shortfall: 1 })
     ])
-    const outlet = await db.product_store_stock.findOne({ where: { product: product.id, store: storeA.id } })
+    const [outlet] = await db.product_store_stock.findAll({
+      where: { product: product.id, store: storeA.id },
+      limit: 1
+    })
     expect(Number(outlet.stock)).toBe(0)
-    const history = await db.stock_history.findOne({
-      where: { referenceType: 'sale', referenceId: created.body.data.id, product: product.id, ingredient: null }
+    const [history] = await db.stock_history.findAll({
+      where: { referenceType: 'sale', referenceId: created.body.data.id, product: product.id, ingredient: null },
+      limit: 1
     })
     expect(Number(history.quantityChange)).toBe(0)
     expect(history.notes).toMatch(/KURANG 1/)
