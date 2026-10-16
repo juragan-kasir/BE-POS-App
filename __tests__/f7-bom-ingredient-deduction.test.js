@@ -733,7 +733,9 @@ describe('F7 — INGREDIENT_STOCK_CONFLICT contract', () => {
     expect(res.body.code).toBeUndefined()
   })
 
-  test('deferred paid transition carries the same code and rolls back', async () => {
+  // BA gap 028 (DR-18): settling an already-taken order is never refused
+  // for stock — the payment stands and the shortage is recorded and shown.
+  test('deferred paid transition with an ingredient shortage settles and records the shortage', async () => {
     const ing = await makeIngredient(storeA.id, { stock: 1 })
     const product = await makeProduct({ inventoryMode: 'make_to_order', stock: 20 })
     await makeBom(storeA.id, product.id, [{ ingredientId: ing.id, qty: 3 }])
@@ -744,11 +746,26 @@ describe('F7 — INGREDIENT_STOCK_CONFLICT contract', () => {
       status: 'paid',
       paymentMethod: 'cash'
     })
-    expect(res.status).toBe(409)
-    expect(res.body.code).toBe('INGREDIENT_STOCK_CONFLICT')
-    expect((await db.order.findByPk(order.id)).paymentStatus).toBe('unpaid')
-    expect(await db.transaction.count({ where: { order: order.id } })).toBe(0)
-    expect(Number((await db.ingredient.findByPk(ing.id)).stock)).toBe(1)
+    expect(res.status).toBe(200)
+    expect(res.body.stockShortages).toEqual([
+      expect.objectContaining({ type: 'ingredient', id: ing.id, required: 3, deducted: 1, shortfall: 2 })
+    ])
+    expect((await db.order.findByPk(order.id)).paymentStatus).toBe('paid')
+    expect(await db.transaction.count({ where: { order: order.id } })).toBe(1)
+    // Never below zero, and the uncovered amount is explicit, not clamped away.
+    expect(Number((await db.ingredient.findByPk(ing.id)).stock)).toBe(0)
+    const [history] = await db.stock_history.findAll({
+      where: { referenceType: 'sale', referenceId: order.id, ingredient: ing.id },
+      limit: 1
+    })
+    expect(Number(history.quantityChange)).toBe(-1)
+    expect(history.notes).toMatch(/KURANG 2/)
+    const [audit] = await db.auditLog.findAll({
+      where: { entity: 'stock_shortage', entityId: order.id },
+      limit: 1
+    })
+    expect(audit).not.toBeNull()
+    expect(audit.newValues.shortages[0].shortfall).toBe(2)
   })
 })
 
@@ -929,12 +946,11 @@ describe('F7 — QR customer paid via trusted cashier transition (Phase 3.1)', (
     expect(Number((await db.ingredient.findByPk(ing.id)).stock)).toBe(92) // 100 - (4*2)
   })
 
-  test('make_to_order with insufficient ingredient: create OK, trusted paid returns 409 and rolls back atomically', async () => {
+  test('make_to_order with insufficient ingredient: create OK, trusted paid settles with a recorded shortage (DR-18)', async () => {
     const ing = await makeIngredient(storeA.id, { stock: 2 })
     const product = await makeProduct({ stock: 0, inventoryMode: 'make_to_order' })
     await makeBom(storeA.id, product.id, [{ ingredientId: ing.id, qty: 5 }])
 
-    const ordersBefore = await db.order.count({ where: { store: storeA.id } })
     const created = await customerCreate({
       store: storeA.id,
       paymentMethod: 'cash',
@@ -950,23 +966,46 @@ describe('F7 — QR customer paid via trusted cashier transition (Phase 3.1)', (
       id: created.body.data.id,
       status: 'paid'
     })
-    // Must be the F7 ingredient-shortage 409, never a finished-good 400.
-    expect(paid.status).toBe(409)
+    // DR-18: the payment is not refused for stock at settlement.
+    expect(paid.status).toBe(200)
+    expect(paid.body.stockShortages).toEqual([
+      expect.objectContaining({ type: 'ingredient', id: ing.id, required: 5, deducted: 2, shortfall: 3 })
+    ])
     expect(Number((await db.product.findByPk(product.id)).stock)).toBe(0)
-    expect(Number((await db.ingredient.findByPk(ing.id)).stock)).toBe(2)
-
-    // The paid transition rolled back entirely — the unpaid creation record
-    // persists untouched: no order-status row, no ledger row, no ingredient
-    // stock_history.
+    expect(Number((await db.ingredient.findByPk(ing.id)).stock)).toBe(0)
     const persisted = await db.order.findByPk(created.body.data.id)
-    expect(persisted.status).toBe('pending')
-    expect(persisted.paymentStatus).toBe('unpaid')
-    expect(await db.order.count({ where: { store: storeA.id } })).toBe(ordersBefore + 1)
-    expect(await db.transaction.findAll({ where: { order: created.body.data.id } })).toHaveLength(0)
-    const historyRows = await db.stock_history.findAll({
-      where: { referenceType: 'sale', ingredient: ing.id }
+    expect(persisted.paymentStatus).toBe('paid')
+    expect(await db.transaction.findAll({ where: { order: created.body.data.id } })).toHaveLength(1)
+  })
+
+  test('a stocked dish short at its outlet settles; the shortfall is recorded, never clamped silently (DR-18)', async () => {
+    const product = await makeProduct({ stock: 1, inventoryMode: 'stocked' })
+    const created = await customerCreate({
+      store: storeA.id,
+      paymentMethod: 'cash',
+      customerName: 'QR F7 FG',
+      items: [{ productId: product.id, productName: product.nameProduct, quantity: 1 }]
     })
-    expect(historyRows.length).toBe(0)
+    expect(created.status).toBe(201)
+    // Another sale takes the last unit before this order is paid.
+    await db.product_store_stock.update({ stock: 0 }, { where: { product: product.id, store: storeA.id } })
+
+    const paid = await updateOrderStatus(tokenA, { id: created.body.data.id, status: 'paid' })
+    expect(paid.status).toBe(200)
+    expect(paid.body.stockShortages).toEqual([
+      expect.objectContaining({ type: 'product', id: product.id, required: 1, deducted: 0, shortfall: 1 })
+    ])
+    const [outlet] = await db.product_store_stock.findAll({
+      where: { product: product.id, store: storeA.id },
+      limit: 1
+    })
+    expect(Number(outlet.stock)).toBe(0)
+    const [history] = await db.stock_history.findAll({
+      where: { referenceType: 'sale', referenceId: created.body.data.id, product: product.id, ingredient: null },
+      limit: 1
+    })
+    expect(Number(history.quantityChange)).toBe(0)
+    expect(history.notes).toMatch(/KURANG 1/)
   })
 
   test('stocked: finished-good stock deducted, ingredient stock untouched (regression)', async () => {

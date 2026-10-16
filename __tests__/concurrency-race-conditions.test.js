@@ -189,6 +189,8 @@ describe('Concurrent status update — double stock deduction (order.js updateOr
       price: 5000,
       stock: 10
     })
+    // DR-14: the outlet row is the authoritative stock.
+    await db.product_store_stock.create({ product: product.id, store: location.id, stock: 10 })
     // AUTH-1 P2: the row is the authority — assign it the store the token claims.
     await db.user.update({ store: location.id }, { where: { id: 8802 } })
     token = await signSessionToken(

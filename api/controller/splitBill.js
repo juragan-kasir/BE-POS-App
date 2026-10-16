@@ -425,6 +425,7 @@ const splitBillController = {
           let orderComplete = false
           let accountingJobs = null
           let retired = []
+          let splitStockShortages = []
 
           if (after.state === FINANCIAL_STATES.PAID) {
             // Stock is deducted exactly once, on the transition to PAID.
@@ -434,13 +435,28 @@ const splitBillController = {
             // row and the other sees it and skips. Partial split collections
             // award nothing.
             if (order.paymentStatus !== 'paid') {
-              await deductStockForPaidOrder(
+              // BA gap 028 (DR-18): completion is never refused for stock;
+              // what the outlet could not cover is audited with it.
+              const shortages = await deductStockForPaidOrder(
                 order.id,
                 order.store,
                 order.orderNumber,
                 req.user?.id || null,
                 t
               )
+              if (shortages && shortages.length) {
+                splitStockShortages = shortages
+                await createAudit(
+                  req,
+                  'update',
+                  'stock_shortage',
+                  order.id,
+                  `Order ${order.orderNumber || order.id} settled with a stock shortage`,
+                  null,
+                  { shortages },
+                  t
+                )
+              }
               const completeItems = await db.order_item.findAll({
                 where: { order: order.id },
                 transaction: t
@@ -491,7 +507,14 @@ const splitBillController = {
             )
           }
 
-          return { split, orderComplete, accountingJobs, retired, orderNumber: order.orderNumber }
+          return {
+            split,
+            orderComplete,
+            accountingJobs,
+            retired,
+            orderNumber: order.orderNumber,
+            stockShortages: splitStockShortages
+          }
         })
       )
 
@@ -526,7 +549,8 @@ const splitBillController = {
         message: 'Success pay split bill',
         data: {
           split: result.split,
-          orderComplete: result.orderComplete
+          orderComplete: result.orderComplete,
+          ...(result.stockShortages.length ? { stockShortages: result.stockShortages } : {})
         }
       })
     } catch (error) {

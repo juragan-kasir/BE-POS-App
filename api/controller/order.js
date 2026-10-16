@@ -2691,7 +2691,7 @@ const deductStockForPaidOrder = async (
     where: { order: orderId },
     transaction: t
   })
-  if (items.length === 0) return
+  if (items.length === 0) return []
 
   // Flatten bundle order_items into their component products so the
   // deferred paid-transition path deducts every component exactly as the
@@ -2761,47 +2761,56 @@ const deductStockForPaidOrder = async (
   const productById = new Map(products.map((p) => [p.id, p]))
 
   const stockHistoryRows = []
+  // BA gap 028 (DR-18): settling an already-taken order is never refused
+  // for stock. Whatever the outlet cannot cover is recorded here (and in
+  // the stock history notes) and returned so the caller audits and
+  // surfaces it — never hidden by a silent clamp.
+  const shortages = []
 
   for (const item of flatItems) {
     const product = productById.get(item.product)
     if (!product) continue
 
     if (product.inventoryMode !== 'make_to_order') {
-      const oldStock = Number(product.stock) || 0
       const qty = Math.floor(Number(item.quantity)) || 0
-      const newStock = Math.max(oldStock - qty, 0)
-      await product.update(
-        {
-          stock: db.sequelize.literal(`GREATEST(stock - ${qty}, 0)`)
-        },
-        { transaction: t }
-      )
-      product.stock = newStock
-
-      // ponytail: atomic upsert + deduct per-store stock
-      await db.sequelize.query(
-        `INSERT INTO product_store_stock (product, store, stock, "createdAt", "updatedAt")
-         VALUES ($1, $2, 0, NOW(), NOW())
-         ON CONFLICT (product, store) DO NOTHING`,
-        { bind: [item.product, effectiveStore], transaction: t }
-      )
-      await db.product_store_stock.update(
-        {
-          stock: db.sequelize.literal(`GREATEST(stock - ${qty}, 0)`)
-        },
-        {
-          where: { product: item.product, store: effectiveStore },
-          transaction: t
-        }
-      )
-
-      // ponytail: FIFO - consume oldest batches first
-      await batchService.deductFifo({
-        productId: product.id,
-        store: effectiveStore,
-        qty,
-        transaction: t
+      // DR-14: the outlet row is the authoritative stock, read under a row
+      // lock; a missing row is 0 and is never seeded from the global stock.
+      const outletRow = await db.product_store_stock.findOne({
+        where: { product: product.id, store: effectiveStore },
+        transaction: t,
+        lock: t.LOCK.UPDATE
       })
+      const oldStock = outletRow ? Number(outletRow.stock) || 0 : 0
+      const deducted = Math.min(Math.max(oldStock, 0), qty)
+      const shortfall = qty - deducted
+      const newStock = oldStock - deducted
+      if (outletRow && deducted > 0) {
+        await outletRow.update({ stock: newStock }, { transaction: t })
+      }
+      if (deducted > 0) {
+        // Derived global total follows the outlet movement (DR-14).
+        await product.update(
+          { stock: db.sequelize.literal(`GREATEST(stock - ${deducted}, 0)`) },
+          { transaction: t }
+        )
+        // ponytail: FIFO - consume oldest batches first
+        await batchService.deductFifo({
+          productId: product.id,
+          store: effectiveStore,
+          qty: deducted,
+          transaction: t
+        })
+      }
+      if (shortfall > 0) {
+        shortages.push({
+          type: 'product',
+          id: product.id,
+          name: item.productName || product.nameProduct,
+          required: qty,
+          deducted,
+          shortfall
+        })
+      }
 
       stockHistoryRows.push({
         product: product.id,
@@ -2809,10 +2818,12 @@ const deductStockForPaidOrder = async (
         referenceType: 'sale',
         referenceId: orderId,
         quantityBefore: oldStock,
-        quantityChange: -qty,
+        quantityChange: -deducted,
         quantityAfter: newStock,
         unit: product.unit || 'pcs',
-        notes: item.referenceNote,
+        notes: shortfall
+          ? `${item.referenceNote} — KURANG ${shortfall} (stok tidak mencukupi saat pembayaran)`
+          : item.referenceNote,
         createdBy: changedBy
       })
     }
@@ -2865,9 +2876,11 @@ const deductStockForPaidOrder = async (
       referenceId: orderId,
       notes: `Penjualan: ${orderNumber}`,
       createdBy: changedBy,
-      transaction: t
+      transaction: t,
+      shortages
     })
   }
+  return shortages
 }
 exports.deductStockForPaidOrder = deductStockForPaidOrder
 // P1: split-bill settlement reuses the same server-side cash-tender
@@ -2919,6 +2932,8 @@ exports.updateOrderStatus = async (req, res) => {
   // Split rows retired by this transition; audited after commit.
   let retiredSplits = []
   let retiredSplitReason = null
+  // BA gap 028 (DR-18): stock the settlement could not cover.
+  let stockShortages = []
 
   try {
     const statusAttrs = await getOrderAttributes()
@@ -3557,7 +3572,21 @@ exports.updateOrderStatus = async (req, res) => {
         // Stock is deducted only when the order first reaches PAID
         // (counter orders were deducted at creation).
         if (oldPaymentStatus !== 'paid') {
-          await deductPaidOrderStock(t)
+          stockShortages = (await deductPaidOrderStock(t)) || []
+          if (stockShortages.length) {
+            // Recorded with the settlement (same transaction): the payment
+            // stands, the shortage is explicit and attributable.
+            await createAudit(
+              req,
+              'update',
+              'stock_shortage',
+              id,
+              `Order ${order.orderNumber || id} settled with a stock shortage`,
+              null,
+              { shortages: stockShortages },
+              t
+            )
+          }
         }
       }
 
@@ -3767,7 +3796,8 @@ exports.updateOrderStatus = async (req, res) => {
 
     return res.status(200).json({
       message: 'Order status updated',
-      data: order
+      data: order,
+      ...(stockShortages.length ? { stockShortages } : {})
     })
   } catch (error) {
     console.error('Error:', error)
