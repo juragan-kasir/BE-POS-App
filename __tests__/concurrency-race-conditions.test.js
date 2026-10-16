@@ -146,7 +146,10 @@ describe('Concurrent checkout — overselling (order.js createOrder)', () => {
 
     const finalProduct = await db.product.findByPk(product.id)
     expect(Number(finalProduct.stock)).toBe(0) // never negative, never left at 1 (double-success) either
-    const outlet = await db.product_store_stock.findOne({ where: { product: product.id, store: location.id } })
+    const [outlet] = await db.product_store_stock.findAll({
+      where: { product: product.id, store: location.id },
+      limit: 1
+    })
     expect(Number(outlet.stock)).toBe(0)
 
     const paidOrders = await db.order.count({

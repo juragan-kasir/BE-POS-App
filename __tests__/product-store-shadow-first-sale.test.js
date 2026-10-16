@@ -150,8 +150,9 @@ describe('product_store_stock first-sale seeding', () => {
         idempotencyKey: nextTag()
       })
     expect(res.status).toBe(201)
-    const outlet = await db.product_store_stock.findOne({
-      where: { product: product.id, store: store.id }
+    const [outlet] = await db.product_store_stock.findAll({
+      where: { product: product.id, store: store.id },
+      limit: 1
     })
     expect(Number(outlet.stock)).toBe(3)
     expect(Number((await db.product.findByPk(product.id)).stock)).toBe(95)
