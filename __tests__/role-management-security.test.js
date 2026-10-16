@@ -388,7 +388,7 @@ describe('R-05 role mutations are confined to the caller scope', () => {
     const res = await request(app)
       .post('/role/add-new-role')
       .set(bearer(tokens.superGlobal))
-      .send({ name, store: 999999999 })
+      .send({ name, store: '999999999' })
     expect(res.status).toBe(400)
     expect(await db.role.count({ where: { name } })).toBe(0)
   })
