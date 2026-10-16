@@ -1,6 +1,7 @@
 process.env.NODE_ENV = 'test'
 process.env.VERCEL = 'true'
 
+const crypto = require('crypto')
 const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
@@ -26,7 +27,7 @@ const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 //      the Q31 elevated mechanism)
 //   R-07 accessMenu entries must be well-formed
 
-const PREFIX = `rms_${Date.now()}_${Math.floor(Math.random() * 1e6)}`
+const PREFIX = `rms_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`
 let seq = 0
 const unique = (key) => `${PREFIX}_${key}_${++seq}`.toLowerCase()
 const sign = (claims) => signSessionToken(claims, JWT_SECRET)
@@ -387,7 +388,7 @@ describe('R-05 role mutations are confined to the caller scope', () => {
     const res = await request(app)
       .post('/role/add-new-role')
       .set(bearer(tokens.superGlobal))
-      .send({ name, store: 2147480000 })
+      .send({ name, store: 999999999 })
     expect(res.status).toBe(400)
     expect(await db.role.count({ where: { name } })).toBe(0)
   })
@@ -527,9 +528,10 @@ describe('R-08 role changes and their audit record commit together', () => {
       .set(bearer(tokens.superGlobal))
       .send({ status: 'draft' })
     expect(res.status).toBe(200)
-    const log = await db.auditLog.findOne({
+    const [log] = await db.auditLog.findAll({
       where: { entity: 'role', entityId: role.id, action: 'update' },
-      order: [['id', 'DESC']]
+      order: [['id', 'DESC']],
+      limit: 1
     })
     expect(log).not.toBeNull()
     expect(log.userId).toBe(actors.superGlobal.id)
@@ -570,11 +572,11 @@ describe('R-09 duplicates and missing roles', () => {
 
   test('deleting or editing a role that does not exist is 404', async () => {
     const del = await request(app)
-      .delete('/role/delete-role/2147480000')
+      .delete('/role/delete-role/999999999')
       .set(bearer(tokens.superGlobal))
     expect(del.status).toBe(404)
     const edit = await request(app)
-      .put('/role/edit-role/2147480000')
+      .put('/role/edit-role/999999999')
       .set(bearer(tokens.superGlobal))
       .send({ name: 'x' })
     expect(edit.status).toBe(404)
