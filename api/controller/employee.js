@@ -82,9 +82,14 @@ const normalizeLocationFilter = (value) => {
 // Same grant rule as auth.js change-profile-user, applied to the RESOLVED
 // role: only a global super_admin may assign a super_admin role. An unknown
 // roleId is rejected instead of silently falling back to another role.
-const resolveGrantableRole = async (req, roleId) => {
+// R-11: an inactive or draft role cannot be newly granted; a user who
+// already holds it keeps it (`currentRoleId`), so re-saving them still works.
+const resolveGrantableRole = async (req, roleId, currentRoleId = null) => {
   const role = await db.role.findByPk(roleId)
   if (!role) return { status: 400, message: 'Role tidak ditemukan' }
+  if (role.status !== 'active' && Number(roleId) !== Number(currentRoleId)) {
+    return { status: 400, message: 'Role tidak aktif dan tidak dapat diberikan' }
+  }
   if (role.roleType === 'super_admin' && !isGlobalSuperAdmin(req)) {
     return {
       status: 403,
@@ -521,7 +526,7 @@ exports.updateEmployee = async (req, res) => {
 
     let grantedRole = null
     if (body?.roleId) {
-      const grant = await resolveGrantableRole(req, body.roleId)
+      const grant = await resolveGrantableRole(req, body.roleId, employee.roleId)
       if (!grant.role) {
         return res
           .status(grant.status)

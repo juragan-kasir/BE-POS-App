@@ -331,6 +331,12 @@ exports.changeUserByIdAndLocation = async (req, res) => {
             message: 'Role tidak ditemukan'
           })
         }
+        // R-11: an inactive or draft role cannot be newly granted.
+        if (role.status !== 'active' && Number(roleId) !== Number(targetUser.roleId)) {
+          return res.status(400).json({
+            message: 'Role tidak aktif dan tidak dapat diberikan'
+          })
+        }
         if (
           !isGlobalSuperAdmin(req) &&
           role.roleType === 'super_admin'

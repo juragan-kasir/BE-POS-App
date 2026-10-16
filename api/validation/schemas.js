@@ -1711,6 +1711,16 @@ exports.createMemberTierSchema = z.object({
 exports.updateMemberTierSchema = exports.createMemberTierSchema.partial()
 
 // ===================== Role =====================
+// R-07 / DR-12 §35.4: accessMenu is a presentation list (never the security
+// boundary), but it must stay well-formed: one entry per menu key with
+// boolean (or null = not applicable) action flags.
+const roleAccessMenuSchema = z.array(
+  z
+    .object({ menu: z.string().trim().min(1, 'menu is required') })
+    .catchall(z.union([z.boolean(), z.null()]))
+)
+exports.roleAccessMenuSchema = roleAccessMenuSchema
+
 exports.createRoleSchema = z.object({
   name: z.string().min(1, 'name is required'),
   description: z.string().optional().default(''),
@@ -1721,18 +1731,30 @@ exports.createRoleSchema = z.object({
     .optional()
     .default('user'),
   store: z.union([z.number(), z.string()]).optional().nullable(),
-  accessMenu: z.array(z.any()).optional().default([]),
+  accessMenu: roleAccessMenuSchema.optional().default([]),
   permissions: z
     .union([z.string(), z.array(z.any()), z.record(z.any())])
     .optional()
     .default({})
 })
-exports.updateRoleSchema = exports.createRoleSchema
-  .extend({
-    id: z.union([z.number(), z.string()]),
-    modifiedBy: z.union([z.number(), z.string()]).optional().nullable()
-  })
-  .partial()
+// R-02: no defaults here. zod 4 `.partial()` keeps `.default()` values, so
+// deriving this from createRoleSchema filled an omitted roleType with 'user'
+// and accessMenu with [] — every edit that left them out downgraded the role.
+// An edit changes only the fields it sends.
+exports.updateRoleSchema = z.object({
+  id: z.union([z.number(), z.string()]).optional(),
+  name: z.string().min(1, 'name is required').optional(),
+  description: z.string().optional(),
+  status: z.string().optional(),
+  roleType: z.enum(['super_admin', 'admin', 'kasir', 'user']).optional(),
+  store: z.union([z.number(), z.string()]).optional().nullable(),
+  accessMenu: roleAccessMenuSchema.optional(),
+  createdBy: z.union([z.number(), z.string()]).optional().nullable(),
+  modifiedBy: z.union([z.number(), z.string()]).optional().nullable(),
+  permissions: z
+    .union([z.string(), z.array(z.any()), z.record(z.any())])
+    .optional()
+})
 
 // ===================== Purchase Payment =====================
 exports.createPurchasePaymentSchema = z.object({
