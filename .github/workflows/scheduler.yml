@@ -1,0 +1,36 @@
+name: Production Schedulers
+
+# The in-process schedulers never run on serverless (api/index.js starts
+# them only when !VERCEL), and Vercel Cron cannot send the Authorization
+# header the /internal endpoints require — so GitHub Actions drives them
+# instead. Required repo configuration (Settings → Secrets and variables →
+# Actions): secret CRON_SECRET (>= 32 chars, same value as the Vercel project
+# env CRON_SECRET) and variable PROD_API_URL (e.g. https://api.example.com).
+
+on:
+  schedule:
+    # Journal outbox drain + stale QR sweep, staggered to avoid overlap.
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+jobs:
+  schedulers:
+    name: Drain outbox + expire QR orders
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check configuration
+        run: |
+          test -n "${{ vars.PROD_API_URL }}" || { echo "PROD_API_URL variable is not set"; exit 1; }
+          test -n "${{ secrets.CRON_SECRET }}" || { echo "CRON_SECRET secret is not set"; exit 1; }
+
+      - name: Drain accounting outbox
+        run: |
+          curl --fail --show-error --max-time 25 \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "${{ vars.PROD_API_URL }}/internal/accounting-outbox/drain"
+
+      - name: Expire stale QR orders
+        run: |
+          curl --fail --show-error --max-time 25 \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "${{ vars.PROD_API_URL }}/internal/qr-orders/expire"
