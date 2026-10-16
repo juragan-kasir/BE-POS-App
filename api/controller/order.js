@@ -38,6 +38,7 @@ const {
   retirePendingSplits
 } = require('../service/orderFinancials')
 const { normalizePaymentMethod, requiresTenderReference } = require('../service/canonicalPayment')
+const { assertSettlementReferenceUnused } = require('../service/settlementReference')
 const {
   counterOrderMismatches,
   customerOrderMismatches,
@@ -1636,6 +1637,19 @@ exports.createOrder = async (req, res) => {
          t
        )
 
+       const counterReference =
+         effectivePaymentMethod === 'CASH'
+           ? null
+           : typeof referenceNumber === 'string' && referenceNumber.trim() !== ''
+             ? referenceNumber.trim()
+             : null
+       // BA 004 (DR-23 §D): never the same reference twice per store+method.
+       await assertSettlementReferenceUnused({
+         store: authorizedStore,
+         method: effectivePaymentMethod,
+         reference: counterReference,
+         transaction: t
+       })
        await recordOrderPayment(
         createdOrder,
         effectivePaymentMethod,
@@ -1646,12 +1660,7 @@ exports.createOrder = async (req, res) => {
         changeGiven,
         {
           cashRegisterId: openRegister.id,
-          referenceNumber:
-            effectivePaymentMethod === 'CASH'
-              ? null
-              : typeof referenceNumber === 'string' && referenceNumber.trim() !== ''
-                ? referenceNumber.trim()
-                : null
+          referenceNumber: counterReference
         }
       )
       await createInitialOrderStatus(
@@ -3540,6 +3549,13 @@ exports.updateOrderStatus = async (req, res) => {
       // deduct stock exactly once on the transition to PAID.
       if (isSettlement) {
         if (paidTender) {
+          // BA 004 (DR-23 §D): never the same reference twice per store+method.
+          await assertSettlementReferenceUnused({
+            store: lockedOrder.store,
+            method: paidTender.method,
+            reference: paidTender.referenceNumber,
+            transaction: t
+          })
           await recordOrderPayment(
             lockedOrder,
             paidTender.method,

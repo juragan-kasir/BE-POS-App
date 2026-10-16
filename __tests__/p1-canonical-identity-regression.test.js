@@ -214,7 +214,7 @@ describe.each([
   test(`approve on a ${canonical}-settled order preserves tender, register and reference`, async () => {
     const order = await makeQrOrder()
     expect((await updateStatus(adminToken, {
-      id: order.id, store: store.id, status: 'paid', paymentMethod: alias, referenceNumber: `P1I-SALE-${canonical}`
+      id: order.id, store: store.id, status: 'paid', paymentMethod: alias, referenceNumber: `P1I-RETSALE-${canonical}`
     })).status).toBe(200)
 
     const items = await db.order_item.findAll({ where: { order: order.id } })

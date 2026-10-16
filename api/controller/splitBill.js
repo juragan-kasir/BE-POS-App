@@ -19,6 +19,7 @@ const {
 } = require('../service/orderFinancials')
 const { normalizePaymentMethod } = require('../service/canonicalPayment')
 const { resolveAttributedRegister } = require('../service/settlementAttribution')
+const { assertSettlementReferenceUnused } = require('../service/settlementReference')
 const { awardEarnedPointsOnce } = require('../service/loyaltyService')
 
 // split_bill has no store column of its own — ownership is entirely
@@ -380,6 +381,13 @@ const splitBillController = {
               )
             }
             splitReference = ref
+            // BA 004 (DR-23 §D): never the same reference twice per store+method.
+            await assertSettlementReferenceUnused({
+              store: order.store,
+              method,
+              reference: ref,
+              transaction: t
+            })
           }
           const splitRegister = await resolveAttributedRegister(order.store, t)
 
