@@ -2,6 +2,7 @@ process.env.NODE_ENV = 'test'
 process.env.VERCEL = 'true'
 
 const request = require('supertest')
+const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
@@ -51,7 +52,7 @@ const posOrder = (tableId, { key, quantity = 1, productId } = {}) => {
   return request(app)
     .post('/order/create')
     .set('Authorization', `Bearer ${token()}`)
-    .send(body)
+    .send(withIdempotencyKey(body))
 }
 
 const qrOrder = (tableId, key) =>

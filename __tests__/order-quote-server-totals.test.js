@@ -2,6 +2,7 @@ process.env.NODE_ENV = 'test'
 process.env.VERCEL = 'true'
 
 const request = require('supertest')
+const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
@@ -55,14 +56,14 @@ async function createWithExactCash(payload, total) {
   return request(app)
     .post('/order/create')
     .set(as())
-    .send({
+    .send(withIdempotencyKey({
       ...payload,
       paymentMethod: 'cash',
       cashierName: 'Quote Cashier',
       idempotencyKey: unique('quote'),
       cashAmount: total,
       changeAmount: 0
-    })
+    }))
 }
 
 async function snapshot() {

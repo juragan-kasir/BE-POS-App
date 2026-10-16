@@ -13,6 +13,7 @@ jest.mock('../api/service/socket', () => {
 })
 
 const request = require('supertest')
+const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
@@ -117,7 +118,7 @@ const sale = (key, extra = {}) => ({
   ...extra
 })
 const postSale = (body) =>
-  request(app).post('/order/create').set('Authorization', `Bearer ${token}`).send(body)
+  request(app).post('/order/create').set('Authorization', `Bearer ${token}`).send(withIdempotencyKey(body))
 const stockOf = async (id) =>
   Number((await db.product_store_stock.findOne({ where: { product: id, store: store.id } })).stock)
 
@@ -183,6 +184,39 @@ describe('machine-readable refusal codes (status unchanged)', () => {
     const res = await postSale(sale(unique('c_tbl2'), { tableId: table.id }))
     expect(res.status).toBe(400)
     expect(res.body.code).toBe('TABLE_OCCUPIED')
+  })
+})
+
+describe('BA 005 counter sale idempotency key (DR-23 §K)', () => {
+  test.each([
+    ['missing', undefined],
+    ['null', null],
+    ['empty', ''],
+    ['whitespace-only', '   ']
+  ])('a %s key is refused 422 IDEMPOTENCY_KEY_REQUIRED with no sale', async (_label, key) => {
+    const before = await stockOf(product.id)
+    const ordersBefore = await db.order.count({ where: { store: store.id } })
+    const body = sale(undefined)
+    if (key === undefined) delete body.idempotencyKey
+    else body.idempotencyKey = key
+    const res = await request(app)
+      .post('/order/create')
+      .set('Authorization', `Bearer ${token}`)
+      .send(body)
+    expect(res.status).toBe(422)
+    expect(res.body.code).toBe('IDEMPOTENCY_KEY_REQUIRED')
+    expect(await db.order.count({ where: { store: store.id } })).toBe(ordersBefore)
+    expect(await stockOf(product.id)).toBe(before)
+  })
+
+  test('the read-only quote still needs no key', async () => {
+    const body = sale(undefined)
+    delete body.idempotencyKey
+    const res = await request(app)
+      .post('/order/quote')
+      .set('Authorization', `Bearer ${token}`)
+      .send(body)
+    expect(res.status).toBe(200)
   })
 })
 

@@ -2,6 +2,7 @@ process.env.NODE_ENV = 'test'
 process.env.VERCEL = 'true'
 
 const request = require('supertest')
+const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
@@ -69,13 +70,13 @@ const orderOne = (overrides = {}) =>
   request(app)
     .post('/order/create')
     .set('Authorization', `Bearer ${cashierToken}`)
-    .send({
+    .send(withIdempotencyKey({
       store: location.id,
       items: [{ product: productA.id, quantity: 1 }],
       paymentMethod: 'cash',
       cashierName: 'Tax Contract',
       ...overrides
-    })
+    }))
 
 describe('tax config resolution contract (F-SMOKE-01)', () => {
   test('a global (store: null) active PPN config prices the order — not the 11% fallback', async () => {

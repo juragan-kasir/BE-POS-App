@@ -2,6 +2,7 @@ process.env.NODE_ENV = 'test'
 process.env.VERCEL = 'true'
 
 const request = require('supertest')
+const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
@@ -29,14 +30,14 @@ async function counterSale(paymentMethod, extra = {}) {
   const res = await request(app)
     .post('/order/create')
     .set(as())
-    .send({
+    .send(withIdempotencyKey({
       store: store.id,
       items: [{ product: product.id, quantity: 1 }],
       paymentMethod,
       cashierName: 'Journal Cashier',
       idempotencyKey: unique('jrn'),
       ...extra
-    })
+    }))
   if (res.status !== 201) throw new Error('sale failed: ' + JSON.stringify(res.body))
   return res.body.data
 }

@@ -2,6 +2,7 @@ process.env.NODE_ENV = 'test'
 process.env.VERCEL = 'true'
 
 const request = require('supertest')
+const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
@@ -127,12 +128,12 @@ describe('Concurrent checkout — overselling (order.js createOrder)', () => {
       request(app)
         .post('/order/create')
         .set('Authorization', `Bearer ${token}`)
-        .send({
+        .send(withIdempotencyKey({
           store: location.id,
           items: [{ product: product.id, quantity: 1 }],
           paymentMethod: 'cash',
           cashierName: 'Race Cashier'
-        })
+        }))
 
     // Fired together, not awaited sequentially — both requests are in
     // flight at the same time, racing for the same row.
@@ -404,13 +405,13 @@ describe('Concurrent duplicate submit — idempotency key (order.js createOrder)
       request(app)
         .post('/order/create')
         .set('Authorization', `Bearer ${token}`)
-        .send({
+        .send(withIdempotencyKey({
           store: location.id,
           items: [{ product: product.id, quantity: 2 }],
           paymentMethod: 'cash',
           cashierName: 'Race Cashier',
           idempotencyKey
-        })
+        }))
 
     const [resA, resB] = await Promise.all([submit(), submit()])
 
@@ -436,13 +437,13 @@ describe('Concurrent duplicate submit — idempotency key (order.js createOrder)
       request(app)
         .post('/order/create')
         .set('Authorization', `Bearer ${token}`)
-        .send({
+        .send(withIdempotencyKey({
           store: location.id,
           items: [{ product: product.id, quantity: 1 }],
           paymentMethod: 'cash',
           cashierName: 'Race Cashier',
           idempotencyKey
-        })
+        }))
 
     const first = await send()
     expect(first.status).toBe(201)
@@ -528,12 +529,12 @@ describe('Concurrent order creation — daily customer number uniqueness (order.
         request(app)
           .post('/order/create')
           .set('Authorization', `Bearer ${token}`)
-          .send({
+          .send(withIdempotencyKey({
             store: location.id,
             items: [{ product: product.id, quantity: 1 }],
             paymentMethod: 'cash',
             cashierName: 'Race Cashier'
-          })
+          }))
 
       const responses = await Promise.all(
         Array.from({ length: 10 }, () => submit())

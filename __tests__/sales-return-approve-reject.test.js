@@ -2,6 +2,7 @@ process.env.NODE_ENV = 'test'
 process.env.VERCEL = 'true'
 
 const request = require('supertest')
+const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
@@ -18,12 +19,12 @@ const makeOrder = async (qty) => {
   const createRes = await request(app)
     .post('/order/create')
     .set('Authorization', `Bearer ${adminToken}`)
-    .send({
+    .send(withIdempotencyKey({
       store: location.id,
       items: [{ product: product.id, quantity: qty }],
       paymentMethod: 'cash',
       cashierName: 'Test Cashier'
-    })
+    }))
   return createRes.body.data
 }
 
@@ -249,7 +250,7 @@ describe('PATCH /sales-return/approve and /reject', () => {
     const orderRes = await request(app)
       .post('/order/create')
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({
+      .send(withIdempotencyKey({
         store: location.id,
         items: [
           { product: product.id, quantity: 5 },
@@ -257,7 +258,7 @@ describe('PATCH /sales-return/approve and /reject', () => {
         ],
         paymentMethod: 'cash',
         cashierName: 'Test Cashier'
-      })
+      }))
     expect(orderRes.status).toBe(201)
     const order = orderRes.body.data
 

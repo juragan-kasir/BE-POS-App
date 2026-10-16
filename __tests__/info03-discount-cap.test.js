@@ -2,6 +2,7 @@ process.env.NODE_ENV = 'test'
 process.env.VERCEL = 'true'
 
 const request = require('supertest')
+const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
@@ -96,14 +97,14 @@ const createOrderWithDiscount = (discountId, promoCode) =>
   request(app)
     .post('/order/create')
     .set('Authorization', `Bearer ${cashierToken}`)
-    .send({
+    .send(withIdempotencyKey({
       store: location.id,
       items: [{ product: product.id, quantity: 1 }],
       paymentMethod: 'cash',
       cashierName: 'INFO03 Cashier',
       discountId,
       promoCode
-    })
+    }))
 
 describe('INFO-03 discount capping / non-negative total', () => {
   test('normal discount 1000 on subtotal 10000 → total 9000+tax', async () => {
@@ -168,12 +169,12 @@ describe('INFO-03 discount capping / non-negative total', () => {
     const res = await request(app)
       .post('/order/create')
       .set('Authorization', `Bearer ${cashierToken}`)
-      .send({
+      .send(withIdempotencyKey({
         store: location.id,
         items: [{ product: product.id, quantity: 1 }],
         paymentMethod: 'cash',
         cashierName: 'INFO03 Cashier'
-      })
+      }))
     expect(res.status).toBe(201)
     expect(res.body.data.discountAmount).toBe(0)
     expect(res.body.data.subTotal).toBe(10000)

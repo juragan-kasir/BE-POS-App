@@ -2,6 +2,7 @@ process.env.NODE_ENV = 'test'
 process.env.VERCEL = 'true'
 
 const request = require('supertest')
+const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const { signSessionToken } = require('../test-helpers/authSession')
 const { Op } = require('sequelize')
 const app = require('../api/index')
@@ -117,12 +118,12 @@ async function createPaidOrder(token, qty = 2) {
   const res = await request(app)
     .post('/order/create')
     .set('Authorization', `Bearer ${token}`)
-    .send({
+    .send(withIdempotencyKey({
       store: location.id,
       items: [{ product: prod.id, quantity: qty }],
       paymentMethod: 'cash',
       cashierName: 'Void Reason Cashier'
-    })
+    }))
   expect(res.status).toBe(201)
   return { order: res.body.data, prod }
 }
@@ -283,12 +284,12 @@ describe('paid-order reversal (void) requires a reason and an elevated capabilit
     const res = await request(app)
       .post('/order/create')
       .set('Authorization', `Bearer ${kasirToken}`)
-      .send({
+      .send(withIdempotencyKey({
         store: location.id,
         items: [{ product: prod.id, quantity: 1 }],
         paymentMethod: 'cash',
         cashierName: 'Void Reason Cashier'
-      })
+      }))
     expect(res.status).toBe(201)
     const created = await db.order.findByPk(res.body.data.id)
     expect(created.paymentStatus).toBe('paid')
