@@ -88,6 +88,8 @@ beforeAll(async () => {
     isAvailable: true
   })
   await db.product_store.create({ product: product.id, store: store.id })
+  // DR-14: the outlet row is the authoritative stock.
+  await db.product_store_stock.create({ product: product.id, store: store.id, stock: 50 })
   table = await db.table.create({ store: store.id, name: 'RECEIPT_XSS_TABLE' })
   // W3-3 (DR-17): PPN is explicit setup, never a fallback — seed the rate
   // so these receipt assertions exercise configured tax.
@@ -108,6 +110,7 @@ afterAll(async () => {
   }
   await db.table.destroy({ where: { id: table?.id }, force: true })
   await db.product_store.destroy({ where: { product: product?.id }, force: true })
+  await db.product_store_stock.destroy({ where: { product: product?.id }, force: true })
   await db.product.destroy({ where: { id: product?.id }, force: true })
   await db.category.destroy({ where: { id: category?.id }, force: true })
   await db.location.destroy({ where: { id: store?.id }, force: true })
