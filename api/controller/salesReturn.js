@@ -16,7 +16,7 @@ const {
   attemptJob,
   recordImmediateAttempt
 } = require('../service/accountingOutboxService')
-const { normalizePaymentMethod } = require('../service/canonicalPayment')
+const { normalizePaymentMethod, requiresTenderReference } = require('../service/canonicalPayment')
 const { resolveAttributedRegister } = require('../service/settlementAttribution')
 const { reverseEarnedPoints } = require('../service/loyaltyService')
 
@@ -152,13 +152,16 @@ const salesReturnController = {
     // scratch is safe. Safe to retry: guard failures below throw tagged
     // errors (mapped to responses outside the closure) and no response is
     // ever sent before a retryable error can be thrown.
-    const approvalError = (statusCode, message) => {
+    const approvalError = (statusCode, message, code) => {
       const e = new Error(message)
       e.statusCode = statusCode
+      if (code) e.code = code
       return e
     }
     const { id } = req.params
     const { refundReference } = req.body || {}
+    const trimmedReference =
+      typeof refundReference === 'string' ? refundReference.trim() : ''
     let outcome = null
     try {
       outcome = await withDeadlockRetry(async () => {
@@ -721,6 +724,19 @@ const salesReturnController = {
           const refundMethod = normalizePaymentMethod(
             ret.refundMethod || order.paymentMethod || 'cash'
           )
+          // BA gap 009 (DR-23 §D/§G, DR-13): a non-cash refund carries its
+          // external reference (OTHER: a description) so it stays
+          // traceable. Refused inside the transaction: nothing is restocked,
+          // refunded or approved.
+          if (requiresTenderReference(refundMethod) && !trimmedReference) {
+            throw approvalError(
+              422,
+              refundMethod === 'OTHER'
+                ? 'A description of how this refund was made is required for an OTHER refund'
+                : `A refund reference is required for a ${refundMethod} refund`,
+              'REFERENCE_REQUIRED'
+            )
+          }
           let refundRegisterId = null
           if (refundMethod === 'CASH') {
             const refunding = await resolveAttributedRegister(
@@ -742,7 +758,7 @@ const salesReturnController = {
               salesReturnId: ret.id,
               typePayment: refundMethod,
               amount: -Math.abs(ret.refundAmount),
-              referenceNumber: refundReference || null,
+              referenceNumber: trimmedReference || null,
               cashRegisterId: refundRegisterId,
               notes: `Refund for return ${ret.returnNumber}`,
               createdBy: req.user?.id || null
@@ -760,7 +776,7 @@ const salesReturnController = {
             status: 'approved',
             approvedBy: req.user?.id || null,
             approvedAt,
-            refundReference: refundReference || null
+            refundReference: trimmedReference || null
           },
           { transaction }
         )
@@ -840,6 +856,7 @@ const salesReturnController = {
       if (error && error.statusCode) {
         return res.status(error.statusCode).json({
           success: false,
+          ...(error.code ? { code: error.code } : {}),
           message: error.message
         })
       }
