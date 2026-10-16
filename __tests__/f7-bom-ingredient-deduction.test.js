@@ -2,6 +2,7 @@ process.env.NODE_ENV = 'test'
 process.env.VERCEL = 'true'
 
 const request = require('supertest')
+const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
@@ -61,7 +62,7 @@ const makeBom = async (store, productId, lines, overrides = {}) => {
 }
 
 const createOrder = (token, body) =>
-  request(app).post('/order/create').set('Authorization', `Bearer ${token}`).send(body)
+  request(app).post('/order/create').set('Authorization', `Bearer ${token}`).send(withIdempotencyKey(body))
 
 // Phase 39 — a successful QR order occupies its table until paid/cancelled/
 // void releases it. These fixtures create many independent QR orders on one

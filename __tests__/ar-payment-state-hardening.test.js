@@ -2,6 +2,7 @@ process.env.NODE_ENV = 'test'
 process.env.VERCEL = 'true'
 
 const request = require('supertest')
+const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
@@ -74,12 +75,12 @@ beforeAll(async () => {
   const orderRes = await request(app)
     .post('/order/create')
     .set('Authorization', `Bearer ${adminToken}`)
-    .send({
+    .send(withIdempotencyKey({
       store: store.id,
       items: [{ product: product.id, quantity: 1, productName: 'arpay' }],
       paymentMethod: 'cash',
       cashierName: 'AR Cashier'
-    })
+    }))
   if (orderRes.status !== 201) throw new Error('order setup failed')
   order = await db.order.findByPk(orderRes.body.data.id)
   openAR = await makeAR({ totalAmount: 100000, paidAmount: 0, status: 'UNPAID' })

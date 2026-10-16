@@ -2,6 +2,7 @@ process.env.NODE_ENV = 'test'
 process.env.VERCEL = 'true'
 
 const request = require('supertest')
+const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const crypto = require('crypto')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
@@ -75,12 +76,12 @@ describe('PPN_MISSING machine-readable code on checkout paths', () => {
     const res = await request(app)
       .post('/order/create')
       .set('Authorization', `Bearer ${cashierToken}`)
-      .send({
+      .send(withIdempotencyKey({
         store: location.id,
         items: [{ product: productA.id, quantity: 1 }],
         paymentMethod: 'cash',
         cashierName: 'PPN Code'
-      })
+      }))
     expect(res.status).toBe(400)
     expect(res.body.code).toBe('PPN_MISSING')
     expect(String(res.body.error || res.body.message || '')).toMatch(/PPN tax configuration is missing/)

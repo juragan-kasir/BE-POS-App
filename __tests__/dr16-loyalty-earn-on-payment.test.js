@@ -2,6 +2,7 @@ process.env.NODE_ENV = 'test'
 process.env.VERCEL = 'true'
 
 const request = require('supertest')
+const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
@@ -415,7 +416,7 @@ describe('DR-16 preserved behavior', () => {
     const createRes = await request(app)
       .post('/order/create')
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({
+      .send(withIdempotencyKey({
         store: store.id,
         customerId: member.id,
         items: [{ product: product.id, quantity: 2 }],
@@ -424,7 +425,7 @@ describe('DR-16 preserved behavior', () => {
         changeAmount: 0,
         cashierName: 'DR16',
         idempotencyKey: unique('dr16counter')
-      })
+      }))
     expect(createRes.status).toBe(201)
     const orderId = createRes.body.data.id
     createdOrderIds.push(orderId)

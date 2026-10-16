@@ -2,6 +2,7 @@ process.env.NODE_ENV = 'test'
 process.env.VERCEL = 'true'
 
 const request = require('supertest')
+const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
@@ -14,12 +15,12 @@ const createOrderRequest = () =>
   request(app)
     .post('/order/create')
     .set('Authorization', `Bearer ${token}`)
-    .send({
+    .send(withIdempotencyKey({
       store: location.id,
       items: [{ product: product.id, quantity: 1 }],
       paymentMethod: 'cash',
       cashierName: 'F03Cashier'
-    })
+    }))
 
 const setStatus = (id, status, reason, asToken = token) =>
   request(app)
