@@ -79,6 +79,26 @@ async function batchStocks(batchId) {
   return db.product_batch_stock.findAll({ where: { batch: batchId } })
 }
 
+// P1-5: drafts post nothing — every lifecycle below completes the draft
+// first so there is a posted effect (and batches) to reverse/retire.
+const completeGR = async (id) => {
+  const res = await request(app)
+    .patch(`/goods-receipt/status/${id}`)
+    .set('Authorization', `Bearer ${adminToken}`)
+    .send({ status: 'completed', store: location.id })
+  if (res.status !== 200) throw new Error('Complete setup failed: ' + JSON.stringify(res.body))
+  return res.body.data
+}
+
+// Reversal paths (cancel/delete/update-rebuild) only unwind posted effects.
+// Since new drafts never post, a posted draft is legacy state (posted at
+// create before P1-5, or completed-then-reopened): simulate it by flipping
+// a completed receipt back to draft — stockPosted stays true, exactly like
+// a pre-deploy draft row.
+const reopenAsLegacyDraft = async (id) => {
+  await db.goodsReceipt.update({ status: 'draft' }, { where: { id } })
+}
+
 async function fgStock() {
   return Number((await db.product.findByPk(product.id)).stock)
 }
@@ -132,7 +152,13 @@ describe('Phase 39 Batch 3 (B1) — GR reversal retires its product batches', ()
     const baseline = await fgStock()
     const po = await makePO(5000)
     const receipt = await makeDraftGR(po, 10)
+    expect(await fgStock()).toBe(baseline)
+    await completeGR(receipt.id)
     expect(await fgStock()).toBe(baseline + 10)
+
+    // Completed receipts are terminal — reopen as a legacy posted draft so
+    // the cancel path has a posted effect to unwind.
+    await reopenAsLegacyDraft(receipt.id)
 
     const created = await receiptBatches(receipt.receiptNumber)
     expect(created).toHaveLength(1)
@@ -162,14 +188,11 @@ describe('Phase 39 Batch 3 (B1) — GR reversal retires its product batches', ()
     const baseline = await fgStock()
     const po = await makePO(5000)
     const receipt = await makeDraftGR(po, 10)
-
+    // Still a draft: editing lines moves no stock and creates no batches.
     const updateRes = await request(app)
       .put(`/goods-receipt/update/${receipt.id}`)
       .set('Authorization', `Bearer ${adminToken}`)
       .send({
-        // NOTE: status must be explicit — updateGoodsReceiptSchema inherits
-        // create's `.default('completed')`, so an omitted status completes
-        // the receipt (which is itself a J1 journal-posting transition).
         status: 'draft',
         items: [
           {
@@ -181,19 +204,22 @@ describe('Phase 39 Batch 3 (B1) — GR reversal retires its product batches', ()
         ]
       })
     expect(updateRes.status).toBe(200)
-    expect(await fgStock()).toBe(baseline + 6)
+    expect(await fgStock()).toBe(baseline)
+    expect(await activeBatches()).toHaveLength(0)
 
-    // Old 10-unit batch retired; exactly one active batch carrying 6.
+    // Completing posts the final lines: exactly one active batch of 6,
+    // with nothing retired (nothing was ever posted before).
+    await completeGR(receipt.id)
+    expect(await fgStock()).toBe(baseline + 6)
     const all = await receiptBatches(receipt.receiptNumber)
     const active = all.filter((b) => b.status === 'active')
     expect(active).toHaveLength(1)
     expect(Number(active[0].qty)).toBe(6)
-    const retired = all.filter((b) => b.status !== 'active')
-    expect(retired).toHaveLength(1)
-    expect(Number(retired[0].qty)).toBe(10)
+    expect(all.filter((b) => b.status !== 'active')).toHaveLength(0)
 
     // Close the lifecycle: cancelling the replaced receipt unwinds the
-    // re-applied effect and retires the replacement batch.
+    // posted effect and retires the batch.
+    await reopenAsLegacyDraft(receipt.id)
     const cancelRes = await request(app)
       .patch(`/goods-receipt/status/${receipt.id}`)
       .set('Authorization', `Bearer ${adminToken}`)
@@ -207,6 +233,12 @@ describe('Phase 39 Batch 3 (B1) — GR reversal retires its product batches', ()
     const baseline = await fgStock()
     const po = await makePO(5000)
     const receipt = await makeDraftGR(po, 10)
+    await completeGR(receipt.id)
+    expect(await fgStock()).toBe(baseline + 10)
+
+    // A completed receipt cannot be deleted; reopen as a legacy posted
+    // draft so the delete path has a posted effect to unwind.
+    await reopenAsLegacyDraft(receipt.id)
 
     const delRes = await request(app)
       .delete(`/goods-receipt/delete/${receipt.id}`)
@@ -219,10 +251,27 @@ describe('Phase 39 Batch 3 (B1) — GR reversal retires its product batches', ()
     expect(retired[0].status).not.toBe('active')
   })
 
+  test('TEST 3b — deleting a never-posted draft removes rows with no stock movement', async () => {
+    const baseline = await fgStock()
+    const po = await makePO(5000)
+    const receipt = await makeDraftGR(po, 10)
+
+    const delRes = await request(app)
+      .delete(`/goods-receipt/delete/${receipt.id}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+    expect(delRes.status).toBe(200)
+    expect(await fgStock()).toBe(baseline)
+    expect(await activeBatches()).toHaveLength(0)
+    expect(await receiptBatches(receipt.receiptNumber)).toHaveLength(0)
+  })
+
   test('TEST 4 — cancelling one receipt never touches another receipt batch', async () => {
     const po = await makePO(5000, 20)
     const receiptA = await makeDraftGR(po, 10, { batchNumber: `B1-LOT-A-${SUFFIX}` })
     const receiptB = await makeDraftGR(po, 10, { batchNumber: `B1-LOT-B-${SUFFIX}` })
+    await completeGR(receiptA.id)
+    await completeGR(receiptB.id)
+    await reopenAsLegacyDraft(receiptA.id)
 
     const cancelRes = await request(app)
       .patch(`/goods-receipt/status/${receiptA.id}`)
@@ -244,6 +293,7 @@ describe('Phase 39 Batch 3 (B1) — GR reversal retires its product batches', ()
     expect(Number(batchB[0].qty)).toBe(10)
 
     // Cleanup the surviving receipt through its own lifecycle.
+    await reopenAsLegacyDraft(receiptB.id)
     const cancelB = await request(app)
       .patch(`/goods-receipt/status/${receiptB.id}`)
       .set('Authorization', `Bearer ${adminToken}`)

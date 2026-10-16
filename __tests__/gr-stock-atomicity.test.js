@@ -96,7 +96,6 @@ beforeAll(async () => {
 })
 
 afterAll(async () => {
-  await db.user.destroy({ where: { id: [7301] }, force: true })
   await db.stock_history.destroy({ where: { product: product?.id }, force: true })
   await db.goodsReceiptItem.destroy({ where: {}, force: true })
   const receipts = await db.goodsReceipt.findAll({ where: { store: store?.id } })
@@ -109,6 +108,8 @@ afterAll(async () => {
   await db.goodsReceipt.destroy({ where: { store: store?.id }, force: true })
   await db.purchase_order_item.destroy({ where: { purchaseOrder: poId }, force: true })
   await db.purchase_order.destroy({ where: { id: poId }, force: true })
+  // Users last: purchase orders reference the creator (FK).
+  await db.user.destroy({ where: { id: [7301] }, force: true })
   await db.product_store_stock.destroy({ where: { product: product?.id }, force: true })
   await db.product.destroy({ where: { id: product?.id }, force: true })
   await db.category.destroy({ where: { id: category?.id }, force: true })
@@ -125,10 +126,12 @@ async function receivedQty() {
 }
 
 describe('F-STOCK-1 GR lifecycle exactly-once', () => {
-  test('draft→completed does not re-apply stock or receivedQuantity', async () => {
+  test('draft→completed posts the stock effect exactly once (nothing at draft)', async () => {
+    const baseStock = await productStock()
+    const baseReceived = await receivedQty()
     const gr = await makeDraftGR(10, unique('gratC'))
-    expect(await productStock()).toBe(10)
-    expect(await receivedQty()).toBe(10)
+    expect(await productStock()).toBe(baseStock)
+    expect(await receivedQty()).toBe(baseReceived)
 
     const res = await request(app)
       .patch(`/goods-receipt/status/${gr.id}`)
@@ -136,9 +139,10 @@ describe('F-STOCK-1 GR lifecycle exactly-once', () => {
       .send({ status: 'completed' })
     expect(res.status).toBe(200)
 
-    // Exactly the create-time effect — not doubled.
-    expect(await productStock()).toBe(10)
-    expect(await receivedQty()).toBe(10)
+    // Exactly one completion effect — not zero, not doubled.
+    // (Later tests capture their own baselines; shared fixtures accrue.)
+    expect(await productStock()).toBe(baseStock + 10)
+    expect(await receivedQty()).toBe(baseReceived + 10)
   })
 
   test('draft→cancelled reverses stock and receivedQuantity to baseline', async () => {
@@ -182,8 +186,9 @@ describe('F-STOCK-1 GR lifecycle exactly-once', () => {
         .send({ status: 'completed' })
     ])
     // One winner completes; the loser sees the terminal state.
+    // The winner posts the draft's effect exactly once.
     expect([r1.status, r2.status].sort()).toEqual([200, 400])
-    expect(await productStock()).toBe(before)
+    expect(await productStock()).toBe(before + 10)
   })
 
   test('failed update rolls back stock completely', async () => {
