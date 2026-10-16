@@ -2295,10 +2295,14 @@ const resolvePaidSettlement = async ({
   // refusal writes nothing.
   const reference = typeof referenceNumber === 'string' ? referenceNumber.trim() : ''
   if (requiresTenderReference(method) && reference === '') {
+    // DR-23 §D: OTHER carries a description of how it was paid, not an
+    // external transaction reference — say so instead of asking for one.
     throw financialError(
       422,
       'REFERENCE_REQUIRED',
-      `referenceNumber is required for ${method} settlement`
+      method === 'OTHER'
+        ? 'A description of how this payment was made is required for an OTHER payment'
+        : `A transaction reference is required for a ${method} payment`
     )
   }
 
