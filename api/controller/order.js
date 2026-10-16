@@ -39,6 +39,7 @@ const {
 } = require('../service/orderFinancials')
 const { normalizePaymentMethod, requiresTenderReference } = require('../service/canonicalPayment')
 const { assertSettlementReferenceUnused } = require('../service/settlementReference')
+const { expireStaleQrOrders } = require('../service/qrOrderExpiry')
 const {
   counterOrderMismatches,
   customerOrderMismatches,
@@ -699,9 +700,28 @@ const calculateOrderTotals = (
 // be read and changed independently. All still module-private — only
 // exports.createOrder below calls them.
 
+// BA gap 019 (DR-09): a table held only by a stale unpaid QR order is freed
+// before it is judged occupied. A no-op unless QR_PENDING_EXPIRY_MINUTES
+// is configured.
+// Fail-safe: an expiry failure is logged and the table is judged as it
+// stands, exactly as before this rule existed — ordering never breaks.
+const releaseTableFromStaleQrOrder = async (table, store) => {
+  if (!table || table.status !== 'occupied') return table
+  try {
+    const expired = await expireStaleQrOrders({ store, tableId: table.id })
+    return expired.length ? Table.findOne({ where: { id: table.id, store } }) : table
+  } catch (error) {
+    console.error('QR order expiry failed; table left as is:', error)
+    return table
+  }
+}
+
 const checkTableAvailable = async (tableId, store) => {
   if (!tableId) return { ok: true }
-  const table = await Table.findOne({ where: { id: tableId, store } })
+  const table = await releaseTableFromStaleQrOrder(
+    await Table.findOne({ where: { id: tableId, store } }),
+    store
+  )
   if (table && ['occupied', 'reserved', 'maintenance'].includes(table.status)) {
     return {
       ok: false,
@@ -4152,13 +4172,15 @@ exports.createCustomerOrder = async (req, res) => {
       Date.now().toString().slice(-8) +
       Math.random().toString(36).slice(2, 6).toUpperCase()
 
+    // BA gap 019 (DR-09): a stale unpaid QR order no longer holds the table.
+    const currentTable = await releaseTableFromStaleQrOrder(table, store)
     if (
-      table &&
-      ['occupied', 'reserved', 'maintenance'].includes(table.status)
+      currentTable &&
+      ['occupied', 'reserved', 'maintenance'].includes(currentTable.status)
     ) {
       return res.status(400).json({
         message:
-          table.status === 'occupied'
+          currentTable.status === 'occupied'
             ? 'Table is already occupied'
             : 'Table is not available'
       })
