@@ -122,6 +122,13 @@ exports.getAllLocationInTable = async (req, res) => {
     const offset = (page - 1) * limit
 
     let whereClause = {}
+    // Non-super_admin callers are pinned to their own store: the list (and
+    // its stats below) must never expose another store's rows. validateStoreAccess
+    // already rejected store-less non-super_admin callers, so req.user.store
+    // is a real store id here.
+    if (userRole !== 'super_admin') {
+      whereClause.id = req.user.store
+    }
     if (status === 'active' || status === 'true') {
       whereClause.status = 'active'
     } else if (status === 'inactive' || status === 'false') {
@@ -149,9 +156,9 @@ exports.getAllLocationInTable = async (req, res) => {
     const [total, activeCount, inactiveCount, draftCount, citiesResult] =
       await Promise.all([
         Location.count({ where: whereClause }),
-        Location.count({ where: { status: 'active' } }),
-        Location.count({ where: { status: 'inactive' } }),
-        Location.count({ where: { status: 'draft' } }),
+        Location.count({ where: { ...whereClause, status: 'active' } }),
+        Location.count({ where: { ...whereClause, status: 'inactive' } }),
+        Location.count({ where: { ...whereClause, status: 'draft' } }),
         Location.findAll({
           where: whereClause,
           attributes: [

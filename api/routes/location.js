@@ -39,12 +39,13 @@ const upload = multer({
 // Public - Get all active locations (for registration dropdown) - NO auth required
 router.get('/get-location-public', locationController.getAllLocationPublic)
 
-// Get all locations in table - Super Admin only
+// Get all locations in table - Super Admin sees all; admin sees own store
+// only (controller scopes non-super_admin by req.user.store).
 router.get(
   '/get-location-all',
   authorization,
   validateStoreAccess,
-  requireRole('super_admin'),
+  requireRole('super_admin', 'admin'),
   locationController.getAllLocationInTable
 )
 
