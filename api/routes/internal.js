@@ -3,6 +3,8 @@ const crypto = require('crypto')
 const express = require('express')
 const db = require('../../db/models')
 const { tryAcquireSchedulerLock } = require('../../utils/schedulerLock')
+const { expireStaleQrOrders, qrPendingExpiryMinutes } = require('../service/qrOrderExpiry')
+const { ACTOR_TYPES } = require('../../utils/auditLog')
 const {
   drainAccountingOutbox,
   getAccountingOutboxHealth
@@ -70,6 +72,29 @@ router.get('/accounting-outbox/drain', requireCronSecret, async (req, res) => {
   } catch (error) {
     console.error('Accounting outbox drain failed:', error)
     return res.status(500).json({ code: 'INTERNAL_ERROR', message: 'Drain failed' })
+  }
+})
+
+// BA gap 019 (DR-09): sweep unpaid pending QR orders older than
+// QR_PENDING_EXPIRY_MINUTES (no-op while unset). Schedule it with the
+// same CRON_SECRET as the outbox drain.
+router.get('/qr-orders/expire', requireCronSecret, async (req, res) => {
+  try {
+    const minutes = qrPendingExpiryMinutes()
+    if (!minutes) {
+      return res.status(200).json({ success: true, enabled: false, expired: 0 })
+    }
+    const expired = await expireStaleQrOrders({ actorType: ACTOR_TYPES.JOB })
+    return res.status(200).json({
+      success: true,
+      enabled: true,
+      expiryMinutes: minutes,
+      expired: expired.length,
+      orders: expired.map((o) => o.id)
+    })
+  } catch (error) {
+    console.error('QR order expiry sweep failed:', error)
+    return res.status(500).json({ success: false, code: 'QR_EXPIRY_FAILED' })
   }
 })
 
