@@ -864,6 +864,15 @@ const resolveOrderDiscount = async ({
 const isAdminRoleForOrder = (user) =>
   user && (user.roleType === 'admin' || user.roleType === 'super_admin')
 
+// P1-7: menu visibility (status active) is not enough — checkout must
+// refuse products that are inactive or flagged unavailable (master or
+// daily switch). Null/legacy values stay orderable (fail-open on missing
+// data); only an explicit off-switch refuses.
+const isProductSellable = (prod) =>
+  prod.status === 'active' &&
+  prod.isAvailable !== false &&
+  prod.isAvailableHariIni !== false
+
 // Re-derives every item's price from the DB (never trusts client-sent
 // amounts), loads + validates any referenced bundles, and checks stock for
 // every line — bundle components and regular items alike, in one pass
@@ -967,6 +976,15 @@ const loadAndPriceOrderItems = async (items, store, user = null) => {
             message: `Bundle not available: ${item.bundleName || item.bundleId}`
           }
         }
+        // P1-7: an inactive/unavailable component makes the whole bundle
+        // unavailable.
+        if (!isProductSellable(prod)) {
+          return {
+            ok: false,
+            code: 'BUNDLE_NOT_AVAILABLE',
+            message: `Bundle "${bundle.name}" tidak tersedia: produk "${prod.nameProduct}" sedang tidak tersedia`
+          }
+        }
         // F7: a make_to_order component's own stock is not authoritative —
         // its recipe ingredients are checked (and refused with
         // INGREDIENT_STOCK_CONFLICT) inside the sale transaction. Same rule
@@ -1005,6 +1023,15 @@ const loadAndPriceOrderItems = async (items, store, user = null) => {
         ok: false,
         code: 'PRODUCT_NOT_FOUND',
         message: `Product not found: ${item.productName || item.product || item.productId}`
+      }
+    }
+    // P1-7: inactive or unavailable products are refused with an explicit
+    // message (unlike foreign products, which stay indistinguishable).
+    if (!isProductSellable(prod)) {
+      return {
+        ok: false,
+        code: 'PRODUCT_NOT_AVAILABLE',
+        message: `Produk "${prod.nameProduct || item.productName || item.product || item.productId}" sedang tidak tersedia`
       }
     }
     productById.set(prod.id, prod)
@@ -4291,6 +4318,13 @@ exports.createCustomerOrder = async (req, res) => {
             message: `Product not found: ${item.productName || item.productId}`
           })
         }
+        // P1-7: inactive or unavailable products are refused explicitly.
+        if (!isProductSellable(prod)) {
+          return res.status(400).json({
+            code: 'PRODUCT_NOT_AVAILABLE',
+            message: `Produk "${prod.nameProduct || item.productName || item.productId}" sedang tidak tersedia`
+          })
+        }
         // W3-1 (DR-11): same outlet-resolved catalog price as the counter
         // path; override stays prohibited here.
         const catalogPrice = await resolveCatalogBase(prod, store)
@@ -4333,6 +4367,14 @@ exports.createCustomerOrder = async (req, res) => {
           if (!(await isProductOrderableAtStore(prod.id, store))) {
             return res.status(400).json({
               message: `Bundle not available: ${item.bundleName || item.bundleId}`
+            })
+          }
+          // P1-7: an inactive/unavailable component makes the whole bundle
+          // unavailable.
+          if (!isProductSellable(prod)) {
+            return res.status(400).json({
+              code: 'PRODUCT_NOT_AVAILABLE',
+              message: `Bundle "${bundle.name}" tidak tersedia: produk "${prod.nameProduct}" sedang tidak tersedia`
             })
           }
           // F7: a make_to_order product's finished-good stock is not
