@@ -99,9 +99,10 @@ beforeAll(async () => {
     isAvailable: true
   })
   await db.product_store_stock.create({ product: product.id, store: store.id, stock: 1000 })
-  // Per-store stock passes the pre-transaction check; the global stock read
-  // under the row lock inside the transaction does not — so the failure
-  // happens AFTER the table claim, proving the claim rolls back.
+  // Per-store stock passes the pre-transaction check; the test below makes
+  // the locked in-transaction read of the outlet row see 1 (as if another
+  // sale took the stock in between) — so the failure happens AFTER the
+  // table claim, proving the claim rolls back.
   lowStockProduct = await db.product.create({
     nameProduct: `POS_OCC_LOW_${SUFFIX}`,
     category: category.id,
@@ -242,7 +243,22 @@ describe('POS occupancy — claim', () => {
 
   test('a failure after the claim (stock, inside the transaction) rolls the table back to available', async () => {
     const table = await mkTable()
-    const res = await posOrder(table.id, { productId: lowStockProduct.id, quantity: 5 })
+    // DR-14: the in-transaction re-check reads the locked outlet row. Make
+    // that locked read observe 1 unit left, as a concurrent sale would.
+    const realFindOne = db.product_store_stock.findOne.bind(db.product_store_stock)
+    const spy = jest
+      .spyOn(db.product_store_stock, 'findOne')
+      .mockImplementation(async (opts) => {
+        const row = await realFindOne(opts)
+        if (opts?.lock && row && Number(row.product) === lowStockProduct.id) row.stock = 1
+        return row
+      })
+    let res
+    try {
+      res = await posOrder(table.id, { productId: lowStockProduct.id, quantity: 5 })
+    } finally {
+      spy.mockRestore()
+    }
     expect(res.status).toBe(400)
     // "Tersedia: 1" is the locked in-transaction stock read, not the
     // per-store pre-check (100) — i.e. the claim had already happened.

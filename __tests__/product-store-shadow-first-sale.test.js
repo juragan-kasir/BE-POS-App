@@ -35,7 +35,10 @@ beforeAll(async () => {
     { id: 9404, userName: 'pss_admin', roleType: 'admin', store: store.id },
     JWT_SECRET
   )
-  await db.cashRegister.destroy({ where: { store: store.id, status: 'open' }, force: true })
+  await db.cashRegister.destroy({
+    where: { store: store.id, status: 'open' },
+    force: true
+  })
   await db.cashRegister.create({
     store: store.id,
     user: 9404,
@@ -64,7 +67,10 @@ afterAll(async () => {
   // test database, and an unscoped destroy can delete another suite's
   // ledger rows mid-flight.
   if (orderIds.length) {
-    await db.stock_history.destroy({ where: { referenceId: orderIds }, force: true })
+    await db.stock_history.destroy({
+      where: { referenceId: orderIds },
+      force: true
+    })
     await db.order_item.destroy({ where: { order: orderIds }, force: true })
     await db.transaction.destroy({ where: { order: orderIds }, force: true })
     await db.order_status.destroy({ where: { order: orderIds }, force: true })
@@ -72,7 +78,10 @@ afterAll(async () => {
   await db.order.destroy({ where: { store: store.id }, force: true })
   await db.cashRegister.destroy({ where: { store: store.id }, force: true })
   await db.user.destroy({ where: { id: [9404] }, force: true })
-  await db.product_store_stock.destroy({ where: { store: store.id }, force: true })
+  await db.product_store_stock.destroy({
+    where: { store: store.id },
+    force: true
+  })
   await db.best_selling.destroy({ where: { store: store.id }, force: true })
   await db.product.destroy({ where: { category: category.id }, force: true })
   await db.category.destroy({ where: { id: category.id }, force: true })
@@ -80,7 +89,10 @@ afterAll(async () => {
 })
 
 describe('product_store_stock first-sale seeding', () => {
-  test('first sale at a store without a shadow row mirrors the global stock', async () => {
+  // BA gap 027 (DR-14): per-outlet stock is authoritative. The global
+  // product.stock is never an availability fallback and never seeds an
+  // outlet row; it only follows outlet movements as a derived total.
+  test('a sale at an outlet without a stock row is refused and seeds nothing', async () => {
     const product = await db.product.create({
       nameProduct: nextTag(),
       category: category.id,
@@ -88,8 +100,6 @@ describe('product_store_stock first-sale seeding', () => {
       stock: 100,
       inventoryMode: 'stocked'
     })
-    // Precondition: no per-store shadow row exists yet (e.g. product
-    // assigned to this store after creation).
     const before = await db.product_store_stock.findOne({
       where: { product: product.id, store: store.id }
     })
@@ -102,17 +112,63 @@ describe('product_store_stock first-sale seeding', () => {
         store: store.id,
         items: [{ product: product.id, quantity: 5 }],
         paymentMethod: 'cash',
-        cashierName: 'PSS Test'
+        cashierName: 'PSS Test',
+        idempotencyKey: nextTag()
       })
-    expect(res.status).toBe(201)
+    expect(res.status).toBe(400)
+    expect(res.body.code).toBe('INSUFFICIENT_STOCK')
 
-    const afterProduct = await db.product.findByPk(product.id)
-    expect(Number(afterProduct.stock)).toBe(95)
+    expect(Number((await db.product.findByPk(product.id)).stock)).toBe(100)
     const shadow = await db.product_store_stock.findOne({
       where: { product: product.id, store: store.id }
     })
-    expect(shadow).not.toBeNull()
-    // The shadow must track the same deduction, not stay clamped at 0.
-    expect(Number(shadow.stock)).toBe(95)
+    expect(shadow).toBeNull()
+  })
+
+  test('a sale deducts the outlet row; the global total follows it', async () => {
+    const product = await db.product.create({
+      nameProduct: nextTag(),
+      category: category.id,
+      price: 20000,
+      stock: 100,
+      inventoryMode: 'stocked'
+    })
+    await db.product_store_stock.create({
+      product: product.id,
+      store: store.id,
+      stock: 8
+    })
+
+    const res = await request(app)
+      .post('/order/create')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        store: store.id,
+        items: [{ product: product.id, quantity: 5 }],
+        paymentMethod: 'cash',
+        cashierName: 'PSS Test',
+        idempotencyKey: nextTag()
+      })
+    expect(res.status).toBe(201)
+    const outlet = await db.product_store_stock.findOne({
+      where: { product: product.id, store: store.id }
+    })
+    expect(Number(outlet.stock)).toBe(3)
+    expect(Number((await db.product.findByPk(product.id)).stock)).toBe(95)
+
+    // More than the outlet holds is refused even though the global total
+    // would cover it.
+    const over = await request(app)
+      .post('/order/create')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        store: store.id,
+        items: [{ product: product.id, quantity: 4 }],
+        paymentMethod: 'cash',
+        cashierName: 'PSS Test',
+        idempotencyKey: nextTag()
+      })
+    expect(over.status).toBe(400)
+    expect(over.body.code).toBe('INSUFFICIENT_STOCK')
   })
 })
