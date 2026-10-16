@@ -39,7 +39,9 @@ const post = (p, b, t) => req('POST', p, b, t)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 async function run() {
-  const pass = process.argv[3] || 'admin123'
+  // DR-06: never a committed password — pass it as an argument or env.
+  const pass = process.argv[3] || process.env.SIMULATE_PASSWORD
+  if (!pass) throw new Error('Pass the password as the 2nd argument or set SIMULATE_PASSWORD')
 
   for (const { label, user, pw, sid } of [
     { label: 'LAWSON', user: 'admin_lawson', pw: pass, sid: 1 },

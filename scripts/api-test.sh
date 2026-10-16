@@ -11,7 +11,7 @@ ERRORS=""
 echo "=== LOGIN ==="
 LOGIN_RESP=$(curl -s -X POST "$BASE_URL/auth/login" \
   -H "Content-Type: application/json" \
-  -d '{"userName":"super_admin","password":"superadmin123"}')
+  -d "{\"userName\":\"${SA_USER:-super_admin}\",\"password\":\"${SA_PASS:?set SA_PASS}\"}")
 TOKEN=$(echo "$LOGIN_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('token',''))" 2>/dev/null)
 
 if [ -z "$TOKEN" ]; then

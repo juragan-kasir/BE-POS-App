@@ -2,6 +2,7 @@ require('dotenv').config({
   path: require('path').join(__dirname, '..', '.env')
 })
 const path = require('path')
+const { requireEnv } = require('../utils/seedCredential')
 const http = require('http')
 const db = require(path.join(__dirname, '..', 'db', 'models'))
 
@@ -44,8 +45,9 @@ function api(method, path, body) {
 async function main() {
   // 1. Login
   const login = await api('POST', '/auth/login', {
-    userName: 'dev',
-    password: 'dev123'
+    userName: process.env.E2E_USER || 'dev',
+    // DR-06: never a committed password.
+    password: requireEnv('E2E_PASSWORD')
   })
   if (login.status !== 200)
     throw new Error('Login failed: ' + JSON.stringify(login.data))

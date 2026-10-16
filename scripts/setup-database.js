@@ -1,5 +1,6 @@
 //!/usr/bin/env node
 require('dotenv').config({ path: __dirname + '/.env' })
+const { requireSeedPassword, requireEnv } = require('../utils/seedCredential')
 const bcrypt = require('bcrypt')
 
 async function main() {
@@ -8,7 +9,7 @@ async function main() {
     user: process.env.DB_DEV_USERNAME || 'postgres',
     host: process.env.DB_DEV_HOST || 'localhost',
     database: process.env.DB_DEV_DATABASE || 'cashier_app',
-    password: process.env.DB_DEV_PASSWORD || 'teddyferdian98',
+    password: requireEnv('DB_DEV_PASSWORD'),
     port: process.env.DB_DEV_PORT || 5432
   })
 
@@ -38,7 +39,7 @@ async function main() {
 
     // Create super admin user
     console.log('🏷️  Creating Super Admin user...')
-    const hashedPassword = await bcrypt.hash('superadmin123', 10)
+    const hashedPassword = await bcrypt.hash(requireSeedPassword('SEED_SUPER_ADMIN_PASSWORD'), 10)
 
     // Get the roleId for super_admin
     const roleResult = await client.query(

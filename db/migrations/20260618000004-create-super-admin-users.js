@@ -1,5 +1,6 @@
 'use strict'
 const bcrypt = require('bcrypt')
+const { seedPassword, describeSeedPassword } = require('../../utils/seedCredential')
 
 module.exports = {
   up: async (queryInterface, Sequelize) => {
@@ -14,7 +15,9 @@ module.exports = {
     }
 
     const superAdminRoleId = roles[0].id
-    const hashedPassword = await bcrypt.hash('admin123', 10)
+    // DR-06: never a known password (SEED_SUPER_ADMIN_PASSWORD or random).
+    const seed = seedPassword('SEED_SUPER_ADMIN_PASSWORD')
+    const hashedPassword = await bcrypt.hash(seed.password, 10)
 
     const users = [
       {
@@ -69,10 +72,8 @@ module.exports = {
     }
 
     console.log('')
-    console.log('Super Admin users created/verified:')
-    console.log('  fabiola.rosa / admin123')
-    console.log('  surya / admin123')
-    console.log('  angga / admin123')
+    console.log(`Super Admin users created/verified (${describeSeedPassword(seed)}):`)
+    console.log('  fabiola.rosa, surya, angga')
   },
 
   down: async (queryInterface, Sequelize) => {
