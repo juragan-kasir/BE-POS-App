@@ -23,6 +23,8 @@ beforeAll(async () => {
     price: 10000,
     stock: 20
   })
+  // DR-14: the outlet row is the authoritative stock.
+  await db.product_store_stock.create({ product: product.id, store: location.id, stock: 20 })
   // P1-4: central gate denies unknown caller identities; these rows
   // satisfy the identity invariant. Assertions below are unchanged.
   await db.user.create({
