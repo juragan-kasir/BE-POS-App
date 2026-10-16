@@ -1,6 +1,7 @@
 'use strict'
 
 const bcrypt = require('bcrypt')
+const { seedPassword } = require('../../utils/seedCredential')
 
 module.exports = {
   async up(queryInterface, Sequelize) {
@@ -30,7 +31,8 @@ module.exports = {
 
     // Admin user (full access to store operations)
     if (!existingUsernames.includes('admin')) {
-      const hashedPassword = await bcrypt.hash('admin123', 10)
+      // DR-06: never a known password (SEED_ADMIN_PASSWORD or random).
+      const hashedPassword = await bcrypt.hash(seedPassword('SEED_ADMIN_PASSWORD').password, 10)
       users.push({
         userName: 'admin',
         fullName: 'Admin',
@@ -47,7 +49,8 @@ module.exports = {
 
     // Kasir Utama (kasir role - can access cashier, products, members)
     if (!existingUsernames.includes('kasir_utama')) {
-      const hashedPassword = await bcrypt.hash('kasir123', 10)
+      // DR-06: never a known password (SEED_KASIR_PASSWORD or random).
+      const hashedPassword = await bcrypt.hash(seedPassword('SEED_KASIR_PASSWORD').password, 10)
       users.push({
         userName: 'kasir_utama',
         fullName: 'Kasir Utama',
@@ -64,7 +67,8 @@ module.exports = {
 
     // Staff Gudang (limited user role - inventory & reports only)
     if (!existingUsernames.includes('staff_gudang')) {
-      const hashedPassword = await bcrypt.hash('staff123', 10)
+      // DR-06: never a known password (SEED_STAFF_PASSWORD or random).
+      const hashedPassword = await bcrypt.hash(seedPassword('SEED_STAFF_PASSWORD').password, 10)
       users.push({
         userName: 'staff_gudang',
         fullName: 'Staff Gudang',
@@ -83,9 +87,8 @@ module.exports = {
       await queryInterface.bulkInsert('user', users)
       console.log(`Created ${users.length} user accounts`)
       users.forEach((u) => {
-        console.log(
-          `Username: ${u.userName}, Password: ${u.roleType === 'admin' ? 'admin123' : u.userName === 'kasir_utama' ? 'kasir123' : 'staff123'}`
-        )
+        // Passwords are never logged (DR-06).
+        console.log(`Username: ${u.userName}`)
       })
     } else {
       await queryInterface.sequelize.query(

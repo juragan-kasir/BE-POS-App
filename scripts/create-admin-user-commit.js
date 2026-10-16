@@ -1,4 +1,5 @@
 require('dotenv').config({ path: __dirname + '/.env' })
+const { requireSeedPassword, requireEnv } = require('../utils/seedCredential')
 const bcrypt = require('bcrypt')
 
 async function setupDatabase() {
@@ -7,7 +8,7 @@ async function setupDatabase() {
     user: process.env.DB_DEV_USERNAME || 'postgres',
     host: process.env.DB_DEV_HOST || 'localhost',
     database: process.env.DB_DEV_DATABASE || 'cashier_app',
-    password: process.env.DB_DEV_PASSWORD || 'teddyferdian98',
+    password: requireEnv('DB_DEV_PASSWORD'),
     port: process.env.DB_DEV_PORT || 5432
   })
 
@@ -43,7 +44,7 @@ async function setupDatabase() {
 
     if (userResult.rows.length === 0) {
       console.log('🏷️  Creating Super Admin user...')
-      const hashedPassword = await bcrypt.hash('superadmin123', 10)
+      const hashedPassword = await bcrypt.hash(requireSeedPassword('SEED_SUPER_ADMIN_PASSWORD'), 10)
 
       // Get the roleId for super_admin
       const roleIdResult = await client.query(
@@ -73,7 +74,6 @@ async function setupDatabase() {
 
         console.log('✅ Super Admin user created successfully!')
         console.log('   Username: super_admin')
-        console.log('   Password: superadmin123')
       }
     } else {
       console.log('   ✅ Super Admin user already exists!')

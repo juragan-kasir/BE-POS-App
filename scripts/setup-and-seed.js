@@ -1,5 +1,6 @@
 //!/usr/bin/env node
 require('dotenv').config({ path: __dirname + '/.env' })
+const { requireSeedPassword, requireEnv } = require('../utils/seedCredential')
 const bcrypt = require('bcrypt')
 
 async function seedTestData() {
@@ -8,7 +9,7 @@ async function seedTestData() {
     user: process.env.DB_DEV_USERNAME || 'postgres',
     host: process.env.DB_DEV_HOST || 'localhost',
     database: process.env.DB_DEV_DATABASE || 'cashier_app',
-    password: process.env.DB_DEV_PASSWORD || 'teddyferdian98',
+    password: requireEnv('DB_DEV_PASSWORD'),
     port: process.env.DB_DEV_PORT || 5432
   })
 
@@ -134,7 +135,10 @@ async function seedTestData() {
 
     // Create super admin user
     console.log('🏷️  Creating Super Admin user...')
-    const hashedPassword = await bcrypt.hash('superadmin123', 10)
+    const hashedPassword = await bcrypt.hash(requireSeedPassword('SEED_SUPER_ADMIN_PASSWORD'), 10)
+    // DR-06: test users get a hashed password from SEED_TEST_USER_PASSWORD
+    // (they were stored as plaintext before).
+    const testUserPasswordHash = await bcrypt.hash(requireSeedPassword('SEED_TEST_USER_PASSWORD'), 10)
 
     // Get the roleId for super_admin
     const roleIdResult = await client.query(
@@ -164,7 +168,6 @@ async function seedTestData() {
 
       console.log('✅ Super Admin user created successfully!')
       console.log('   Username: super_admin')
-      console.log('   Password: superadmin123')
     }
 
     // Create the rest of the test data...
@@ -668,7 +671,7 @@ async function seedTestData() {
           `Test Employee ${i}`,
           `testuser${i}`,
           `employee${i}@test.com`,
-          'password123',
+          testUserPasswordHash,
           tier,
           `EMP${String(i).padStart(3, '0')}`,
           `+62 812345678${i}`,
@@ -711,7 +714,7 @@ async function seedTestData() {
           `Test Employee Inactive ${i}`,
           `testuserinactive${i}`,
           `employeeinactive${i}@test.com`,
-          'password456',
+          testUserPasswordHash,
           tier,
           `EMP${String(100 + i).padStart(3, '0')}`,
           `+62 823456789${i}`,
@@ -754,7 +757,7 @@ async function seedTestData() {
           `Test Employee Draft ${i}`,
           `testuserdraft${i}`,
           `employeedraft${i}@test.com`,
-          'password789',
+          testUserPasswordHash,
           tier,
           `EMP${String(200 + i).padStart(3, '0')}`,
           `+62 824567890${i}`,
@@ -815,17 +818,9 @@ async function seedTestData() {
       `   Total: ${categories.length + suppliers.length + memberTiers.length + departments.length + positions.length + shifts.length + members.length + 6} records`
     )
 
-    console.log('\n📝 Test credentials (for login):')
-    console.log(
-      '   Super Admin: userName="super_admin", password="superadmin123"'
-    )
-    console.log('   Regular User: userName="testuser1", password="password123"')
-    console.log(
-      '   Inactive User: userName="testuserinactive1", password="password456"'
-    )
-    console.log(
-      '   Draft User: userName="testuserdraft1", password="password789"'
-    )
+    // DR-06: credentials are never printed. Super admin uses
+    // SEED_SUPER_ADMIN_PASSWORD; test users use SEED_TEST_USER_PASSWORD.
+    console.log('\n📝 Test logins: super_admin, testuser1, testuserinactive1, testuserdraft1')
 
     console.log('\n🎉 Setup and test data seeding completed successfully!')
   } catch (error) {
