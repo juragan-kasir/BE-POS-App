@@ -32,8 +32,8 @@ const makeIngredient = async (store, overrides = {}) =>
     ...overrides
   })
 
-const makeProduct = async (overrides = {}) =>
-  db.product.create({
+const makeProduct = async (overrides = {}) => {
+  const product = await db.product.create({
     nameProduct: nextTag(),
     category: category.id,
     price: 20000,
@@ -41,6 +41,12 @@ const makeProduct = async (overrides = {}) =>
     inventoryMode: 'stocked',
     ...overrides
   })
+  // DR-14: the outlet row is the authoritative stock at each test store.
+  for (const s of [storeA, storeB]) {
+    await db.product_store_stock.create({ product: product.id, store: s.id, stock: product.stock })
+  }
+  return product
+}
 
 const makeBom = async (store, productId, lines, overrides = {}) => {
   const header = await db.bom_header.create({

@@ -107,6 +107,8 @@ async function makeProduct(stock = 50) {
     price: 10000,
     stock
   })
+  // DR-14: the outlet row is the authoritative stock.
+  await db.product_store_stock.create({ product: p.id, store: location.id, stock })
   createdProductIds.push(p.id)
   return p
 }

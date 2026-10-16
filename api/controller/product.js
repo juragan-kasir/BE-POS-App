@@ -61,10 +61,7 @@ const uploadProductFiles = async (req) => {
   let primaryUrl = null
   if (legacyFile && multiFiles.length === 0) {
     try {
-      primaryUrl = await uploadToCloudinary(
-        legacyFile.path,
-        'pos-app-products'
-      )
+      primaryUrl = await uploadToCloudinary(legacyFile.path, 'pos-app-products')
     } catch (err) {
       console.warn(
         'Image upload skipped (Cloudinary not configured):',
@@ -147,7 +144,11 @@ const syncProductStores = async (productId, storeIds, transaction) => {
 // migration-state store with an owned one, or reference a store that does not
 // exist, BEFORE any row is written so the caller gets a deterministic 400
 // instead of a hook-thrown 500.
-const assertProductStoresAssignable = async (productId, storeIds, transaction) => {
+const assertProductStoresAssignable = async (
+  productId,
+  storeIds,
+  transaction
+) => {
   if (!(await hasProductStoreTable())) return null
   if (!storeIds.length) return null
   const result = await db.product_store.assertTenantConsistentAssignment({
@@ -196,7 +197,10 @@ const findProductInScope = async (req, id, options = {}) => {
     where: {
       ...(options.where || {}),
       id,
-      [Op.or]: [getProductStoreSubQuery(storeId), getUnassignedProductSubQuery()]
+      [Op.or]: [
+        getProductStoreSubQuery(storeId),
+        getUnassignedProductSubQuery()
+      ]
     }
   })
 }
@@ -284,7 +288,9 @@ exports.getProductByLocationSuperAdmin = async (req, res) => {
     const getAllProduct = pageRows.map((items) => {
       const getData = {
         ...items.dataValues,
-        stock: items.storeStocks?.[0]?.stock ?? items.stock,
+        // DR-14 (BA 027): an outlet view shows the outlet stock (0 without a
+        // row); only the unscoped view shows the derived global total.
+        stock: store ? (items.storeStocks?.[0]?.stock ?? 0) : items.stock,
         effectivePrice: effectivePriceById.get(String(items.id)) ?? null
       }
       delete getData.storeStocks
@@ -422,7 +428,9 @@ exports.getAllProduct = async (req, res) => {
 
     const resolvedCategories = getAllProduct.map((items) => ({
       ...items.dataValues,
-      stock: items.storeStocks?.[0]?.stock ?? items.stock,
+      // DR-14 (BA 027): an outlet view shows the outlet stock (0 without a
+      // row); only the unscoped view shows the derived global total.
+      stock: store ? (items.storeStocks?.[0]?.stock ?? 0) : items.stock,
       effectivePrice: effectivePriceById.get(String(items.id)) ?? null,
       nameCategory: items.categoryData
         ? items.categoryData.value || items.categoryData.name
@@ -552,7 +560,9 @@ exports.getAllProductInTable = async (req, res) => {
 
     const resolvedCategories = getAllProduct.map((items) => ({
       ...items.dataValues,
-      stock: items.storeStocks?.[0]?.stock ?? items.stock,
+      // DR-14 (BA 027): an outlet view shows the outlet stock (0 without a
+      // row); only the unscoped view shows the derived global total.
+      stock: store ? (items.storeStocks?.[0]?.stock ?? 0) : items.stock,
       nameCategory: items.categoryData ? items.categoryData.name : null,
       storeList: (productStoreMap[items.id] || []).map((id) => ({
         id,
@@ -997,9 +1007,7 @@ exports.editProductByLocationAndId = async (req, res) => {
     const { urls: uploadedUrls, primaryUrl } = await uploadProductFiles(req)
     const rawOrder = parseJSON(imageOrder)
     const manifestProvided =
-      imageOrder !== undefined &&
-      imageOrder !== null &&
-      imageOrder !== ''
+      imageOrder !== undefined && imageOrder !== null && imageOrder !== ''
 
     let gallery = null
     if (manifestProvided) {
@@ -1784,7 +1792,12 @@ exports.importProduct = async (req, res) => {
           let effectiveImportStoreId = storeId
           if (!isSuperAdmin(req)) {
             const callerStore = Number(req.storeId ?? req.user?.store)
-            if (storeName && !isAllStores && storeId && storeId !== callerStore) {
+            if (
+              storeName &&
+              !isAllStores &&
+              storeId &&
+              storeId !== callerStore
+            ) {
               throw new Error(
                 `Anda tidak memiliki izin untuk mengimport produk ke toko "${storeName}"`
               )
@@ -1883,7 +1896,11 @@ exports.importProduct = async (req, res) => {
 
             // Sync junction table
             if (effectiveImportStoreId) {
-              await syncProductStores(existingProduct.id, [effectiveImportStoreId], t)
+              await syncProductStores(
+                existingProduct.id,
+                [effectiveImportStoreId],
+                t
+              )
             }
 
             results.updated.push({
@@ -1902,7 +1919,11 @@ exports.importProduct = async (req, res) => {
 
             // Create junction rows
             if (effectiveImportStoreId) {
-              await syncProductStores(newProduct.id, [effectiveImportStoreId], t)
+              await syncProductStores(
+                newProduct.id,
+                [effectiveImportStoreId],
+                t
+              )
             }
 
             if (productData.stock > 0) {

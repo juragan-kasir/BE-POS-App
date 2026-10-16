@@ -231,36 +231,23 @@ const parseExpectedPrice = (value) => {
   return { present: true, valid: true, value: n }
 }
 
-// Single source of truth for the "store row wins, else base stock" rule used
-// by BOTH order validation (getEffectiveStock) and the public customer menu
-// (batched lookup in getCustomerMenu) so the two paths can never drift.
-// product_store_stock.stock is NOT NULL DEFAULT 0 — a present row is always
-// authoritative, and an explicit zero is a real zero, never "missing".
-const resolveEffectiveStock = (product, pssRow) => {
-  const base =
-    product && product.stock !== null && product.stock !== undefined
-      ? Number(product.stock)
-      : null
-  return pssRow && pssRow.stock !== null && pssRow.stock !== undefined
-    ? Number(pssRow.stock)
-    : base
-}
+// Single source of truth for outlet availability, used by BOTH order
+// validation (getEffectiveStock) and the public customer menu (batched
+// lookup in getCustomerMenu) so the two paths can never drift.
+// BA gap 027 (DR-14): per-outlet stock is authoritative and the global
+// product.stock is never an availability fallback — an outlet without a
+// product_store_stock row has no stock of that product (0).
+const resolveEffectiveStock = (_product, pssRow) =>
+  pssRow && pssRow.stock !== null && pssRow.stock !== undefined ? Number(pssRow.stock) : 0
 
-// Resolve effective stock for a product in a store. Uses the store-specific
-// stock row (product_store_stock) when present, otherwise falls back to the
-// base product stock. This matches how the cashier UI displays stock and how
-// stock is deducted on sale (both base and per-store are kept in sync).
+// Outlet stock of a product (DR-14): its product_store_stock row, or 0 when
+// the outlet has none. A read failure propagates — never a global fallback.
 const getEffectiveStock = async (product, store) => {
   if (!product || !store) return null
-  try {
-    const pss = await db.product_store_stock.findOne({
-      where: { product: product.id, store }
-    })
-    return resolveEffectiveStock(product, pss)
-  } catch {
-    // product_store_stock table may not exist; fall back to base stock
-    return resolveEffectiveStock(product, null)
-  }
+  const pss = await db.product_store_stock.findOne({
+    where: { product: product.id, store }
+  })
+  return resolveEffectiveStock(product, pss)
 }
 
 // Batched per-store effective stock for a set of products — semantically
@@ -274,16 +261,12 @@ const getEffectiveStockMap = async (products, store) => {
   const map = new Map()
   for (const [id] of productById) map.set(id, resolveEffectiveStock(productById.get(id), null))
   if (!map.size || !store) return map
-  try {
-    const rows = await db.product_store_stock.findAll({
-      where: { product: Array.from(productById.keys()), store },
-      attributes: ['product', 'stock']
-    })
-    for (const row of rows) {
-      map.set(String(row.product), resolveEffectiveStock(productById.get(String(row.product)), row))
-    }
-  } catch {
-    // product_store_stock table may not exist; every product falls back to base stock
+  const rows = await db.product_store_stock.findAll({
+    where: { product: Array.from(productById.keys()), store },
+    attributes: ['product', 'stock']
+  })
+  for (const row of rows) {
+    map.set(String(row.product), resolveEffectiveStock(productById.get(String(row.product)), row))
   }
   return map
 }
@@ -1962,43 +1945,31 @@ const deductStockForOrder = async (
       // stock exactly as before. best_selling is still recorded for every
       // mode (it's a sales-count for reporting, not a stock signal).
       if (product.inventoryMode !== 'make_to_order') {
-        const oldStock = Number(product.stock) || 0
-        // Re-validate against the value just read under the row lock, not the
-        // unlocked pre-check earlier in the request — two concurrent orders
-        // can both pass that pre-check for the last unit, then both reach
-        // here; without this, both would silently succeed (the old code
-        // clamped to 0 instead of rejecting), selling more than was in stock.
+        // BA gap 027 (DR-14): the outlet row is the authoritative stock. It
+        // is re-read under a row lock (not the unlocked pre-check earlier in
+        // the request), so two concurrent sales of the last unit cannot both
+        // pass; a missing row is 0, never seeded from the global stock.
+        const outletRow = await db.product_store_stock.findOne({
+          where: { product: product.id, store },
+          transaction: t,
+          lock: t.LOCK.UPDATE
+        })
+        const oldStock = outletRow ? Number(outletRow.stock) || 0 : 0
         if (oldStock < deductQty) {
           const err = new Error(
             `Stok "${product.nameProduct || 'produk'}" tidak mencukupi. Tersedia: ${oldStock}, diminta: ${deductQty}`
           )
           err.statusCode = 400
+          err.code = 'INSUFFICIENT_STOCK'
           throw err
         }
         const newStock = oldStock - deductQty
+        await outletRow.update({ stock: newStock }, { transaction: t })
+        // The global product.stock is only a derived total (DR-14): it
+        // follows the outlet movement and is never read for availability.
         await product.update(
           { stock: db.sequelize.literal(`GREATEST(stock - ${deductQty}, 0)`) },
           { transaction: t }
-        )
-        // Keep the in-memory row consistent so a second reference to the
-        // same product later in this loop (another line, or another
-        // component of a different bundle) sees the already-decremented
-        // stock.
-        product.stock = newStock
-
-        // Seed a missing shadow row at the just-locked product baseline
-        // (same convention as adjustProductStock) — seeding at 0 would
-        // leave the per-store stock permanently diverged from product.stock,
-        // since every later mutation only tracks deltas.
-        await db.sequelize.query(
-          `INSERT INTO product_store_stock (product, store, stock, "createdAt", "updatedAt")
-           VALUES ($1, $2, $3, NOW(), NOW())
-           ON CONFLICT (product, store) DO NOTHING`,
-          { bind: [product.id, store, oldStock], transaction: t }
-        )
-        await db.product_store_stock.update(
-          { stock: db.sequelize.literal(`GREATEST(stock - ${deductQty}, 0)`) },
-          { where: { product: product.id, store }, transaction: t }
         )
 
         // ponytail: FIFO - consume oldest batches first
