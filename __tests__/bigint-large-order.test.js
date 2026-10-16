@@ -2,6 +2,7 @@ process.env.NODE_ENV = 'test'
 process.env.VERCEL = 'true'
 
 const request = require('supertest')
+const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
@@ -72,12 +73,12 @@ describe('INFO-02 BIGINT large order', () => {
     const res = await request(app)
       .post('/order/create')
       .set('Authorization', `Bearer ${cashierToken}`)
-      .send({
+      .send(withIdempotencyKey({
         store: location.id,
         items: [{ product: product.id, quantity: 3000 }],
         paymentMethod: 'cash',
         cashierName: 'BigInt Cashier'
-      })
+      }))
     expect(res.status).toBe(201)
     expect(res.body.data.subTotal).toBe(3000000000)
     expect(res.body.data.totalPrice).toBe(3000000000 + res.body.data.taxAmount)
@@ -93,12 +94,12 @@ describe('INFO-02 BIGINT large order', () => {
     const res = await request(app)
       .post('/order/create')
       .set('Authorization', `Bearer ${cashierToken}`)
-      .send({
+      .send(withIdempotencyKey({
         store: location.id,
         items: [{ product: product.id, quantity: 2148 }],
         paymentMethod: 'cash',
         cashierName: 'BigInt Cashier'
-      })
+      }))
     // 1M * 2148 = 2148000000 > 2^31-1
     expect(res.status).toBe(201)
     expect(Number(res.body.data.subTotal)).toBe(2148000000)

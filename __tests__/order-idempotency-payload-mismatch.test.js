@@ -2,6 +2,7 @@ process.env.NODE_ENV = 'test'
 process.env.VERCEL = 'true'
 
 const request = require('supertest')
+const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
@@ -170,7 +171,7 @@ async function postOrder(body) {
   return request(app)
     .post('/order/create')
     .set('Authorization', `Bearer ${token}`)
-    .send(body)
+    .send(withIdempotencyKey(body))
 }
 
 describe('F-IDEM-1 order idempotency payload mismatch', () => {
@@ -441,7 +442,7 @@ describe('DR-23 §K — same key compares the full order intent', () => {
     const other = await request(app)
       .post('/order/create')
       .set('Authorization', `Bearer ${token2}`)
-      .send({ ...counter(key), store: store2.id })
+      .send(withIdempotencyKey({ ...counter(key), store: store2.id }))
     expect(other.status).toBe(201)
     expect(other.body.data.id).not.toBe(first.body.data.id)
     expect(Number(other.body.data.store)).toBe(Number(store2.id))
@@ -688,7 +689,7 @@ describe('DR-23 §K — replay after legitimate post-create changes', () => {
 
   test('tax: a PPN rate edited after creation does not refuse an identical retry; an unchanged rate proves a waived-tax retry', async () => {
     const post3 = (body) =>
-      request(app).post('/order/create').set('Authorization', `Bearer ${token3}`).send(body)
+      request(app).post('/order/create').set('Authorization', `Bearer ${token3}`).send(withIdempotencyKey(body))
     const sale3 = (key, extra = {}) => ({ ...counter(key), store: store3.id, ...extra })
 
     // Created at 0 % with useTax=true; the store's rate is then edited to 11 %.

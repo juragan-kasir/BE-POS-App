@@ -1417,6 +1417,16 @@ exports.createOrder = async (req, res) => {
     expectedTotal
   } = req.body
 
+  // BA gap 005 (DR-23 §K): a counter sale is money-producing, so it needs
+  // an idempotency key — a retry can then never create a second sale.
+  // Refused before any lookup or write.
+  if (typeof idempotencyKey !== 'string' || idempotencyKey.trim() === '') {
+    return res.status(422).json({
+      error: 'An idempotencyKey is required for a counter sale',
+      code: 'IDEMPOTENCY_KEY_REQUIRED'
+    })
+  }
+
   try {
     // A retried/duplicate submit with the same key (e.g. a POS terminal
     // retrying after a network timeout, or a double-tap on "Pay") returns
