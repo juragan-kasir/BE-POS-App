@@ -1396,7 +1396,15 @@ exports.createGoodsReceiptSchema = z.object({
     .default('completed')
 })
 
-exports.updateGoodsReceiptSchema = exports.createGoodsReceiptSchema.partial()
+exports.updateGoodsReceiptSchema = exports.createGoodsReceiptSchema.partial().extend({
+  // F22-B9-01 (same trap as updateExpenseSchema): .partial() alone keeps
+  // the base schema's `.default('completed')` on `status`, so an update
+  // body without `status` had 'completed' silently injected — every
+  // items/metadata edit on a draft completed it as a side effect (and,
+  // post-P1-5, posted its stock). A plain optional enum leaves an omitted
+  // field undefined so the controller preserves the current status.
+  status: z.enum(['draft', 'completed', 'cancelled']).optional()
+})
 
 // ===================== Production Order =====================
 exports.createProductionOrderSchema = z.object({

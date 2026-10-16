@@ -333,6 +333,11 @@ module.exports = async () => {
     ['cash_register', 'refundCount', 'INTEGER'],
     ['cash_register', 'totalTransactions', 'INTEGER'],
     ['cash_register', 'closeSnapshot', 'JSONB'],
+    // P1-5 (migration 20261016210748): goods_receipt.stockPosted posting
+    // flag. Same precedent as above: provision idempotently here so fresh
+    // CI clones converge, no-op when the migration already ran.
+    // TRUE default = pre-existing rows posted at create (old behavior).
+    ['goods_receipt', 'stockPosted', 'BOOLEAN NOT NULL DEFAULT TRUE'],
   ]
 
   // Phase 34: stock_opname_item's quantity columns are migration-owned

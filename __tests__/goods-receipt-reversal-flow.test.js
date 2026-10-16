@@ -43,7 +43,6 @@ beforeAll(async () => {
 })
 
 afterAll(async () => {
-  await db.user.destroy({ where: { id: [7601] }, force: true })
   await db.product_batch_stock.destroy({ where: {}, force: true })
   await db.product_batch.destroy({ where: { product: product?.id }, force: true })
   await db.stock_history.destroy({ where: { product: product?.id }, force: true })
@@ -54,11 +53,13 @@ afterAll(async () => {
   await db.purchase_order.destroy({ where: { store: location.id }, force: true })
   await db.product.destroy({ where: { id: product?.id }, force: true })
   await db.category.destroy({ where: { id: category?.id }, force: true })
+  // Users last: purchase orders reference the creator (FK).
+  await db.user.destroy({ where: { id: [7601] }, force: true })
   await db.location.destroy({ where: { id: location?.id }, force: true })
 })
 
-describe('Goods receipt edit — reverseStock uses the shared, locked, atomic-delta helper', () => {
-  test('editing a draft receipt down to a smaller quantity reverses then reapplies correctly (net delta, not additive or lost)', async () => {
+describe('Goods receipt edit — drafts post nothing until completed', () => {
+  test('creating then editing a draft moves no stock; completing posts the final lines once', async () => {
     const poRes = await request(app)
       .post('/purchase-order/create')
       .set('Authorization', `Bearer ${adminToken}`)
@@ -90,12 +91,12 @@ describe('Goods receipt edit — reverseStock uses the shared, locked, atomic-de
       })
     expect(grRes.status).toBe(201)
 
+    // P1-5: a draft posts nothing at create.
     const afterCreate = await db.product.findByPk(product.id)
-    expect(Number(afterCreate.stock)).toBe(Number(beforeStock.stock) + 10)
+    expect(Number(afterCreate.stock)).toBe(Number(beforeStock.stock))
 
-    // Edit down to 6 — reverseStock(-10) then applyStock(+6) net effect
-    // must be +6 total from the original baseline, not +16 (additive bug)
-    // and not the original baseline unchanged (lost-update bug).
+    // Editing the draft down to 6 replaces rows with no stock movement
+    // (nothing was posted, so there is nothing to reverse).
     const updateRes = await request(app)
       .put(`/goods-receipt/update/${grRes.body.data.id}`)
       .set('Authorization', `Bearer ${adminToken}`)
@@ -112,17 +113,26 @@ describe('Goods receipt edit — reverseStock uses the shared, locked, atomic-de
     expect(updateRes.status).toBe(200)
 
     const afterUpdate = await db.product.findByPk(product.id)
-    expect(Number(afterUpdate.stock)).toBe(Number(beforeStock.stock) + 6)
+    expect(Number(afterUpdate.stock)).toBe(Number(beforeStock.stock))
 
-    // The reversal's audit entry must reflect the LOCKED value it actually
-    // reversed from, not a stale pre-transaction read.
+    // Completing posts the final lines exactly once.
+    const completeRes = await request(app)
+      .patch(`/goods-receipt/status/${grRes.body.data.id}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ status: 'completed', store: location.id })
+    expect(completeRes.status).toBe(200)
+
+    const afterComplete = await db.product.findByPk(product.id)
+    expect(Number(afterComplete.stock)).toBe(Number(beforeStock.stock) + 6)
+
+    // The only stock movement is the completion's purchase row.
     const history = await db.stock_history.findAll({
-      where: { product: product.id, referenceType: 'adjustment' },
+      where: { product: product.id, referenceType: 'purchase' },
       order: [['id', 'ASC']]
     })
     expect(history.length).toBe(1)
-    expect(Number(history[0].quantityBefore)).toBe(Number(beforeStock.stock) + 10)
-    expect(Number(history[0].quantityChange)).toBe(-10)
-    expect(Number(history[0].quantityAfter)).toBe(Number(beforeStock.stock))
+    expect(Number(history[0].quantityBefore)).toBe(Number(beforeStock.stock))
+    expect(Number(history[0].quantityChange)).toBe(6)
+    expect(Number(history[0].quantityAfter)).toBe(Number(beforeStock.stock) + 6)
   })
 })
