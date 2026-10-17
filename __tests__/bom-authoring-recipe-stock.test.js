@@ -329,3 +329,65 @@ describe('client requirement — bakso stock per type, deducted by each menu rec
     expect(await stockOf(halus)).toBe(7)
   })
 })
+
+// BA finding #4 (Waroeng Bakso dummy, 2026-10-17): HPP is priced per BASE
+// unit. Bakso halus is bought at Rp25.000 per kg and 1 kg = 25 butir, so one
+// butir costs Rp1.000; mie kuning is Rp18.000 per kg and 1 kg = 10 porsi.
+// 5 butir + 1 porsi = Rp6.800, not Rp143.000 (5 × 25.000 + 18.000).
+describe('HPP per porsi uses the cost of one base unit', () => {
+  const draftBom = async () => {
+    const ing = await makeIngredient(storeA.id)
+    const product = await makeProduct()
+    const res = await http('post', '/bom/add', adminToken).send({
+      productId: product.id,
+      status: 'draft',
+      lines: [{ ingredientId: ing.id, qty: 1, unit: 'pcs' }]
+    })
+    expect(res.status).toBe(201)
+    return { bomId: res.body.data.id, product }
+  }
+
+  test('5 butir bakso + 1 porsi mie costs Rp6.800 and the composition shows base units', async () => {
+    const { bomId, product } = await draftBom()
+    await product.update({ price: 15000 })
+    const bakso = await makeIngredient(storeA.id, {
+      name: tag('Bakso Halus'),
+      unit: 'kg',
+      baseUnit: 'butir',
+      conversionFactor: 25,
+      costPrice: 25000
+    })
+    const mie = await makeIngredient(storeA.id, {
+      name: tag('Mie Kuning'),
+      unit: 'kg',
+      baseUnit: 'porsi',
+      conversionFactor: 10,
+      costPrice: 18000
+    })
+    const res = await http('put', `/bom/edit/${bomId}`, adminToken).send({
+      status: 'active',
+      lines: [
+        { ingredientId: bakso.id, qty: 5, unit: 'butir' },
+        { ingredientId: mie.id, qty: 1, unit: 'porsi' }
+      ]
+    })
+    expect(res.status).toBe(200)
+    const fresh = await db.product.findByPk(product.id)
+    expect(Number(fresh.hppPerPorsi)).toBe(6800)
+    // 6.800 / 15.000 = 45,33 % food cost
+    expect(Number(fresh.foodCostPersen)).toBeCloseTo(45.33, 2)
+    const units = Object.fromEntries(fresh.composition.map((c) => [c.ingredientId, c.unit]))
+    expect(units).toEqual({ [bakso.id]: 'butir', [mie.id]: 'porsi' })
+  })
+
+  test('an ingredient bought and used in the same unit keeps its price', async () => {
+    const { bomId, product } = await draftBom()
+    const telur = await makeIngredient(storeA.id, { name: tag('Telur'), costPrice: 2500 })
+    const res = await http('put', `/bom/edit/${bomId}`, adminToken).send({
+      status: 'active',
+      lines: [{ ingredientId: telur.id, qty: 2, unit: 'pcs' }]
+    })
+    expect(res.status).toBe(200)
+    expect(Number((await db.product.findByPk(product.id)).hppPerPorsi)).toBe(5000)
+  })
+})
