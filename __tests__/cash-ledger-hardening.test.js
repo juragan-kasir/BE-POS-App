@@ -57,6 +57,12 @@ const decideVariance = (token, registerId, decision) =>
     .set('Authorization', `Bearer ${token}`)
     .send({ decision })
 
+// G-02 (DR-23 §D): a non-cash counter sale carries its transaction reference.
+const nonCashRef = (overrides) =>
+  overrides.paymentMethod && overrides.paymentMethod !== 'cash' && !('referenceNumber' in overrides)
+    ? { referenceNumber: `CL-REF-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` }
+    : {}
+
 const cashOrder = (token, overrides = {}) =>
   request(app)
     .post('/order/create')
@@ -66,6 +72,7 @@ const cashOrder = (token, overrides = {}) =>
       items: [{ product: product.id, quantity: 1 }],
       paymentMethod: 'cash',
       cashierName: 'Cash Ledger Test Cashier',
+      ...nonCashRef(overrides),
       ...overrides
     }))
 

@@ -66,6 +66,7 @@ afterAll(async () => {
   await db.location.destroy({ where: { id: location?.id }, force: true })
 })
 
+// G-02 (DR-23 §D): a non-cash counter sale carries its transaction reference.
 const orderOne = (overrides = {}) =>
   request(app)
     .post('/order/create')
@@ -75,6 +76,9 @@ const orderOne = (overrides = {}) =>
       items: [{ product: productA.id, quantity: 1 }],
       paymentMethod: 'cash',
       cashierName: 'Tax Contract',
+      ...(overrides.paymentMethod && overrides.paymentMethod !== 'cash'
+        ? { referenceNumber: `TAX-REF-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` }
+        : {}),
       ...overrides
     }))
 
