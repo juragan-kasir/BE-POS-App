@@ -924,3 +924,69 @@ describe('Regression', () => {
     await closeTestRegister(registerId)
   })
 })
+
+// BA gap 009 (DR-23 §D/§G, DR-13): a non-cash refund is traceable — approval
+// without its reference (OTHER: a description) is refused with no effect.
+describe('BA 009 non-cash refund reference', () => {
+  const nonCashReturn = async (method) => {
+    const order = await buildPaidOrder({
+      paymentMethod: method,
+      items: [{ product: product.id, productName: product.nameProduct, quantity: 1, price: 20000, totalPrice: 20000 }]
+    })
+    const ret = await returnOrder(adminToken, order.id, {
+      items: [{ productId: product.id, orderItemId: order.items[0].id, qty: 1 }],
+      reason: 'BA 009',
+      refundMethod: method
+    })
+    expect(ret.status).toBeLessThan(300)
+    return { order, returnId: ret.body.data.id }
+  }
+
+  test.each(['qris', 'debit', 'transfer', 'e-wallet', 'other'])(
+    '%s refund without a reference is refused: still pending, no ledger row, no restock',
+    async (method) => {
+      const { order, returnId } = await nonCashReturn(method)
+      const stockBefore = (await db.product.findByPk(product.id)).stock
+      for (const body of [{}, { refundReference: '   ' }]) {
+        const res = await approveReturn(adminToken, returnId, body)
+        expect(res.status).toBe(422)
+        expect(res.body.code).toBe('REFERENCE_REQUIRED')
+      }
+      expect((await db.sales_return.findByPk(returnId)).status).toBe('pending')
+      expect(await db.transaction.count({ where: { order: order.id, salesReturnId: returnId } })).toBe(0)
+      expect((await db.product.findByPk(product.id)).stock).toBe(stockBefore)
+    }
+  )
+
+  test('other is asked for a description, a card for its reference', async () => {
+    const other = await nonCashReturn('other')
+    const otherRes = await approveReturn(adminToken, other.returnId)
+    expect(otherRes.body.message).toMatch(/description of how this refund was made/)
+    const card = await nonCashReturn('debit')
+    const cardRes = await approveReturn(adminToken, card.returnId)
+    expect(cardRes.body.message).toMatch(/refund reference is required for a CARD refund/)
+  })
+
+  test('with a reference the refund is approved and the reference stored trimmed', async () => {
+    const { order, returnId } = await nonCashReturn('qris')
+    const res = await approveReturn(adminToken, returnId, { refundReference: '  QR-REFUND-9  ' })
+    expect(res.status).toBe(200)
+    expect((await db.sales_return.findByPk(returnId)).refundReference).toBe('QR-REFUND-9')
+    const row = await db.transaction.findOne({ where: { order: order.id, salesReturnId: returnId } })
+    expect(row.referenceNumber).toBe('QR-REFUND-9')
+  })
+
+  test('a cash refund still needs no reference', async () => {
+    const registerId = await openTestRegister()
+    const order = await buildPaidOrder({
+      items: [{ product: product.id, productName: product.nameProduct, quantity: 1, price: 20000, totalPrice: 20000 }]
+    })
+    const ret = await returnOrder(adminToken, order.id, {
+      items: [{ productId: product.id, orderItemId: order.items[0].id, qty: 1 }],
+      reason: 'BA 009 cash'
+    })
+    const res = await approveReturn(adminToken, ret.body.data.id)
+    expect(res.status).toBe(200)
+    await closeTestRegister(registerId)
+  })
+})
