@@ -626,6 +626,7 @@ describe('Order void — additive to the existing generic status-update audit', 
       .send(withIdempotencyKey({
         store: store.id,
         items: [{ product: productAdjust.id, quantity: 1 }],
+        paymentMethod: 'cash',
         cashierName: 'Audit Hardening Cashier'
       }))
     expect(createRes.status).toBe(201)

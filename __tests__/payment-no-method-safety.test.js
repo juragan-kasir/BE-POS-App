@@ -98,23 +98,16 @@ async function createOrder(body) {
 }
 
 describe('F-PAY-1 no-payment-method paid order', () => {
-  test('omitted paymentMethod persists a cash ledger row (never zero rows)', async () => {
+  // G-02 (DR-23 §D/§O): an omitted method is refused, never assumed to be
+  // cash — so a paid order without a ledger row still cannot happen.
+  test('omitted paymentMethod is refused with no order and no ledger row', async () => {
     const key = unique('paynom')
+    const before = await db.order.count({ where: { store: store.id } })
     const res = await createOrder({ idempotencyKey: key })
-    expect(res.status).toBe(201)
-    expect(res.body?.data?.paymentStatus).toBe('paid')
-
-    const rows = await db.transaction.findAll({
-      where: { order: res.body.data.id }
-    })
-    expect(rows.length).toBe(1)
-    expect(rows[0].typePayment).toBe('CASH')
-    expect(Number(rows[0].amount)).toBe(Number(res.body.data.totalPrice))
-    expect(Number(rows[0].cashReceived)).toBe(Number(res.body.data.totalPrice))
-    expect(Number(rows[0].changeGiven)).toBe(0)
-
-    const stored = await db.order.findByPk(res.body.data.id)
-    expect(stored.paymentMethod).toBe('CASH')
+    expect(res.status).toBe(422)
+    expect(res.body.code).toBe('PAYMENT_METHOD_REQUIRED')
+    expect(await db.order.count({ where: { store: store.id } })).toBe(before)
+    expect(await db.order.count({ where: { idempotencyKey: key } })).toBe(0)
   })
 
   test('explicit cash with exact tender still writes the identical ledger row', async () => {
@@ -133,7 +126,11 @@ describe('F-PAY-1 no-payment-method paid order', () => {
 
   test('explicit non-cash method still writes its ledger row', async () => {
     const key = unique('payqris')
-    const res = await createOrder({ idempotencyKey: key, paymentMethod: 'qris' })
+    const res = await createOrder({
+      idempotencyKey: key,
+      paymentMethod: 'qris',
+      referenceNumber: unique('payqrisref')
+    })
     expect(res.status).toBe(201)
     const rows = await db.transaction.findAll({
       where: { order: res.body.data.id }

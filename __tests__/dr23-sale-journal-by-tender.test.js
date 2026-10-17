@@ -36,6 +36,8 @@ async function counterSale(paymentMethod, extra = {}) {
       paymentMethod,
       cashierName: 'Journal Cashier',
       idempotencyKey: unique('jrn'),
+      // G-02 (DR-23 §D): a non-cash sale carries its reference (OTHER: a description).
+      ...(String(paymentMethod).toUpperCase() === 'CASH' ? {} : { referenceNumber: unique('JREF') }),
       ...extra
     }))
   if (res.status !== 201) throw new Error('sale failed: ' + JSON.stringify(res.body))

@@ -37,7 +37,7 @@ const {
   financialError,
   retirePendingSplits
 } = require('../service/orderFinancials')
-const { normalizePaymentMethod, requiresTenderReference } = require('../service/canonicalPayment')
+const { normalizePaymentMethod, requireTenderReference } = require('../service/canonicalPayment')
 const { assertSettlementReferenceUnused } = require('../service/settlementReference')
 const { expireStaleQrOrders } = require('../service/qrOrderExpiry')
 const {
@@ -1528,15 +1528,19 @@ exports.createOrder = async (req, res) => {
     }
 
     // F-PAY-1: a paid order must always carry its payment-ledger row.
-    // paymentMethod is optional in the schema and recordOrderPayment skips
-    // a falsy method — without normalization a missing method produced a
-    // "paid" order with zero transaction rows. The established product
-    // contract treats an absent method as cash exact tender (status notes,
-    // paid-transition and split-bill `|| 'cash'` fallbacks), so normalize
-    // once here and route through normal cash validation + persistence.
-    // P1 (DR-PAY-ATTR-06): the persisted tender is always canonical; an
-    // unknown method is refused with 422 before any write.
-    const effectivePaymentMethod = normalizePaymentMethod(paymentMethod || 'cash')
+    // DR-23 §D/§O (BA gap G-02): the tender is stated explicitly — an omitted
+    // method is refused, never assumed to be cash — and a manually confirmed
+    // tender carries its reference (OTHER: its description). Both refusals
+    // happen before any write. P1 (DR-PAY-ATTR-06): the persisted tender is
+    // always canonical; an unknown method is refused with 422.
+    const effectivePaymentMethod = normalizePaymentMethod(paymentMethod)
+    if (!effectivePaymentMethod) {
+      return res.status(422).json({
+        error: 'A payment method is required for a counter sale',
+        code: 'PAYMENT_METHOD_REQUIRED'
+      })
+    }
+    const counterReference = requireTenderReference(effectivePaymentMethod, referenceNumber)
 
     // Fails fast, before any DB write is attempted, if the cash tender
     // is physically impossible or malformed.
@@ -1677,12 +1681,6 @@ exports.createOrder = async (req, res) => {
          t
        )
 
-       const counterReference =
-         effectivePaymentMethod === 'CASH'
-           ? null
-           : typeof referenceNumber === 'string' && referenceNumber.trim() !== ''
-             ? referenceNumber.trim()
-             : null
        // BA 004 (DR-23 §D): never the same reference twice per store+method.
        await assertSettlementReferenceUnused({
          store: authorizedStore,
@@ -2293,21 +2291,14 @@ const resolvePaidSettlement = async ({
   // normalizePaymentMethod. Whitespace-only counts as missing; the stored
   // reference is trimmed. Thrown inside the settlement transaction, so the
   // refusal writes nothing.
-  const reference = typeof referenceNumber === 'string' ? referenceNumber.trim() : ''
-  if (requiresTenderReference(method) && reference === '') {
-    throw financialError(
-      422,
-      'REFERENCE_REQUIRED',
-      `referenceNumber is required for ${method} settlement`
-    )
-  }
+  const reference = requireTenderReference(method, referenceNumber)
 
   return {
     method,
     cashReceived,
     changeGiven,
     registerId: register.id,
-    referenceNumber: method === 'CASH' || reference === '' ? null : reference,
+    referenceNumber: reference,
     amountDue
   }
 }
