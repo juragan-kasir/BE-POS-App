@@ -157,6 +157,19 @@ describe('settlement reference (DR-23 §D)', () => {
     await expectRefusedWithoutEffect(await settlePaid({ id: order.id, paymentMethod: input }), order.id)
   })
 
+  test('OTHER is asked for a payment description, a non-cash tender for its transaction reference (BA 003)', async () => {
+    const other = await makeQrOrder()
+    const otherRes = await settlePaid({ id: other.id, paymentMethod: 'other' })
+    await expectRefusedWithoutEffect(otherRes, other.id)
+    expect(JSON.stringify(otherRes.body)).toMatch(/description of how this payment was made/)
+    expect(JSON.stringify(otherRes.body)).not.toMatch(/referenceNumber/)
+
+    const qris = await makeQrOrder()
+    const qrisRes = await settlePaid({ id: qris.id, paymentMethod: 'qris' })
+    await expectRefusedWithoutEffect(qrisRes, qris.id)
+    expect(JSON.stringify(qrisRes.body)).toMatch(/transaction reference is required for a QRIS payment/)
+  })
+
   test.each([
     ['empty', ''],
     ['whitespace-only', '   \t '],

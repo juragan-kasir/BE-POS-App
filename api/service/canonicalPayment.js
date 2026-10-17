@@ -73,6 +73,25 @@ const REFERENCE_REQUIRED_METHODS = Object.freeze([
 // `method` is a canonical value (the output of normalizePaymentMethod).
 const requiresTenderReference = (method) => REFERENCE_REQUIRED_METHODS.includes(method)
 
+// DR-23 §D / §M: a manually confirmed tender carries its reference; OTHER
+// carries a description of how it was paid instead. Whitespace-only counts
+// as missing. Returns the trimmed reference to store (null for CASH, or when
+// none was given for a tender that needs none) or refuses with 422
+// REFERENCE_REQUIRED. Shared by the counter sale and the order settlement.
+function requireTenderReference(method, referenceNumber) {
+  const reference = typeof referenceNumber === 'string' ? referenceNumber.trim() : ''
+  if (requiresTenderReference(method) && reference === '') {
+    throw financialError(
+      422,
+      'REFERENCE_REQUIRED',
+      method === 'OTHER'
+        ? 'A description of how this payment was made is required for an OTHER payment'
+        : `A transaction reference is required for a ${method} payment`
+    )
+  }
+  return method === 'CASH' || reference === '' ? null : reference
+}
+
 function normalizePaymentMethod(value) {
   if (value === null || value === undefined) return null
   if (typeof value !== 'string') {
@@ -148,6 +167,7 @@ module.exports = {
   CANONICAL_METHOD_ORDER,
   REFERENCE_REQUIRED_METHODS,
   requiresTenderReference,
+  requireTenderReference,
   normalizePaymentMethod,
   reportingBucket,
   bucketCashFlowTenders

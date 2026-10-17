@@ -2,6 +2,7 @@ process.env.NODE_ENV = 'test'
 process.env.VERCEL = 'true'
 
 const request = require('supertest')
+const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
@@ -61,13 +62,18 @@ async function makeQrOrder({ customerId } = {}) {
     .send({
       store: store.id,
       tableId: table.id,
-      ...(customerId ? { customerId } : {}),
-      customerName: customerId ? undefined : unique('P21 Guest'),
+      customerName: unique('P21 Guest'),
       items: [{ productId: product.id, productName: product.nameProduct, quantity: 1 }],
       idempotencyKey: unique('p21qr')
     })
   if (res.status !== 201) throw new Error('qr setup failed: ' + JSON.stringify(res.body))
   createdOrderIds.push(res.body.data.id)
+  // G-01: the public route refuses customerId; a member reaches a QR order
+  // only through staff, simulated here by attaching it after creation.
+  if (customerId) {
+    await db.order.update({ customerId }, { where: { id: res.body.data.id } })
+    res.body.data.customerId = customerId
+  }
   return res.body.data
 }
 
@@ -345,7 +351,7 @@ describe('DR-04 P2-1 points settlement — idempotency', () => {
     const createRes = await request(app)
       .post('/order/create')
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({
+      .send(withIdempotencyKey({
         store: store.id,
         customerId: member.id,
         items: [{ product: product.id, quantity: 1 }],
@@ -354,7 +360,7 @@ describe('DR-04 P2-1 points settlement — idempotency', () => {
         changeAmount: 0,
         cashierName: 'P21',
         idempotencyKey: unique('p21create')
-      })
+      }))
     expect(createRes.status).toBe(201)
     const orderId = createRes.body.data.id
     createdOrderIds.push(orderId)

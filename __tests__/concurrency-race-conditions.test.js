@@ -2,6 +2,7 @@ process.env.NODE_ENV = 'test'
 process.env.VERCEL = 'true'
 
 const request = require('supertest')
+const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
@@ -33,6 +34,8 @@ describe('Concurrent checkout — overselling (order.js createOrder)', () => {
       price: 10000,
       stock: 1 // exactly one unit — the classic "two cashiers, one item" scenario
     })
+    // DR-14: the outlet row is the authoritative stock.
+    await db.product_store_stock.create({ product: product.id, store: location.id, stock: 1 })
   // P1-4: central gate denies unknown caller identities; these rows
   // satisfy the identity invariant. Assertions below are unchanged.
   await db.user.create({
@@ -125,12 +128,12 @@ describe('Concurrent checkout — overselling (order.js createOrder)', () => {
       request(app)
         .post('/order/create')
         .set('Authorization', `Bearer ${token}`)
-        .send({
+        .send(withIdempotencyKey({
           store: location.id,
           items: [{ product: product.id, quantity: 1 }],
           paymentMethod: 'cash',
           cashierName: 'Race Cashier'
-        })
+        }))
 
     // Fired together, not awaited sequentially — both requests are in
     // flight at the same time, racing for the same row.
@@ -143,6 +146,11 @@ describe('Concurrent checkout — overselling (order.js createOrder)', () => {
 
     const finalProduct = await db.product.findByPk(product.id)
     expect(Number(finalProduct.stock)).toBe(0) // never negative, never left at 1 (double-success) either
+    const [outlet] = await db.product_store_stock.findAll({
+      where: { product: product.id, store: location.id },
+      limit: 1
+    })
+    expect(Number(outlet.stock)).toBe(0)
 
     const paidOrders = await db.order.count({
       where: { store: location.id, status: 'paid' }
@@ -181,6 +189,8 @@ describe('Concurrent status update — double stock deduction (order.js updateOr
       price: 5000,
       stock: 10
     })
+    // DR-14: the outlet row is the authoritative stock.
+    await db.product_store_stock.create({ product: product.id, store: location.id, stock: 10 })
     // AUTH-1 P2: the row is the authority — assign it the store the token claims.
     await db.user.update({ store: location.id }, { where: { id: 8802 } })
     token = await signSessionToken(
@@ -400,13 +410,13 @@ describe('Concurrent duplicate submit — idempotency key (order.js createOrder)
       request(app)
         .post('/order/create')
         .set('Authorization', `Bearer ${token}`)
-        .send({
+        .send(withIdempotencyKey({
           store: location.id,
           items: [{ product: product.id, quantity: 2 }],
           paymentMethod: 'cash',
           cashierName: 'Race Cashier',
           idempotencyKey
-        })
+        }))
 
     const [resA, resB] = await Promise.all([submit(), submit()])
 
@@ -432,13 +442,13 @@ describe('Concurrent duplicate submit — idempotency key (order.js createOrder)
       request(app)
         .post('/order/create')
         .set('Authorization', `Bearer ${token}`)
-        .send({
+        .send(withIdempotencyKey({
           store: location.id,
           items: [{ product: product.id, quantity: 1 }],
           paymentMethod: 'cash',
           cashierName: 'Race Cashier',
           idempotencyKey
-        })
+        }))
 
     const first = await send()
     expect(first.status).toBe(201)
@@ -524,12 +534,12 @@ describe('Concurrent order creation — daily customer number uniqueness (order.
         request(app)
           .post('/order/create')
           .set('Authorization', `Bearer ${token}`)
-          .send({
+          .send(withIdempotencyKey({
             store: location.id,
             items: [{ product: product.id, quantity: 1 }],
             paymentMethod: 'cash',
             cashierName: 'Race Cashier'
-          })
+          }))
 
       const responses = await Promise.all(
         Array.from({ length: 10 }, () => submit())

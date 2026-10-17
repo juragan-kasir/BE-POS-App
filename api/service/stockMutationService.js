@@ -209,6 +209,12 @@ async function setProductStock({
  * @param {string|null} [params.notes]
  * @param {number|null} [params.createdBy]
  * @param {import('sequelize').Transaction} params.transaction - required
+ * @param {Array} [params.shortages] - BA gap 028 (DR-18) settlement mode.
+ *   When given, an ingredient that cannot cover a deduction is NOT refused:
+ *   each line takes what is left (never below zero), and every uncovered
+ *   amount is pushed here as { type: 'ingredient', id, name, productId,
+ *   required, deducted, shortfall } so the caller records and surfaces it.
+ *   Without it, a shortage is refused (409 INGREDIENT_STOCK_CONFLICT).
  * @returns {Promise<Array<{ingredientId:number, quantityBefore:number, quantityAfter:number}>>}
  */
 async function adjustIngredientStockBatch({
@@ -218,7 +224,8 @@ async function adjustIngredientStockBatch({
   referenceId,
   notes = null,
   createdBy = null,
-  transaction
+  transaction,
+  shortages = null
 }) {
   if (!transaction) {
     throw new Error('adjustIngredientStockBatch requires an explicit transaction')
@@ -266,6 +273,45 @@ async function adjustIngredientStockBatch({
       item.ingredientId,
       (aggregateDelta.get(item.ingredientId) || 0) + Number(item.qty)
     )
+  }
+
+  // DR-18 settlement mode: cap each deduction line at what is left of its
+  // ingredient, so stock never goes below zero, and record the uncovered
+  // remainder instead of refusing the payment.
+  if (Array.isArray(shortages)) {
+    const remaining = new Map(ingredientIds.map((id) => [id, Number(ingredientById.get(id).stock)]))
+    for (const item of items) {
+      const qty = Number(item.qty)
+      if (qty >= 0) {
+        remaining.set(item.ingredientId, remaining.get(item.ingredientId) + qty)
+        continue
+      }
+      const need = -qty
+      const left = Math.max(remaining.get(item.ingredientId), 0)
+      const deducted = Math.min(left, need)
+      remaining.set(item.ingredientId, remaining.get(item.ingredientId) - deducted)
+      if (deducted < need) {
+        const ing = ingredientById.get(item.ingredientId)
+        shortages.push({
+          type: 'ingredient',
+          id: item.ingredientId,
+          name: item.ingredientName || ing.name,
+          productId: item.productId ?? null,
+          required: need,
+          deducted,
+          shortfall: need - deducted
+        })
+        item.qty = -deducted
+        item.shortfall = need - deducted
+      }
+    }
+    aggregateDelta.clear()
+    for (const item of items) {
+      aggregateDelta.set(
+        item.ingredientId,
+        (aggregateDelta.get(item.ingredientId) || 0) + Number(item.qty)
+      )
+    }
   }
 
   for (const id of ingredientIds) {
@@ -322,7 +368,9 @@ async function adjustIngredientStockBatch({
       quantityChange: change,
       quantityAfter: after,
       unit: ing.baseUnit || ing.unit || 'pcs',
-      notes,
+      notes: item.shortfall
+        ? `${notes ? `${notes} — ` : ''}KURANG ${item.shortfall} (stok tidak mencukupi saat pembayaran)`
+        : notes,
       createdBy
     })
   }

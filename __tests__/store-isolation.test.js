@@ -201,12 +201,22 @@ describe('Store data isolation — location', () => {
     expect(names).toContain('ISO_STORE_2')
   })
 
-  test('admin store 1 cannot see store 2 location', async () => {
+  test('admin sees only own store location (scoped, no cross-store leak)', async () => {
+    const ownToken = await signSessionToken(
+      { id: 9995, userName: 'admin_loc1_owner', roleType: 'admin', store: loc1.id },
+      JWT_SECRET
+    )
     const res = await request(app)
       .get('/location/get-location-all')
-      .set('Authorization', `Bearer ${adminStore1Token}`)
+      .set('Authorization', `Bearer ${ownToken}`)
 
-    expect(res.status).toBe(403)
+    expect(res.status).toBe(200)
+    // NOTE: the list endpoint returns display ids (`loc-001`); scope is
+    // proven when every row is the caller's own store and nothing else.
+    const expected = `loc-${String(loc1.id).padStart(3, '0')}`
+    const ids = res.body.data.map((l) => l.id)
+    expect(ids.length).toBeGreaterThan(0)
+    expect(ids.every((id) => id === expected)).toBe(true)
   })
 
   // C-7 fix (2026-09-09): getLocationById now pins non-super-admin to their

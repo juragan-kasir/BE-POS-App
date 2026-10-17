@@ -788,6 +788,11 @@ const goodsReceiptController = {
       const transaction = await db.sequelize.transaction()
 
       try {
+        // P1-5: drafts post nothing. The stock effect (PO received
+        // quantities, product/ingredient stock, batches) applies exactly
+        // once, on the draft -> completed transition. Receipts created
+        // already-completed keep posting at create.
+        const postNow = (req.body.status || 'completed') !== 'draft'
         const receipt = await db.goodsReceipt.create(
           {
             store: effectiveStore,
@@ -795,6 +800,7 @@ const goodsReceiptController = {
             purchaseOrderId,
             receivedDate: receivedDate || new Date(),
             status: req.body.status || 'completed',
+            stockPosted: postNow,
             notes,
             pic: pic || null,
             documentation,
@@ -933,7 +939,7 @@ const goodsReceiptController = {
             qtyStock
           })
 
-          if (poItem) {
+          if (poItem && postNow) {
             await poItem.update(
               {
                 receivedQuantity: db.sequelize.literal(
@@ -944,7 +950,7 @@ const goodsReceiptController = {
             )
           }
 
-          if (item.product) {
+          if (item.product && postNow) {
             const product = productById.get(item.product)
             if (product) {
               const qtyBefore = Number(product.stock) || 0
@@ -1008,12 +1014,14 @@ const goodsReceiptController = {
             // explicitly here — it's the one call site where the PO item
             // was already resolved into a separate local variable rather
             // than nested inside `item` itself.
-            const ingredient = await resolveIngredientForItem({
-              item,
-              poItem,
-              store: effectiveStore,
-              transaction
-            })
+            const ingredient = postNow
+              ? await resolveIngredientForItem({
+                  item,
+                  poItem,
+                  store: effectiveStore,
+                  transaction
+                })
+              : null
 
             if (ingredient) {
               const qtyBefore = Number(ingredient.stock) || 0
@@ -1040,12 +1048,14 @@ const goodsReceiptController = {
             }
           }
 
-          await applyCostPrice({
-            item: { ...item, costPrice, conversionToBase: conversion },
-            qty,
-            store: effectiveStore,
-            transaction
-          })
+          if (postNow) {
+            await applyCostPrice({
+              item: { ...item, costPrice, conversionToBase: conversion },
+              qty,
+              store: effectiveStore,
+              transaction
+            })
+          }
         }
 
         if (receiptItems.length > 0) {
@@ -1344,6 +1354,36 @@ const goodsReceiptController = {
         const replacingItems = Array.isArray(items)
         const nextStatus = status || locked.status
         if (!replacingItems) {
+          // P1-5: a metadata-only flip to completed on a never-posted draft
+          // still has to post the existing lines exactly once.
+          if (nextStatus === 'completed' && locked.status === 'draft' && !locked.stockPosted) {
+            const poForPosting = await db.purchase_order.findByPk(
+              locked.purchaseOrderId,
+              { transaction }
+            )
+            await applyStock(lockedOldItems, locked, transaction, req.user?.id)
+            for (const [index, line] of lockedOldItems.entries()) {
+              if (!line.product) continue
+              const lineQty = Number(line.qtyReceived) || 0
+              if (!(lineQty > 0)) continue
+              const lineConversion = Number(line.conversionToBase) || 1
+              await batchService.addBatchStock({
+                productId: line.product,
+                store: store || locked.store,
+                qty: lineQty * lineConversion,
+                costPerUnit:
+                  lineConversion > 0
+                    ? Number(line.costPrice || 0) / lineConversion
+                    : 0,
+                batchCode:
+                  line.batchNumber || `${locked.receiptNumber}-${index + 1}`,
+                expiryDate: line.expiryDate || null,
+                supplier: poForPosting?.supplier || null,
+                receivedDate: receivedDate || locked.receivedDate || new Date(),
+                transaction
+              })
+            }
+          }
           await locked.update(
             {
               notes: notes !== undefined ? notes : locked.notes,
@@ -1359,6 +1399,10 @@ const goodsReceiptController = {
                 shippingCost !== undefined
                   ? Number(shippingCost) || 0
                   : Number(locked.shippingCost) || 0,
+              // P1-5: a completed receipt always has its effect posted (see
+              // the post-on-transition above); anything else keeps its flag.
+              stockPosted:
+                nextStatus === 'completed' ? true : locked.stockPosted,
               modifiedBy: req.user?.id || null
             },
             { transaction }
@@ -1374,24 +1418,27 @@ const goodsReceiptController = {
           })
         }
 
-        await reverseStock(
-          lockedOldItems,
-          store || locked.store,
-          transaction,
-          req.user?.id
-        )
+        // P1-5: only unwind an effect that was actually posted.
+        if (locked.stockPosted) {
+          await reverseStock(
+            lockedOldItems,
+            store || locked.store,
+            transaction,
+            req.user?.id
+          )
 
-        // B1: the reversed stock effect included per-line batches created
-        // at create time — retire them so FIFO/expiry cannot consume
-        // phantom quantities. Deterministic association only (receipt
-        // prefix / exact lot code + received qty); foreign batches are
-        // never touched.
-        await voidReceiptBatches({
-          receiptNumber: locked.receiptNumber,
-          items: lockedOldItems,
-          store: store || locked.store,
-          transaction
-        })
+          // B1: the reversed stock effect included per-line batches created
+          // at create time — retire them so FIFO/expiry cannot consume
+          // phantom quantities. Deterministic association only (receipt
+          // prefix / exact lot code + received qty); foreign batches are
+          // never touched.
+          await voidReceiptBatches({
+            receiptNumber: locked.receiptNumber,
+            items: lockedOldItems,
+            store: store || locked.store,
+            transaction
+          })
+        }
 
         // F-STOCK-1: an update that transitions the draft to cancelled
         // unwinds the receipt like a delete (reverse only) instead of
@@ -1406,6 +1453,7 @@ const goodsReceiptController = {
               notes: notes !== undefined ? notes : locked.notes,
               receivedDate: receivedDate || locked.receivedDate,
               status: 'cancelled',
+              stockPosted: false,
               pic: pic !== undefined ? pic : locked.pic,
               documentation:
                 documentation !== undefined ? documentation : locked.documentation,
@@ -1437,6 +1485,11 @@ const goodsReceiptController = {
             notes: notes !== undefined ? notes : receipt.notes,
             receivedDate: receivedDate || receipt.receivedDate,
             status: status || receipt.status,
+            // P1-5: the rebuild below posts whenever the receipt is (or
+            // becomes) completed; an unposted draft staying draft keeps
+            // its flag off.
+            stockPosted:
+              nextStatus === 'completed' ? true : locked.stockPosted,
             pic: pic !== undefined ? pic : receipt.pic,
             documentation:
               documentation !== undefined ? documentation : receipt.documentation,
@@ -1563,25 +1616,30 @@ const goodsReceiptController = {
 
           if (newItems.length > 0) {
             await db.goodsReceiptItem.bulkCreate(newItems, { transaction })
-            await applyStock(newItems, receipt, transaction, req.user?.id)
-            // B1: fresh batches for the re-applied stock effect — same
-            // shape as create() (per-line batch, receiptNumber-indexed
-            // auto code), so FIFO/expiry track the current backing, not
-            // the retired one.
-            for (const [index, batchInput] of newBatchInputs.entries()) {
-              await batchService.addBatchStock({
-                productId: batchInput.product,
-                store: store || locked.store,
-                qty: batchInput.qtyStock,
-                costPerUnit: batchInput.baseUnitCost,
-                batchCode:
-                  batchInput.batchNumber ||
-                  `${locked.receiptNumber}-${index + 1}`,
-                expiryDate: batchInput.expiryDate || null,
-                supplier: po?.supplier || null,
-                receivedDate: receivedDate || new Date(),
-                transaction
-              })
+            // P1-5: the replacement effect posts only when the receipt is
+            // (or becomes) completed — an unposted draft staying draft
+            // records rows with no stock movement.
+            if (locked.stockPosted || nextStatus === 'completed') {
+              await applyStock(newItems, receipt, transaction, req.user?.id)
+              // B1: fresh batches for the re-applied stock effect — same
+              // shape as create() (per-line batch, receiptNumber-indexed
+              // auto code), so FIFO/expiry track the current backing, not
+              // the retired one.
+              for (const [index, batchInput] of newBatchInputs.entries()) {
+                await batchService.addBatchStock({
+                  productId: batchInput.product,
+                  store: store || locked.store,
+                  qty: batchInput.qtyStock,
+                  costPerUnit: batchInput.baseUnitCost,
+                  batchCode:
+                    batchInput.batchNumber ||
+                    `${locked.receiptNumber}-${index + 1}`,
+                  expiryDate: batchInput.expiryDate || null,
+                  supplier: po?.supplier || null,
+                  receivedDate: receivedDate || new Date(),
+                  transaction
+                })
+              }
             }
           }
 
@@ -1745,20 +1803,24 @@ const goodsReceiptController = {
           ],
           transaction
         })
-        await reverseStock(
-          lockedOldItems,
-          store || locked.store,
-          transaction,
-          req.user?.id
-        )
+        // P1-5: only unwind an effect that was actually posted; deleting a
+        // never-posted draft removes rows with no stock movement.
+        if (locked.stockPosted) {
+          await reverseStock(
+            lockedOldItems,
+            store || locked.store,
+            transaction,
+            req.user?.id
+          )
 
-        // B1: retire this receipt's batches with its stock effect.
-        await voidReceiptBatches({
-          receiptNumber: locked.receiptNumber,
-          items: lockedOldItems,
-          store: store || locked.store,
-          transaction
-        })
+          // B1: retire this receipt's batches with its stock effect.
+          await voidReceiptBatches({
+            receiptNumber: locked.receiptNumber,
+            items: lockedOldItems,
+            store: store || locked.store,
+            transaction
+          })
+        }
 
         await db.goodsReceiptItem.destroy({
           where: { goodsReceipt: id },
@@ -1886,11 +1948,42 @@ const goodsReceiptController = {
         })
 
         if (status === 'completed') {
-          // F-STOCK-1: create() already applied this receipt's stock effect
-          // (for drafts too — pinned by goods-receipt-reversal-flow), so
-          // completing must NOT apply it a second time. Completion only
-          // flips the status, recalculates PO fulfillment, and enqueues
-          // the purchase journal.
+          // P1-5: drafts post nothing at create, so completing posts the
+          // full effect exactly once (guarded by stockPosted — legacy rows
+          // already posted at create keep skipping this). Same composition
+          // as the update() path: applyStock (received quantities, product /
+          // ingredient stock, costing) plus fresh per-line batches.
+          if (!locked.stockPosted) {
+            const poForPosting = await db.purchase_order.findByPk(
+              locked.purchaseOrderId,
+              { transaction }
+            )
+            await applyStock(lockedItems, locked, transaction, req.user?.id)
+            for (const [index, line] of lockedItems.entries()) {
+              if (!line.product) continue
+              const lineQty = Number(line.qtyReceived) || 0
+              if (!(lineQty > 0)) continue
+              const lineConversion = Number(line.conversionToBase) || 1
+              await batchService.addBatchStock({
+                productId: line.product,
+                store: store || locked.store,
+                qty: lineQty * lineConversion,
+                costPerUnit:
+                  lineConversion > 0
+                    ? Number(line.costPrice || 0) / lineConversion
+                    : 0,
+                batchCode:
+                  line.batchNumber || `${locked.receiptNumber}-${index + 1}`,
+                expiryDate: line.expiryDate || null,
+                supplier: poForPosting?.supplier || null,
+                receivedDate: locked.receivedDate || new Date(),
+                transaction
+              })
+            }
+            await locked.update({ stockPosted: true }, { transaction })
+          }
+          // Completion only flips the status, recalculates PO fulfillment,
+          // and enqueues the purchase journal.
           await calculatePurchaseOrderFulfillmentStatus({
             purchaseOrderId: locked.purchaseOrderId,
             transaction
@@ -1898,27 +1991,34 @@ const goodsReceiptController = {
         }
 
         if (status === 'cancelled') {
-          // F-STOCK-1: cancelling unwinds the create-time stock effect
-          // (and the receivedQuantity increments) so a cancelled receipt
-          // leaves no phantom stock behind.
-          await reverseStock(
-            lockedItems,
-            store || locked.store,
-            transaction,
-            req.user?.id
-          )
-          // B1: retire this receipt's batches with its stock effect.
-          await voidReceiptBatches({
-            receiptNumber: locked.receiptNumber,
-            items: lockedItems,
-            store: store || locked.store,
-            transaction
-          })
+          // P1-5: only unwind an effect that was actually posted. A draft
+          // that never posted leaves nothing behind.
+          if (locked.stockPosted) {
+            // F-STOCK-1: cancelling unwinds the create-time stock effect
+            // (and the receivedQuantity increments) so a cancelled receipt
+            // leaves no phantom stock behind.
+            await reverseStock(
+              lockedItems,
+              store || locked.store,
+              transaction,
+              req.user?.id
+            )
+            // B1: retire this receipt's batches with its stock effect.
+            await voidReceiptBatches({
+              receiptNumber: locked.receiptNumber,
+              items: lockedItems,
+              store: store || locked.store,
+              transaction
+            })
+          }
         }
 
         await locked.update(
           {
             status,
+            // P1-5: a cancelled receipt holds no posted effect; a completed
+            // one always does (posted just above when it wasn't already).
+            stockPosted: status === 'cancelled' ? false : true,
             modifiedBy: req.user?.id || null,
             receivedDate:
               status === 'completed' ? new Date() : locked.receivedDate

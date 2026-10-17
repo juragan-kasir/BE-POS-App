@@ -122,6 +122,13 @@ exports.getAllLocationInTable = async (req, res) => {
     const offset = (page - 1) * limit
 
     let whereClause = {}
+    // Non-super_admin callers are pinned to their own store: the list (and
+    // its stats below) must never expose another store's rows. validateStoreAccess
+    // already rejected store-less non-super_admin callers, so req.user.store
+    // is a real store id here.
+    if (userRole !== 'super_admin') {
+      whereClause.id = req.user.store
+    }
     if (status === 'active' || status === 'true') {
       whereClause.status = 'active'
     } else if (status === 'inactive' || status === 'false') {
@@ -149,9 +156,9 @@ exports.getAllLocationInTable = async (req, res) => {
     const [total, activeCount, inactiveCount, draftCount, citiesResult] =
       await Promise.all([
         Location.count({ where: whereClause }),
-        Location.count({ where: { status: 'active' } }),
-        Location.count({ where: { status: 'inactive' } }),
-        Location.count({ where: { status: 'draft' } }),
+        Location.count({ where: { ...whereClause, status: 'active' } }),
+        Location.count({ where: { ...whereClause, status: 'inactive' } }),
+        Location.count({ where: { ...whereClause, status: 'draft' } }),
         Location.findAll({
           where: whereClause,
           attributes: [
@@ -679,7 +686,10 @@ const getLocationDeleteUpdates = () => [
 
   // ENUM status models -> set appropriate closed/cancelled state
   { model: StockOpname, update: { store: null, status: 'cancelled' } },
-  { model: Order, update: { store: null, status: 'cancelled' } },
+  // P1-9: orders keep their store — they are financial history, and
+  // detaching them would orphan the cancelled records outside every
+  // store scope. (Collected-money orders already refuse deletion above.)
+  { model: Order, update: { status: 'cancelled' } },
   { model: PurchaseOrder, update: { store: null, status: 'cancelled' } },
   { model: CashRegister, update: { store: null, status: 'closed' } },
   { model: Expense, update: { store: null, status: 'rejected' } },
@@ -740,29 +750,61 @@ exports.deleteLocationById = async (req, res) => {
 
     const entries = getLocationDeleteUpdates()
 
-    for (const { model, update, action } of entries) {
-      try {
+    // P1-9: the whole cascade is one atomic unit. Per-model errors used to
+    // be swallowed one by one (console.error + continue) with the location
+    // deleted afterwards — a failure midway left a half-detached store
+    // behind. Any failure now rolls everything back and reports 500 with
+    // nothing mutated.
+    await db.sequelize.transaction(async (t) => {
+      for (const { model, update, action } of entries) {
         if (!model) continue
         if (action === 'delete') {
-          await model.destroy({ where: { store: dbId } })
+          await model.destroy({ where: { store: dbId }, transaction: t })
         } else {
-          await model.update(update, { where: { store: dbId } })
+          await model.update(update, { where: { store: dbId }, transaction: t })
         }
-      } catch (modelError) {
-        console.error(
-          `Error updating ${model?.name || 'unknown'}:`,
-          modelError.message
-        )
+      }
+
+      // P1-9: assignment state (not history) for this store is removed:
+      // product/category junction rows and per-store stock shadows. The
+      // shadow quantities are first subtracted from the global
+      // product.stock derived total so closing a store does not leave
+      // phantom stock behind; shared catalog rows themselves are kept.
+      const shadows = await db.product_store_stock.findAll({
+        where: { store: dbId },
+        attributes: ['product', 'stock'],
+        transaction: t
+      })
+      for (const shadow of shadows) {
+        const qty = Number(shadow.stock) || 0
+        if (qty > 0) {
+          await db.product.update(
+            { stock: db.sequelize.literal(`GREATEST(stock - ${qty}, 0)`) },
+            { where: { id: shadow.product }, transaction: t }
+          )
+        }
+      }
+      await db.product_store_stock.destroy({ where: { store: dbId }, transaction: t })
+      if (db.product_store) {
+        await db.product_store.destroy({ where: { store: dbId }, transaction: t })
+      }
+      if (db.category_store) {
+        await db.category_store.destroy({ where: { store: dbId }, transaction: t })
+      }
+
+      // Hard delete the location (force: true bypasses paranoid if set)
+      await Location.destroy({ where: { id: dbId }, transaction: t })
+    })
+
+    // Outside the transaction: external side effect, must never roll back
+    // (or block) the already-consistent delete. A failure only logs.
+    if (location.image) {
+      try {
+        await deleteFromCloudinary(location.image)
+      } catch (imageError) {
+        console.error('Error deleting location image:', imageError.message)
       }
     }
-
-    // Delete location image if exists
-    if (location.image) {
-      await deleteFromCloudinary(location.image)
-    }
-
-    // Hard delete the location (force: true bypasses paranoid if set)
-    await Location.destroy({ where: { id: dbId } })
 
     createNotification({
       type: 'location_deleted',

@@ -2,6 +2,7 @@ process.env.NODE_ENV = 'test'
 process.env.VERCEL = 'true'
 
 const request = require('supertest')
+const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
@@ -56,17 +57,24 @@ const decideVariance = (token, registerId, decision) =>
     .set('Authorization', `Bearer ${token}`)
     .send({ decision })
 
+// G-02 (DR-23 §D): a non-cash counter sale carries its transaction reference.
+const nonCashRef = (overrides) =>
+  overrides.paymentMethod && overrides.paymentMethod !== 'cash' && !('referenceNumber' in overrides)
+    ? { referenceNumber: `CL-REF-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` }
+    : {}
+
 const cashOrder = (token, overrides = {}) =>
   request(app)
     .post('/order/create')
     .set('Authorization', `Bearer ${token}`)
-    .send({
+    .send(withIdempotencyKey({
       store: store.id,
       items: [{ product: product.id, quantity: 1 }],
       paymentMethod: 'cash',
       cashierName: 'Cash Ledger Test Cashier',
+      ...nonCashRef(overrides),
       ...overrides
-    })
+    }))
 
 beforeAll(async () => {
   store = await db.location.create({ name: 'CASH_LEDGER_STORE', status: 'active' })
@@ -1037,12 +1045,12 @@ describe('Backward compatibility', () => {
     const res = await request(app)
       .post('/order/create')
       .set('Authorization', `Bearer ${cashierToken}`)
-      .send({
+      .send(withIdempotencyKey({
         store: store.id,
         items: [{ product: product.id, quantity: 1 }],
         paymentMethod: 'cash',
         cashierName: 'Legacy Client'
-      })
+      }))
     expect(res.status).toBe(201)
   })
 })

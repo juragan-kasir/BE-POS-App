@@ -27,6 +27,15 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.ENUM('draft', 'completed', 'cancelled'),
         defaultValue: 'draft'
       },
+      // P1-5: whether this receipt's stock effect has been applied. Drafts
+      // start unposted and post exactly once on completion; receipts created
+      // already-completed post at create. Pre-existing rows default true
+      // (they posted at create under the old behavior).
+      stockPosted: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: true
+      },
       notes: {
         type: DataTypes.TEXT
       },

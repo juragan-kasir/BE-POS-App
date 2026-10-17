@@ -2,6 +2,7 @@ process.env.NODE_ENV = 'test'
 process.env.VERCEL = 'true'
 
 const request = require('supertest')
+const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
@@ -76,13 +77,13 @@ const createOrder = (body) =>
   request(app)
     .post('/order/create')
     .set('Authorization', `Bearer ${cashierToken}`)
-    .send({
+    .send(withIdempotencyKey({
       store: location.id,
       items: [{ product: product.id, quantity: 1 }],
       paymentMethod: 'cash',
       cashierName: 'Tax Cashier',
       ...body
-    })
+    }))
 
 describe('Phase 18 Tax Toggle', () => {
   test('useTax true → taxAmount 1650 total 16650', async () => {

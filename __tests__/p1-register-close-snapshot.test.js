@@ -2,6 +2,7 @@ process.env.NODE_ENV = 'test'
 process.env.VERCEL = 'true'
 
 const request = require('supertest')
+const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
@@ -43,14 +44,14 @@ async function makeCounterOrder({ quantity = QTY, paymentMethod = 'cash', extra 
   const res = await request(app)
     .post('/order/create')
     .set(auth(adminToken))
-    .send({
+    .send(withIdempotencyKey({
       store: store.id,
       items: [{ product: product.id, quantity }],
       paymentMethod,
       cashierName: 'P1C Cashier',
       idempotencyKey: unique('p1ccreate'),
       ...extra
-    })
+    }))
   if (res.status !== 201) throw new Error('counter setup failed: ' + JSON.stringify(res.body))
   return res.body.data
 }

@@ -2,6 +2,7 @@ process.env.NODE_ENV = 'test'
 process.env.VERCEL = 'true'
 
 const request = require('supertest')
+const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
@@ -48,13 +49,13 @@ async function sell(items, key) {
   const res = await request(app)
     .post('/order/create')
     .set('Authorization', `Bearer ${adminToken}`)
-    .send({
+    .send(withIdempotencyKey({
       store: store.id,
       items,
       paymentMethod: 'cash',
       cashierName: 'Cancel Cashier',
       idempotencyKey: key || unique('cancelsell')
-    })
+    }))
   if (res.status !== 201) throw new Error('sale setup failed: ' + JSON.stringify(res.body))
   return res.body.data
 }

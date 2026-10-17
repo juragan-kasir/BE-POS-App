@@ -2,6 +2,7 @@ process.env.NODE_ENV = 'test'
 process.env.VERCEL = 'true'
 
 const request = require('supertest')
+const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
@@ -23,6 +24,8 @@ beforeAll(async () => {
     price: 10000,
     stock: 20
   })
+  // DR-14: the outlet row is the authoritative stock.
+  await db.product_store_stock.create({ product: product.id, store: location.id, stock: 20 })
   // P1-4: central gate denies unknown caller identities; these rows
   // satisfy the identity invariant. Assertions below are unchanged.
   await db.user.create({
@@ -95,12 +98,12 @@ describe('PUT /order/update-status — cancel restores stock (reverseOrderStock)
     const createRes = await request(app)
       .post('/order/create')
       .set('Authorization', `Bearer ${cashierToken}`)
-      .send({
+      .send(withIdempotencyKey({
         store: location.id,
         items: [{ product: product.id, quantity: 5 }],
         paymentMethod: 'cash',
         cashierName: 'Test Cashier'
-      })
+      }))
     expect(createRes.status).toBe(201)
 
     const afterCreate = await db.product.findByPk(product.id)
@@ -148,12 +151,12 @@ describe('PUT /order/update-status — cancel restores stock (reverseOrderStock)
     const createRes = await request(app)
       .post('/order/create')
       .set('Authorization', `Bearer ${cashierToken}`)
-      .send({
+      .send(withIdempotencyKey({
         store: location.id,
         items: [{ product: product.id, quantity: 5 }],
         paymentMethod: 'cash',
         cashierName: 'Test Cashier'
-      })
+      }))
     expect(createRes.status).toBe(201)
     const orderId = createRes.body.data.id
 

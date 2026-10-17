@@ -1,4 +1,5 @@
 require('dotenv').config({ path: __dirname + '/../.env' })
+const { requireEnv } = require('../utils/seedCredential')
 
 // Phase 30F-1: default-deny guard BEFORE any Sequelize instantiation or
 // authentication. This script TRUNCATEs production tables by design.
@@ -25,7 +26,7 @@ const { Sequelize } = require('sequelize')
 
 const devConfig = {
   username: process.env.DB_DEV_USERNAME || 'postgres',
-  password: process.env.DB_DEV_PASSWORD || 'teddyferdian98',
+  password: requireEnv('DB_DEV_PASSWORD'),
   database: process.env.DB_DEV_DATABASE || 'cashier_app',
   host: process.env.DB_DEV_HOST || '127.0.0.1',
   port: parseInt(process.env.DB_DEV_PORT) || 5432,

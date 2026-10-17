@@ -37,7 +37,9 @@ const {
   financialError,
   retirePendingSplits
 } = require('../service/orderFinancials')
-const { normalizePaymentMethod, requiresTenderReference } = require('../service/canonicalPayment')
+const { normalizePaymentMethod, requireTenderReference } = require('../service/canonicalPayment')
+const { assertSettlementReferenceUnused } = require('../service/settlementReference')
+const { expireStaleQrOrders } = require('../service/qrOrderExpiry')
 const {
   counterOrderMismatches,
   customerOrderMismatches,
@@ -230,36 +232,23 @@ const parseExpectedPrice = (value) => {
   return { present: true, valid: true, value: n }
 }
 
-// Single source of truth for the "store row wins, else base stock" rule used
-// by BOTH order validation (getEffectiveStock) and the public customer menu
-// (batched lookup in getCustomerMenu) so the two paths can never drift.
-// product_store_stock.stock is NOT NULL DEFAULT 0 — a present row is always
-// authoritative, and an explicit zero is a real zero, never "missing".
-const resolveEffectiveStock = (product, pssRow) => {
-  const base =
-    product && product.stock !== null && product.stock !== undefined
-      ? Number(product.stock)
-      : null
-  return pssRow && pssRow.stock !== null && pssRow.stock !== undefined
-    ? Number(pssRow.stock)
-    : base
-}
+// Single source of truth for outlet availability, used by BOTH order
+// validation (getEffectiveStock) and the public customer menu (batched
+// lookup in getCustomerMenu) so the two paths can never drift.
+// BA gap 027 (DR-14): per-outlet stock is authoritative and the global
+// product.stock is never an availability fallback — an outlet without a
+// product_store_stock row has no stock of that product (0).
+const resolveEffectiveStock = (_product, pssRow) =>
+  pssRow && pssRow.stock !== null && pssRow.stock !== undefined ? Number(pssRow.stock) : 0
 
-// Resolve effective stock for a product in a store. Uses the store-specific
-// stock row (product_store_stock) when present, otherwise falls back to the
-// base product stock. This matches how the cashier UI displays stock and how
-// stock is deducted on sale (both base and per-store are kept in sync).
+// Outlet stock of a product (DR-14): its product_store_stock row, or 0 when
+// the outlet has none. A read failure propagates — never a global fallback.
 const getEffectiveStock = async (product, store) => {
   if (!product || !store) return null
-  try {
-    const pss = await db.product_store_stock.findOne({
-      where: { product: product.id, store }
-    })
-    return resolveEffectiveStock(product, pss)
-  } catch {
-    // product_store_stock table may not exist; fall back to base stock
-    return resolveEffectiveStock(product, null)
-  }
+  const pss = await db.product_store_stock.findOne({
+    where: { product: product.id, store }
+  })
+  return resolveEffectiveStock(product, pss)
 }
 
 // Batched per-store effective stock for a set of products — semantically
@@ -273,16 +262,12 @@ const getEffectiveStockMap = async (products, store) => {
   const map = new Map()
   for (const [id] of productById) map.set(id, resolveEffectiveStock(productById.get(id), null))
   if (!map.size || !store) return map
-  try {
-    const rows = await db.product_store_stock.findAll({
-      where: { product: Array.from(productById.keys()), store },
-      attributes: ['product', 'stock']
-    })
-    for (const row of rows) {
-      map.set(String(row.product), resolveEffectiveStock(productById.get(String(row.product)), row))
-    }
-  } catch {
-    // product_store_stock table may not exist; every product falls back to base stock
+  const rows = await db.product_store_stock.findAll({
+    where: { product: Array.from(productById.keys()), store },
+    attributes: ['product', 'stock']
+  })
+  for (const row of rows) {
+    map.set(String(row.product), resolveEffectiveStock(productById.get(String(row.product)), row))
   }
   return map
 }
@@ -715,9 +700,28 @@ const calculateOrderTotals = (
 // be read and changed independently. All still module-private — only
 // exports.createOrder below calls them.
 
+// BA gap 019 (DR-09): a table held only by a stale unpaid QR order is freed
+// before it is judged occupied. A no-op unless QR_PENDING_EXPIRY_MINUTES
+// is configured.
+// Fail-safe: an expiry failure is logged and the table is judged as it
+// stands, exactly as before this rule existed — ordering never breaks.
+const releaseTableFromStaleQrOrder = async (table, store) => {
+  if (!table || table.status !== 'occupied') return table
+  try {
+    const expired = await expireStaleQrOrders({ store, tableId: table.id })
+    return expired.length ? Table.findOne({ where: { id: table.id, store } }) : table
+  } catch (error) {
+    console.error('QR order expiry failed; table left as is:', error)
+    return table
+  }
+}
+
 const checkTableAvailable = async (tableId, store) => {
   if (!tableId) return { ok: true }
-  const table = await Table.findOne({ where: { id: tableId, store } })
+  const table = await releaseTableFromStaleQrOrder(
+    await Table.findOne({ where: { id: tableId, store } }),
+    store
+  )
   if (table && ['occupied', 'reserved', 'maintenance'].includes(table.status)) {
     return {
       ok: false,
@@ -860,6 +864,15 @@ const resolveOrderDiscount = async ({
 const isAdminRoleForOrder = (user) =>
   user && (user.roleType === 'admin' || user.roleType === 'super_admin')
 
+// P1-7: menu visibility (status active) is not enough — checkout must
+// refuse products that are inactive or flagged unavailable (master or
+// daily switch). Null/legacy values stay orderable (fail-open on missing
+// data); only an explicit off-switch refuses.
+const isProductSellable = (prod) =>
+  prod.status === 'active' &&
+  prod.isAvailable !== false &&
+  prod.isAvailableHariIni !== false
+
 // Re-derives every item's price from the DB (never trusts client-sent
 // amounts), loads + validates any referenced bundles, and checks stock for
 // every line — bundle components and regular items alike, in one pass
@@ -963,6 +976,15 @@ const loadAndPriceOrderItems = async (items, store, user = null) => {
             message: `Bundle not available: ${item.bundleName || item.bundleId}`
           }
         }
+        // P1-7: an inactive/unavailable component makes the whole bundle
+        // unavailable.
+        if (!isProductSellable(prod)) {
+          return {
+            ok: false,
+            code: 'BUNDLE_NOT_AVAILABLE',
+            message: `Bundle "${bundle.name}" tidak tersedia: produk "${prod.nameProduct}" sedang tidak tersedia`
+          }
+        }
         // F7: a make_to_order component's own stock is not authoritative —
         // its recipe ingredients are checked (and refused with
         // INGREDIENT_STOCK_CONFLICT) inside the sale transaction. Same rule
@@ -1001,6 +1023,15 @@ const loadAndPriceOrderItems = async (items, store, user = null) => {
         ok: false,
         code: 'PRODUCT_NOT_FOUND',
         message: `Product not found: ${item.productName || item.product || item.productId}`
+      }
+    }
+    // P1-7: inactive or unavailable products are refused with an explicit
+    // message (unlike foreign products, which stay indistinguishable).
+    if (!isProductSellable(prod)) {
+      return {
+        ok: false,
+        code: 'PRODUCT_NOT_AVAILABLE',
+        message: `Produk "${prod.nameProduct || item.productName || item.product || item.productId}" sedang tidak tersedia`
       }
     }
     productById.set(prod.id, prod)
@@ -1417,6 +1448,16 @@ exports.createOrder = async (req, res) => {
     expectedTotal
   } = req.body
 
+  // BA gap 005 (DR-23 §K): a counter sale is money-producing, so it needs
+  // an idempotency key — a retry can then never create a second sale.
+  // Refused before any lookup or write.
+  if (typeof idempotencyKey !== 'string' || idempotencyKey.trim() === '') {
+    return res.status(422).json({
+      error: 'An idempotencyKey is required for a counter sale',
+      code: 'IDEMPOTENCY_KEY_REQUIRED'
+    })
+  }
+
   try {
     // A retried/duplicate submit with the same key (e.g. a POS terminal
     // retrying after a network timeout, or a double-tap on "Pay") returns
@@ -1487,15 +1528,19 @@ exports.createOrder = async (req, res) => {
     }
 
     // F-PAY-1: a paid order must always carry its payment-ledger row.
-    // paymentMethod is optional in the schema and recordOrderPayment skips
-    // a falsy method — without normalization a missing method produced a
-    // "paid" order with zero transaction rows. The established product
-    // contract treats an absent method as cash exact tender (status notes,
-    // paid-transition and split-bill `|| 'cash'` fallbacks), so normalize
-    // once here and route through normal cash validation + persistence.
-    // P1 (DR-PAY-ATTR-06): the persisted tender is always canonical; an
-    // unknown method is refused with 422 before any write.
-    const effectivePaymentMethod = normalizePaymentMethod(paymentMethod || 'cash')
+    // DR-23 §D/§O (BA gap G-02): the tender is stated explicitly — an omitted
+    // method is refused, never assumed to be cash — and a manually confirmed
+    // tender carries its reference (OTHER: its description). Both refusals
+    // happen before any write. P1 (DR-PAY-ATTR-06): the persisted tender is
+    // always canonical; an unknown method is refused with 422.
+    const effectivePaymentMethod = normalizePaymentMethod(paymentMethod)
+    if (!effectivePaymentMethod) {
+      return res.status(422).json({
+        error: 'A payment method is required for a counter sale',
+        code: 'PAYMENT_METHOD_REQUIRED'
+      })
+    }
+    const counterReference = requireTenderReference(effectivePaymentMethod, referenceNumber)
 
     // Fails fast, before any DB write is attempted, if the cash tender
     // is physically impossible or malformed.
@@ -1636,6 +1681,13 @@ exports.createOrder = async (req, res) => {
          t
        )
 
+       // BA 004 (DR-23 §D): never the same reference twice per store+method.
+       await assertSettlementReferenceUnused({
+         store: authorizedStore,
+         method: effectivePaymentMethod,
+         reference: counterReference,
+         transaction: t
+       })
        await recordOrderPayment(
         createdOrder,
         effectivePaymentMethod,
@@ -1646,12 +1698,7 @@ exports.createOrder = async (req, res) => {
         changeGiven,
         {
           cashRegisterId: openRegister.id,
-          referenceNumber:
-            effectivePaymentMethod === 'CASH'
-              ? null
-              : typeof referenceNumber === 'string' && referenceNumber.trim() !== ''
-                ? referenceNumber.trim()
-                : null
+          referenceNumber: counterReference
         }
       )
       await createInitialOrderStatus(
@@ -1943,43 +1990,31 @@ const deductStockForOrder = async (
       // stock exactly as before. best_selling is still recorded for every
       // mode (it's a sales-count for reporting, not a stock signal).
       if (product.inventoryMode !== 'make_to_order') {
-        const oldStock = Number(product.stock) || 0
-        // Re-validate against the value just read under the row lock, not the
-        // unlocked pre-check earlier in the request — two concurrent orders
-        // can both pass that pre-check for the last unit, then both reach
-        // here; without this, both would silently succeed (the old code
-        // clamped to 0 instead of rejecting), selling more than was in stock.
+        // BA gap 027 (DR-14): the outlet row is the authoritative stock. It
+        // is re-read under a row lock (not the unlocked pre-check earlier in
+        // the request), so two concurrent sales of the last unit cannot both
+        // pass; a missing row is 0, never seeded from the global stock.
+        const outletRow = await db.product_store_stock.findOne({
+          where: { product: product.id, store },
+          transaction: t,
+          lock: t.LOCK.UPDATE
+        })
+        const oldStock = outletRow ? Number(outletRow.stock) || 0 : 0
         if (oldStock < deductQty) {
           const err = new Error(
             `Stok "${product.nameProduct || 'produk'}" tidak mencukupi. Tersedia: ${oldStock}, diminta: ${deductQty}`
           )
           err.statusCode = 400
+          err.code = 'INSUFFICIENT_STOCK'
           throw err
         }
         const newStock = oldStock - deductQty
+        await outletRow.update({ stock: newStock }, { transaction: t })
+        // The global product.stock is only a derived total (DR-14): it
+        // follows the outlet movement and is never read for availability.
         await product.update(
           { stock: db.sequelize.literal(`GREATEST(stock - ${deductQty}, 0)`) },
           { transaction: t }
-        )
-        // Keep the in-memory row consistent so a second reference to the
-        // same product later in this loop (another line, or another
-        // component of a different bundle) sees the already-decremented
-        // stock.
-        product.stock = newStock
-
-        // Seed a missing shadow row at the just-locked product baseline
-        // (same convention as adjustProductStock) — seeding at 0 would
-        // leave the per-store stock permanently diverged from product.stock,
-        // since every later mutation only tracks deltas.
-        await db.sequelize.query(
-          `INSERT INTO product_store_stock (product, store, stock, "createdAt", "updatedAt")
-           VALUES ($1, $2, $3, NOW(), NOW())
-           ON CONFLICT (product, store) DO NOTHING`,
-          { bind: [product.id, store, oldStock], transaction: t }
-        )
-        await db.product_store_stock.update(
-          { stock: db.sequelize.literal(`GREATEST(stock - ${deductQty}, 0)`) },
-          { where: { product: product.id, store }, transaction: t }
         )
 
         // ponytail: FIFO - consume oldest batches first
@@ -2256,21 +2291,14 @@ const resolvePaidSettlement = async ({
   // normalizePaymentMethod. Whitespace-only counts as missing; the stored
   // reference is trimmed. Thrown inside the settlement transaction, so the
   // refusal writes nothing.
-  const reference = typeof referenceNumber === 'string' ? referenceNumber.trim() : ''
-  if (requiresTenderReference(method) && reference === '') {
-    throw financialError(
-      422,
-      'REFERENCE_REQUIRED',
-      `referenceNumber is required for ${method} settlement`
-    )
-  }
+  const reference = requireTenderReference(method, referenceNumber)
 
   return {
     method,
     cashReceived,
     changeGiven,
     registerId: register.id,
-    referenceNumber: method === 'CASH' || reference === '' ? null : reference,
+    referenceNumber: reference,
     amountDue
   }
 }
@@ -2418,18 +2446,27 @@ const recordPromoUsageIfApplied = async (
       : null,
     createdBy: userId,
     transaction,
-    // The discount was already computed and applied to this order's totals
-    // before checkout reached this point — a per-member cap collision here
-    // is a bookkeeping edge case, not a reason to refuse recording that the
-    // (already-honored) discount happened. Only maxUsageTotal, the actual
-    // "no more discounted orders allowed at all" cap, is worth knowing
-    // about below; skip the extra query for the per-member cap.
-    enforcePerMemberLimit: false
+    // P1-8: enforce the per-member cap inside the same transaction (the
+    // helper serializes on the locked campaign row). The evaluation-time
+    // check runs unlocked before this transaction, so concurrent
+    // checkouts for one member would otherwise all pass it and
+    // over-redeem. A hit here refuses the whole order (409) — the
+    // discount was already honored in this order's totals, so recording a
+    // usage the cap forbids would be a silent over-redemption.
+    enforcePerMemberLimit: true
   })
   if (result.limitReached) {
     console.error(
       `Promo usage for campaign ${appliedCampaignId} not recorded on order ${order.id}: maxUsageTotal reached`
     )
+  }
+  if (result.memberLimitReached) {
+    const err = new Error(
+      `Promo campaign usage limit per member reached`
+    )
+    err.statusCode = 409
+    err.code = 'PROMO_MEMBER_LIMIT'
+    throw err
   }
 }
 
@@ -2701,7 +2738,7 @@ const deductStockForPaidOrder = async (
     where: { order: orderId },
     transaction: t
   })
-  if (items.length === 0) return
+  if (items.length === 0) return []
 
   // Flatten bundle order_items into their component products so the
   // deferred paid-transition path deducts every component exactly as the
@@ -2771,47 +2808,56 @@ const deductStockForPaidOrder = async (
   const productById = new Map(products.map((p) => [p.id, p]))
 
   const stockHistoryRows = []
+  // BA gap 028 (DR-18): settling an already-taken order is never refused
+  // for stock. Whatever the outlet cannot cover is recorded here (and in
+  // the stock history notes) and returned so the caller audits and
+  // surfaces it — never hidden by a silent clamp.
+  const shortages = []
 
   for (const item of flatItems) {
     const product = productById.get(item.product)
     if (!product) continue
 
     if (product.inventoryMode !== 'make_to_order') {
-      const oldStock = Number(product.stock) || 0
       const qty = Math.floor(Number(item.quantity)) || 0
-      const newStock = Math.max(oldStock - qty, 0)
-      await product.update(
-        {
-          stock: db.sequelize.literal(`GREATEST(stock - ${qty}, 0)`)
-        },
-        { transaction: t }
-      )
-      product.stock = newStock
-
-      // ponytail: atomic upsert + deduct per-store stock
-      await db.sequelize.query(
-        `INSERT INTO product_store_stock (product, store, stock, "createdAt", "updatedAt")
-         VALUES ($1, $2, 0, NOW(), NOW())
-         ON CONFLICT (product, store) DO NOTHING`,
-        { bind: [item.product, effectiveStore], transaction: t }
-      )
-      await db.product_store_stock.update(
-        {
-          stock: db.sequelize.literal(`GREATEST(stock - ${qty}, 0)`)
-        },
-        {
-          where: { product: item.product, store: effectiveStore },
-          transaction: t
-        }
-      )
-
-      // ponytail: FIFO - consume oldest batches first
-      await batchService.deductFifo({
-        productId: product.id,
-        store: effectiveStore,
-        qty,
-        transaction: t
+      // DR-14: the outlet row is the authoritative stock, read under a row
+      // lock; a missing row is 0 and is never seeded from the global stock.
+      const outletRow = await db.product_store_stock.findOne({
+        where: { product: product.id, store: effectiveStore },
+        transaction: t,
+        lock: t.LOCK.UPDATE
       })
+      const oldStock = outletRow ? Number(outletRow.stock) || 0 : 0
+      const deducted = Math.min(Math.max(oldStock, 0), qty)
+      const shortfall = qty - deducted
+      const newStock = oldStock - deducted
+      if (outletRow && deducted > 0) {
+        await outletRow.update({ stock: newStock }, { transaction: t })
+      }
+      if (deducted > 0) {
+        // Derived global total follows the outlet movement (DR-14).
+        await product.update(
+          { stock: db.sequelize.literal(`GREATEST(stock - ${deducted}, 0)`) },
+          { transaction: t }
+        )
+        // ponytail: FIFO - consume oldest batches first
+        await batchService.deductFifo({
+          productId: product.id,
+          store: effectiveStore,
+          qty: deducted,
+          transaction: t
+        })
+      }
+      if (shortfall > 0) {
+        shortages.push({
+          type: 'product',
+          id: product.id,
+          name: item.productName || product.nameProduct,
+          required: qty,
+          deducted,
+          shortfall
+        })
+      }
 
       stockHistoryRows.push({
         product: product.id,
@@ -2819,10 +2865,12 @@ const deductStockForPaidOrder = async (
         referenceType: 'sale',
         referenceId: orderId,
         quantityBefore: oldStock,
-        quantityChange: -qty,
+        quantityChange: -deducted,
         quantityAfter: newStock,
         unit: product.unit || 'pcs',
-        notes: item.referenceNote,
+        notes: shortfall
+          ? `${item.referenceNote} — KURANG ${shortfall} (stok tidak mencukupi saat pembayaran)`
+          : item.referenceNote,
         createdBy: changedBy
       })
     }
@@ -2875,9 +2923,11 @@ const deductStockForPaidOrder = async (
       referenceId: orderId,
       notes: `Penjualan: ${orderNumber}`,
       createdBy: changedBy,
-      transaction: t
+      transaction: t,
+      shortages
     })
   }
+  return shortages
 }
 exports.deductStockForPaidOrder = deductStockForPaidOrder
 // P1: split-bill settlement reuses the same server-side cash-tender
@@ -2929,6 +2979,8 @@ exports.updateOrderStatus = async (req, res) => {
   // Split rows retired by this transition; audited after commit.
   let retiredSplits = []
   let retiredSplitReason = null
+  // BA gap 028 (DR-18): stock the settlement could not cover.
+  let stockShortages = []
 
   try {
     const statusAttrs = await getOrderAttributes()
@@ -3540,6 +3592,13 @@ exports.updateOrderStatus = async (req, res) => {
       // deduct stock exactly once on the transition to PAID.
       if (isSettlement) {
         if (paidTender) {
+          // BA 004 (DR-23 §D): never the same reference twice per store+method.
+          await assertSettlementReferenceUnused({
+            store: lockedOrder.store,
+            method: paidTender.method,
+            reference: paidTender.referenceNumber,
+            transaction: t
+          })
           await recordOrderPayment(
             lockedOrder,
             paidTender.method,
@@ -3560,7 +3619,21 @@ exports.updateOrderStatus = async (req, res) => {
         // Stock is deducted only when the order first reaches PAID
         // (counter orders were deducted at creation).
         if (oldPaymentStatus !== 'paid') {
-          await deductPaidOrderStock(t)
+          stockShortages = (await deductPaidOrderStock(t)) || []
+          if (stockShortages.length) {
+            // Recorded with the settlement (same transaction): the payment
+            // stands, the shortage is explicit and attributable.
+            await createAudit(
+              req,
+              'update',
+              'stock_shortage',
+              id,
+              `Order ${order.orderNumber || id} settled with a stock shortage`,
+              null,
+              { shortages: stockShortages },
+              t
+            )
+          }
         }
       }
 
@@ -3770,7 +3843,8 @@ exports.updateOrderStatus = async (req, res) => {
 
     return res.status(200).json({
       message: 'Order status updated',
-      data: order
+      data: order,
+      ...(stockShortages.length ? { stockShortages } : {})
     })
   } catch (error) {
     console.error('Error:', error)
@@ -4111,6 +4185,18 @@ exports.createCustomerOrder = async (req, res) => {
       }
     }
 
+    // DR-16 / DR-23 §H (BA gap G-01): an anonymous diner never receives
+    // member benefits. A self-supplied customerId is guessable (sequential,
+    // and /customer-member reveals it by name), so this public route refuses
+    // it before any read or write; staff attach a verified member at
+    // settlement. customerName stays a plain order label.
+    if (customerId !== undefined && customerId !== null && customerId !== '') {
+      return res.status(400).json({
+        code: 'MEMBER_ATTACH_REQUIRES_STAFF',
+        message: 'A member is attached by staff at payment, not from a QR order'
+      })
+    }
+
     // Public, unauthenticated endpoint on a QR-ordering flow — flaky mobile
     // networks make client retries routine. Same replay pattern as
     // createOrder: a retried submit with the same key returns the order
@@ -4125,47 +4211,24 @@ exports.createCustomerOrder = async (req, res) => {
       Date.now().toString().slice(-8) +
       Math.random().toString(36).slice(2, 6).toUpperCase()
 
+    // BA gap 019 (DR-09): a stale unpaid QR order no longer holds the table.
+    const currentTable = await releaseTableFromStaleQrOrder(table, store)
     if (
-      table &&
-      ['occupied', 'reserved', 'maintenance'].includes(table.status)
+      currentTable &&
+      ['occupied', 'reserved', 'maintenance'].includes(currentTable.status)
     ) {
       return res.status(400).json({
         message:
-          table.status === 'occupied'
+          currentTable.status === 'occupied'
             ? 'Table is already occupied'
             : 'Table is not available'
       })
     }
 
-    let member = null
-    if (customerId) {
-      // AUD-3 (security): never resolve a customerId across stores. A
-      // foreign or unknown customerId is indistinguishable and rejected —
-      // no existence side-channel for other stores' members.
-      member = await db.member.findOne({
-        where: { id: customerId, store }
-      })
-      if (!member) {
-        return res.status(400).json({ message: 'Customer not found' })
-      }
-    }
-    // DR-16: free-text customerName never establishes member identity and
-    // unlocks no tier discount or loyalty benefits. It stays a plain order
-    // label (receipt display, kitchen ticket). Member attachment for QR
-    // orders happens only through an explicitly supplied customerId today;
-    // verified staff-attach at settlement is the approved follow-up
-    // mechanism, not free-text matching.
-
-    let discountValue = 0
+    // A QR order is always anonymous (customerId refused above), so no member
+    // tier discount applies; only store-wide campaigns can discount it.
+    const discountValue = 0
     let discountType = 'none'
-
-    if (member && member.tier) {
-      const tier = await db.member_tier.findByPk(member.tier)
-      if (tier && tier.discountPercent > 0) {
-        discountValue = tier.discountPercent
-        discountType = 'percent'
-      }
-    }
 
     // Pre-load bundles
     const bundleMap = {}
@@ -4242,6 +4305,13 @@ exports.createCustomerOrder = async (req, res) => {
             message: `Product not found: ${item.productName || item.productId}`
           })
         }
+        // P1-7: inactive or unavailable products are refused explicitly.
+        if (!isProductSellable(prod)) {
+          return res.status(400).json({
+            code: 'PRODUCT_NOT_AVAILABLE',
+            message: `Produk "${prod.nameProduct || item.productName || item.productId}" sedang tidak tersedia`
+          })
+        }
         // W3-1 (DR-11): same outlet-resolved catalog price as the counter
         // path; override stays prohibited here.
         const catalogPrice = await resolveCatalogBase(prod, store)
@@ -4284,6 +4354,14 @@ exports.createCustomerOrder = async (req, res) => {
           if (!(await isProductOrderableAtStore(prod.id, store))) {
             return res.status(400).json({
               message: `Bundle not available: ${item.bundleName || item.bundleId}`
+            })
+          }
+          // P1-7: an inactive/unavailable component makes the whole bundle
+          // unavailable.
+          if (!isProductSellable(prod)) {
+            return res.status(400).json({
+              code: 'PRODUCT_NOT_AVAILABLE',
+              message: `Bundle "${bundle.name}" tidak tersedia: produk "${prod.nameProduct}" sedang tidak tersedia`
             })
           }
           // F7: a make_to_order product's finished-good stock is not
@@ -4389,7 +4467,7 @@ exports.createCustomerOrder = async (req, res) => {
         subtotal: item.price * item.quantity
       })),
       store,
-      member ? member.id : null,
+      null,
       subTotal
     )
 
@@ -4399,8 +4477,6 @@ exports.createCustomerOrder = async (req, res) => {
       discountAmount = campaignResult.discountAmount
       appliedCampaignId = campaignResult.campaignId
       discountType = 'nominal'
-    } else if (discountType === 'percent') {
-      discountAmount = Math.round(subTotal * (discountValue / 100))
     }
 
     const afterDiscount = subTotal - discountAmount
@@ -4412,7 +4488,7 @@ exports.createCustomerOrder = async (req, res) => {
       orderNumber,
       store,
       tableId: tableId || null,
-      customerId: member ? member.id : null,
+      customerId: null,
       cashierId: null,
       cashierName: customerName || 'Customer',
       customerName: customerName || null,
@@ -4582,7 +4658,7 @@ exports.createCustomerOrder = async (req, res) => {
         const promoResult = await incrementPromoUsage({
           campaignId: appliedCampaignId,
           orderId: createdOrder.id,
-          memberId: member ? member.id : null,
+          memberId: null,
           discountApplied: discountAmount,
           freeItemsGiven: campaignResult.reward
             ? [
@@ -4594,12 +4670,21 @@ exports.createCustomerOrder = async (req, res) => {
             : null,
           createdBy: req.user?.id,
           transaction: t,
-          enforcePerMemberLimit: false
+          // P1-8: same per-member enforcement as the counter path — a
+          // cap hit refuses the order so a discounted total can never
+          // settle without a recorded usage.
+          enforcePerMemberLimit: true
         })
         if (promoResult.limitReached) {
           console.error(
             `Promo usage for campaign ${appliedCampaignId} not recorded on order ${createdOrder.id}: maxUsageTotal reached`
           )
+        }
+        if (promoResult.memberLimitReached) {
+          const err = new Error(`Promo campaign usage limit per member reached`)
+          err.statusCode = 409
+          err.code = 'PROMO_MEMBER_LIMIT'
+          throw err
         }
       }
 

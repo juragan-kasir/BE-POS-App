@@ -44,6 +44,10 @@ beforeAll(async () => {
     price: 1000,
     stock: 100
   })
+  // DR-14: the outlet row is the authoritative stock.
+  for (const s of [storeA, storeB]) {
+    await db.product_store_stock.create({ product: product.id, store: s.id, stock: 100 })
+  }
 })
 
 afterAll(async () => {
@@ -55,6 +59,7 @@ afterAll(async () => {
   await db.order.destroy({ where: { store: [storeA?.id, storeB?.id].filter(Boolean) }, force: true })
   await db.waiter_request.destroy({ where: {}, force: true })
   await db.table.destroy({ where: { id: [tableA?.id, tableB?.id].filter(Boolean) }, force: true })
+  await db.product_store_stock.destroy({ where: { product: product?.id }, force: true })
   await db.product.destroy({ where: { id: product?.id }, force: true })
   await db.category.destroy({ where: { id: category?.id }, force: true })
   await db.location.destroy({ where: { id: [storeA?.id, storeB?.id].filter(Boolean) }, force: true })

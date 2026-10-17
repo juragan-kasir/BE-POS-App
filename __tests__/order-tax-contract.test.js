@@ -2,6 +2,7 @@ process.env.NODE_ENV = 'test'
 process.env.VERCEL = 'true'
 
 const request = require('supertest')
+const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
@@ -65,17 +66,21 @@ afterAll(async () => {
   await db.location.destroy({ where: { id: location?.id }, force: true })
 })
 
+// G-02 (DR-23 §D): a non-cash counter sale carries its transaction reference.
 const orderOne = (overrides = {}) =>
   request(app)
     .post('/order/create')
     .set('Authorization', `Bearer ${cashierToken}`)
-    .send({
+    .send(withIdempotencyKey({
       store: location.id,
       items: [{ product: productA.id, quantity: 1 }],
       paymentMethod: 'cash',
       cashierName: 'Tax Contract',
+      ...(overrides.paymentMethod && overrides.paymentMethod !== 'cash'
+        ? { referenceNumber: `TAX-REF-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` }
+        : {}),
       ...overrides
-    })
+    }))
 
 describe('tax config resolution contract (F-SMOKE-01)', () => {
   test('a global (store: null) active PPN config prices the order — not the 11% fallback', async () => {

@@ -2,6 +2,7 @@ process.env.NODE_ENV = 'test'
 process.env.VERCEL = 'true'
 
 const request = require('supertest')
+const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
@@ -69,12 +70,12 @@ describe('duplicate global PPN exposure (T2)', () => {
     const res = await request(app)
       .post('/order/create')
       .set('Authorization', `Bearer ${cashierToken}`)
-      .send({
+      .send(withIdempotencyKey({
         store: store.id,
         items: [{ product: product.id, quantity: 1 }],
         paymentMethod: 'cash',
         cashierName: 'T2 Dup'
-      })
+      }))
     expect(res.status).toBe(201)
     // 10000 base, one applied 11% row.
     expect(Number(res.body.data.taxAmount)).toBe(1100)
