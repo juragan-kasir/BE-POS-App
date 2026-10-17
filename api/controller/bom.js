@@ -49,13 +49,26 @@ const validateBomLines = async (lines, store, transaction) => {
   return { bomLines, ingredients }
 }
 
+// Cost of ONE base unit of an ingredient. costPrice is the purchase price
+// per purchase unit (`unit`, e.g. Rp25.000 per kg) and conversionFactor is
+// how many base units one purchase unit holds (1 kg = 25 butir), while BOM
+// lines are always in the base unit (enforced above). BA finding #4: using
+// costPrice directly priced 5 butir as 5 kg (Rp143.000 instead of Rp6.800).
+const baseUnitCost = (ingredient) => {
+  const costPrice = Number(ingredient?.costPrice || 0)
+  const factor = Number(ingredient?.conversionFactor)
+  return factor > 0 ? costPrice / factor : costPrice
+}
+
 // HPP / food-cost / composition snapshot onto the product, from the BOM's
-// current lines and the ingredients' current cost.
+// current lines and the ingredients' current cost per base unit.
 const refreshProductCosting = async (productId, bomLines, ingredients, transaction) => {
   const prod = await db.product.findByPk(productId, { transaction })
   if (!prod || bomLines.length === 0) return
-  const costMap = Object.fromEntries(ingredients.map((i) => [i.id, Number(i.costPrice || 0)]))
-  const hpp = bomLines.reduce((sum, l) => sum + (costMap[l.ingredientId] || 0) * l.qty, 0)
+  const costMap = Object.fromEntries(ingredients.map((i) => [i.id, baseUnitCost(i)]))
+  const hpp = Math.round(
+    bomLines.reduce((sum, l) => sum + (costMap[l.ingredientId] || 0) * Number(l.qty), 0)
+  )
   const price = Number(prod.price || 0)
   const foodCostPersen =
     hpp > 0 && price > 0 ? Math.min(999.99, parseFloat(((hpp / price) * 100).toFixed(2))) : 0
@@ -67,7 +80,8 @@ const refreshProductCosting = async (productId, bomLines, ingredients, transacti
       ingredientId: l.ingredientId,
       name: ing?.name || 'Unknown',
       qty: l.qty,
-      unit: ing?.unit || l.unit || 'pcs'
+      // The BOM quantity is in the base unit (5 butir, not 5 kg).
+      unit: l.unit || ing?.baseUnit || 'pcs'
     }
   })
   await prod.update({ hppPerPorsi: hpp, foodCostPersen, marginPersen, composition }, { transaction })
