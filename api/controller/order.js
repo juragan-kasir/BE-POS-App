@@ -4194,6 +4194,18 @@ exports.createCustomerOrder = async (req, res) => {
       }
     }
 
+    // DR-16 / DR-23 §H (BA gap G-01): an anonymous diner never receives
+    // member benefits. A self-supplied customerId is guessable (sequential,
+    // and /customer-member reveals it by name), so this public route refuses
+    // it before any read or write; staff attach a verified member at
+    // settlement. customerName stays a plain order label.
+    if (customerId !== undefined && customerId !== null && customerId !== '') {
+      return res.status(400).json({
+        code: 'MEMBER_ATTACH_REQUIRES_STAFF',
+        message: 'A member is attached by staff at payment, not from a QR order'
+      })
+    }
+
     // Public, unauthenticated endpoint on a QR-ordering flow — flaky mobile
     // networks make client retries routine. Same replay pattern as
     // createOrder: a retried submit with the same key returns the order
@@ -4222,35 +4234,10 @@ exports.createCustomerOrder = async (req, res) => {
       })
     }
 
-    let member = null
-    if (customerId) {
-      // AUD-3 (security): never resolve a customerId across stores. A
-      // foreign or unknown customerId is indistinguishable and rejected —
-      // no existence side-channel for other stores' members.
-      member = await db.member.findOne({
-        where: { id: customerId, store }
-      })
-      if (!member) {
-        return res.status(400).json({ message: 'Customer not found' })
-      }
-    }
-    // DR-16: free-text customerName never establishes member identity and
-    // unlocks no tier discount or loyalty benefits. It stays a plain order
-    // label (receipt display, kitchen ticket). Member attachment for QR
-    // orders happens only through an explicitly supplied customerId today;
-    // verified staff-attach at settlement is the approved follow-up
-    // mechanism, not free-text matching.
-
-    let discountValue = 0
+    // A QR order is always anonymous (customerId refused above), so no member
+    // tier discount applies; only store-wide campaigns can discount it.
+    const discountValue = 0
     let discountType = 'none'
-
-    if (member && member.tier) {
-      const tier = await db.member_tier.findByPk(member.tier)
-      if (tier && tier.discountPercent > 0) {
-        discountValue = tier.discountPercent
-        discountType = 'percent'
-      }
-    }
 
     // Pre-load bundles
     const bundleMap = {}
@@ -4489,7 +4476,7 @@ exports.createCustomerOrder = async (req, res) => {
         subtotal: item.price * item.quantity
       })),
       store,
-      member ? member.id : null,
+      null,
       subTotal
     )
 
@@ -4499,8 +4486,6 @@ exports.createCustomerOrder = async (req, res) => {
       discountAmount = campaignResult.discountAmount
       appliedCampaignId = campaignResult.campaignId
       discountType = 'nominal'
-    } else if (discountType === 'percent') {
-      discountAmount = Math.round(subTotal * (discountValue / 100))
     }
 
     const afterDiscount = subTotal - discountAmount
@@ -4512,7 +4497,7 @@ exports.createCustomerOrder = async (req, res) => {
       orderNumber,
       store,
       tableId: tableId || null,
-      customerId: member ? member.id : null,
+      customerId: null,
       cashierId: null,
       cashierName: customerName || 'Customer',
       customerName: customerName || null,
@@ -4682,7 +4667,7 @@ exports.createCustomerOrder = async (req, res) => {
         const promoResult = await incrementPromoUsage({
           campaignId: appliedCampaignId,
           orderId: createdOrder.id,
-          memberId: member ? member.id : null,
+          memberId: null,
           discountApplied: discountAmount,
           freeItemsGiven: campaignResult.reward
             ? [

@@ -57,13 +57,18 @@ async function makeQrOrder({ member, qty = 2 } = {}) {
     .send({
       store: store.id,
       tableId: table.id,
-      ...(member ? { customerId: member.id } : {}),
-      customerName: member ? undefined : unique('DR16 Guest'),
+      customerName: unique('DR16 Guest'),
       items: [{ productId: product.id, productName: product.nameProduct, quantity: qty }],
       idempotencyKey: unique('dr16qr')
     })
   if (res.status !== 201) throw new Error('qr setup failed: ' + JSON.stringify(res.body))
   createdOrderIds.push(res.body.data.id)
+  // G-01: the public route refuses customerId; a member reaches a QR order
+  // only through staff, simulated here by attaching it after creation.
+  if (member) {
+    await db.order.update({ customerId: member.id }, { where: { id: res.body.data.id } })
+    res.body.data.customerId = member.id
+  }
   return res.body.data
 }
 
@@ -516,7 +521,26 @@ describe('DR-16 free-text name grants nothing', () => {
     expect(await memberPoints(member.id)).toBe(0)
   })
 
-  test('explicit customerId attach still works (preservation)', async () => {
+  test('a self-supplied customerId is refused: no order, no tier discount (G-01)', async () => {
+    const member = await makeTieredMember()
+    const table = await makeTable()
+    const before = await db.order.count({ where: { store: store.id } })
+    const res = await request(app)
+      .post('/order/customer-create')
+      .send({
+        store: store.id,
+        tableId: table.id,
+        customerId: member.id,
+        items: [{ productId: product.id, productName: product.nameProduct, quantity: 2 }],
+        idempotencyKey: unique('dr16qrid')
+      })
+    expect(res.status).toBe(400)
+    expect(res.body.code).toBe('MEMBER_ATTACH_REQUIRES_STAFF')
+    expect(await db.order.count({ where: { store: store.id } })).toBe(before)
+    expect((await db.table.findByPk(table.id)).status).not.toBe('occupied')
+  })
+
+  test('a staff-attached member still earns at payment', async () => {
     const member = await makeMember(0)
     const order = await makeQrOrder({ member, qty: 2 })
     const row = await db.order.findByPk(order.id)
