@@ -624,10 +624,13 @@ describe('SEC-004 — customer-create rejects cross-store product/bundle/custome
       })
 
     expect(res.status).toBe(400)
+    expect(res.body.code).toBe('MEMBER_ATTACH_REQUIRES_STAFF')
     expect(await db.order.count({ where: { store: store1.id } })).toBe(ordersBefore)
   })
 
-  test('SEC-CROSS-MEMBER — store 1 order with a store 1 customerId still succeeds (legitimate member link)', async () => {
+  // G-01 (DR-16 / DR-23 §H): a same-store customerId is guessable too, so the
+  // public route refuses it; staff attach a verified member at settlement.
+  test('SEC-CROSS-MEMBER — store 1 order with a store 1 customerId is refused: 400, no order', async () => {
     const ordersBefore = await db.order.count({ where: { store: store1.id } })
 
     const res = await request(app)
@@ -641,10 +644,9 @@ describe('SEC-004 — customer-create rejects cross-store product/bundle/custome
         items: [{ productId: product.id, productName: product.nameProduct, quantity: 1 }]
       })
 
-    expect(res.status).toBe(201)
-    expect(res.body.data.customerId).toBe(memberStore1.id)
-    createdOrderIds.push(res.body.data.id)
-    expect(await db.order.count({ where: { store: store1.id } })).toBe(ordersBefore + 1)
+    expect(res.status).toBe(400)
+    expect(res.body.code).toBe('MEMBER_ATTACH_REQUIRES_STAFF')
+    expect(await db.order.count({ where: { store: store1.id } })).toBe(ordersBefore)
   })
 })
 

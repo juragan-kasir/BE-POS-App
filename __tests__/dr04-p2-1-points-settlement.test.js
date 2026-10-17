@@ -62,13 +62,18 @@ async function makeQrOrder({ customerId } = {}) {
     .send({
       store: store.id,
       tableId: table.id,
-      ...(customerId ? { customerId } : {}),
-      customerName: customerId ? undefined : unique('P21 Guest'),
+      customerName: unique('P21 Guest'),
       items: [{ productId: product.id, productName: product.nameProduct, quantity: 1 }],
       idempotencyKey: unique('p21qr')
     })
   if (res.status !== 201) throw new Error('qr setup failed: ' + JSON.stringify(res.body))
   createdOrderIds.push(res.body.data.id)
+  // G-01: the public route refuses customerId; a member reaches a QR order
+  // only through staff, simulated here by attaching it after creation.
+  if (customerId) {
+    await db.order.update({ customerId }, { where: { id: res.body.data.id } })
+    res.body.data.customerId = customerId
+  }
   return res.body.data
 }
 
