@@ -4,7 +4,7 @@ const Table = db.table
 const Order = db.order
 const Reservation = db.reservation
 const Location = db.location
-const { createAudit } = require('../../utils/auditLog')
+const { createAudit, recordAudit } = require('../../utils/auditLog')
 const { enrichAuditFields } = require('../../utils/auditFields')
 const { scalarStoreScope } = require('../../utils/tenantScope')
 
@@ -319,12 +319,12 @@ exports.deleteTable = async (req, res) => {
 
 exports.updateTableStatus = async (req, res) => {
   const id = req.params.id || req.body.id
-  const { status } = req.body
+  const { status, reason } = req.body
 
   try {
-    // Same IDOR fix as updateTable. This route has no requireRole gate at
-    // all (any authenticated role reaches it for POS use), which made the
-    // old body.store trust reachable by the lowest-privileged callers.
+    // Same IDOR fix as updateTable. The route itself is admin-only (DR-24
+    // C-16 / D-03) — POS order flows claim and release tables inside their
+    // own transactions; this endpoint is the manual override.
     const table = await Table.findOne({
       where: scalarStoreScope(req, { id })
     })
@@ -335,6 +335,21 @@ exports.updateTableStatus = async (req, res) => {
       })
     }
 
+    // DR-24 C-16 (D-03): releasing a table is an elevated action — the
+    // reason is mandatory and persisted on the audit row. Non-release
+    // transitions (e.g. maintenance) do not require one.
+    let releaseReason = null
+    if (status === 'available') {
+      releaseReason = typeof reason === 'string' ? reason.trim() : ''
+      if (!releaseReason) {
+        return res.status(400).json({
+          code: 'RELEASE_REASON_REQUIRED',
+          message: 'A reason is required to release a table'
+        })
+      }
+    }
+
+    const previousStatus = table.status
     await table.update({ status })
 
     if (status === 'available') {
@@ -346,7 +361,19 @@ exports.updateTableStatus = async (req, res) => {
       }
     }
 
-    createAudit(req, 'update', 'table', id, `Updated table status: ${id}`)
+    await recordAudit({
+      req,
+      action: 'update',
+      entity: 'table',
+      entityId: id,
+      description: releaseReason
+        ? `Released table ${id}: ${releaseReason}`
+        : `Updated table status: ${id}`,
+      reason: releaseReason,
+      previousState: { status: previousStatus },
+      newState: { status },
+      metadata: { channel: 'table-management' }
+    })
 
     return res.status(200).json({
       message: 'Success updating table status',

@@ -15,7 +15,9 @@ const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 //  - An occupied/reserved/maintenance/missing/other-store table is rejected,
 //    and POS and QR share table.status (each rejects the other's claim).
 //  - A POS visit is released ONLY by Table Management "Set Available" — never
-//    by its order's payment, kitchen statuses, cancel or void.
+//    by its order's payment, kitchen statuses, cancel or void. Since DR-24
+//    C-16/D-03 that release is an elevated action: admin-only with a
+//    mandatory reason (fixtures therefore release with the admin token).
 //  - Same-key retries replay the winner; a different key is a new request.
 
 const SUFFIX = Date.now()
@@ -75,8 +77,8 @@ const updateStatus = (body, asToken = token()) =>
 const setAvailable = (tableId) =>
   request(app)
     .put(`/table/update-status/${tableId}`)
-    .set('Authorization', `Bearer ${token()}`)
-    .send({ status: 'available' })
+    .set('Authorization', `Bearer ${adminToken}`)
+    .send({ status: 'available', reason: 'POS occupancy test release' })
 
 const tableStatus = async (id) => (await db.table.findByPk(id)).status
 const ordersOnTable = (tableId) => db.order.count({ where: { tableId } })
