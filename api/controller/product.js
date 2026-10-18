@@ -665,7 +665,6 @@ exports.postAddProduct = async (req, res) => {
     currencyCode,
     tipeProduk,
     inventoryMode,
-    composition,
     redeemPoints,
     estimationTime
   } = req.body
@@ -863,7 +862,9 @@ exports.postAddProduct = async (req, res) => {
       priceTiers: parsedPriceTiers,
       currencyId: currencyId || null,
       currencyCode: currencyCode || null,
-      composition: composition || [],
+      // BA finding #3: the recipe (composition) is owned by the BOM. A new
+      // product has none until its BOM is saved (bom.js refreshProductCosting).
+      composition: [],
       estimationTime: estimationTime || 0
     })
 
@@ -966,7 +967,6 @@ exports.editProductByLocationAndId = async (req, res) => {
     currencyCode,
     tipeProduk,
     inventoryMode,
-    composition,
     redeemPoints,
     estimationTime
   } = req.body
@@ -1171,7 +1171,9 @@ exports.editProductByLocationAndId = async (req, res) => {
       currencyCode: currencyCode || null,
       tipeProduk,
       ...(inventoryMode !== undefined ? { inventoryMode } : {}),
-      composition: composition || [],
+      // BA finding #3: composition is not editable here — it is the BOM's
+      // recipe snapshot (bom.js refreshProductCosting). An edit that sent a
+      // manual list used to overwrite it, leaving two diverging recipes.
       estimationTime: estimationTime || 0,
       ...(actorId !== null && actorId > 0 ? { modifiedBy: actorId } : {})
     }
