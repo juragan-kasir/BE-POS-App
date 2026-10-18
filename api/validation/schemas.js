@@ -317,6 +317,10 @@ exports.createOrderSchema = z.object({
   changeAmount: z.any().transform((v) =>
     v === '' || v === null || v === undefined ? null : Number(v)
   ).optional(),
+  // DR-24 D-01: the cashier tax toggle is removed. This field is kept for
+  // backward compatibility with older clients (it also documents the quote /
+  // create body shape), but it is no longer read — pricing always uses the
+  // resolved outlet PPN rate (DR-17).
   useTax: z.boolean().optional().default(true),
   // DR-23 §M TOTAL_CHANGED: optional payable the client showed the customer
   // (e.g. its server quote's totalPrice). Comparison-only, never persisted:

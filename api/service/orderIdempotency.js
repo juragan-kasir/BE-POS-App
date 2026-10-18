@@ -24,9 +24,12 @@ const { normalizePaymentMethod } = require('./canonicalPayment')
 //    with the canonical tender (same value as its ledger row). Once that
 //    evidence exists the original intent is unknown and is not compared;
 //    split payments never touch it, so it stays compared until then.
-//  - useTax: a 0 % order with useTax=true is refused only while the store's
-//    active PPN set is provably unchanged since the order was created
-//    (otherwise the rate at creation may have been 0 %).
+//  - useTax: no longer an intent field (DR-24 D-01 removed the cashier tax
+//    toggle, so pricing always uses the resolved outlet rate and a legacy
+//    useTax=false retry is ignored). It is reported only when the persisted
+//    evidence proves a 0 % order was a legacy tax waiver: the store's active
+//    PPN rate is > 0 and its row set is unchanged since creation, so a taxed
+//    request would not have persisted 0 %.
 //
 // Prices, totals and tax amounts are server-derived and not compared
 // (except a stated `expectedTotal`, which must equal the committed total);
@@ -139,7 +142,8 @@ const intentOverwrittenBySettlement = (order) => {
  * store's current PPN rate (or null when unknown) and
  * `activeTaxSetUnchangedSinceCreation` is true when every active PPN row
  * was last changed no later than the order's creation; both are consulted
- * only to tell "tax requested" from "tax waived" on an order persisted at 0 %.
+ * only to recognise a legacy tax-waived 0 % order (with the cashier toggle
+ * removed by DR-24 D-01, a taxed request would never persist 0 %).
  * `requestedDiscountResolvedAtCreation` is true when the requested
  * discountId names a discount of this store that already existed when the
  * order was created (so it would have been applied).
@@ -200,15 +204,17 @@ const counterOrderMismatches = (
     else if (hadDiscount !== null && codeOrNull(body.promoCode) === null) fields.push('discountId')
   }
 
-  // Tax mode: useTax=false always persists a 0 % rate. A 0 % order can only
-  // come from useTax=true when the store's rate was itself 0 % at creation —
-  // provable only if the active PPN set has not changed since then (a rate
-  // edited from 0 % to 11 % in between must not refuse an identical retry).
-  const useTax = body.useTax === undefined ? true : Boolean(body.useTax)
+  // Tax mode (DR-24 D-01): the cashier tax toggle is removed, so a body
+  // that still carries useTax is ignored — pricing always uses the resolved
+  // outlet rate. The only tax mismatch left is the provable legacy waiver:
+  // with the toggle gone a taxed request can no longer persist 0 %, so when
+  // the store's active PPN rate is > 0 and its row set is unchanged since
+  // creation the original must have been a tax waiver (old behaviour), and
+  // a retry asking for tax is a different intent then. An edited rate
+  // (updatedAt after creation) keeps such a retry a replay.
   const persistedRate = Number(order.taxRate) || 0
-  if (!useTax && persistedRate > 0) fields.push('useTax')
   if (
-    useTax &&
+    body.useTax !== false &&
     persistedRate === 0 &&
     Number(activeTaxRate) > 0 &&
     activeTaxSetUnchangedSinceCreation
