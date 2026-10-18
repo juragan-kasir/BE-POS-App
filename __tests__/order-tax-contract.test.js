@@ -128,13 +128,16 @@ describe('tax config resolution contract (F-SMOKE-01)', () => {
     expect(Number(res.body.data.totalPrice)).toBe(10900)
   })
 
-  test('legacy percentage-typed rows are never treated as PPN — missing PPN setup fails explicitly instead of the removed 11% fallback', async () => {
+  test('non-PPN-typed rows are never treated as PPN — missing PPN setup fails explicitly instead of the removed 11% fallback', async () => {
     await db.taxConfig.destroy({ where: { store: null, name: 'TEST_GLOBAL_PPN' }, force: true })
     await db.taxConfig.destroy({ where: { store: location.id }, force: true })
+    // `tax_config.type` only ever allowed ('ppn', 'service_charge', 'other')
+    // — a legacy 'percentage' row cannot exist in any migrated database, so
+    // the same contract is pinned with a valid non-PPN row instead.
     await db.taxConfig.create({
-      name: 'LEGACY_PERCENTAGE_ROW',
+      name: 'NON_PPN_ROW',
       rate: 5,
-      type: 'percentage',
+      type: 'other',
       status: 'active',
       store: location.id
     })
