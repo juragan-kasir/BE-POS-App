@@ -724,6 +724,24 @@ exports.postAddProduct = async (req, res) => {
         parsedStores = []
       }
     }
+    // BA finding #2 (Waroeng Bakso dummy, 2026-10-17): an initial stock with
+    // no store assignment has nowhere to live — with per-outlet stock
+    // authoritative (DR-14, BA gap 027) every outlet reads its
+    // product_store_stock row (0 without one), so the outlet list showed 0
+    // and the sale was refused while the edit form still showed the number.
+    // Reject it with a clear message instead of stranding the stock. Products
+    // that don't use their own stock (make_to_order) are exempt.
+    const initialStockValue = Number(stock) || 0
+    const usesProductStock = String(inventoryMode || 'stocked') !== 'make_to_order'
+    if (parsedStores.length === 0 && initialStockValue > 0 && usesProductStock) {
+      return res.status(400).json({
+        success: false,
+        code: 'STOCK_REQUIRES_STORE',
+        field: 'stock',
+        message:
+          'Stok awal hanya bisa disimpan ke toko tertentu. Pilih minimal satu toko, atau kosongkan stok.'
+      })
+    }
     const assignmentDecision = assertSellableProductAssignment({
       assignmentProvided: stores !== undefined && stores !== null,
       storeIds: parsedStores,
