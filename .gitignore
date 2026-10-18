@@ -47,3 +47,4 @@ yarn-error.log*
 # superpowers scratch workspace
 .superpowers/
 .vercel
+node_modules
