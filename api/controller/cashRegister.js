@@ -274,7 +274,7 @@ async function buildReportData({
   // (per-row cashRegisterId with order-header fallback — same membership
   // rule as the cash ledger above), not to the opener. Never used in the
   // expectedCash formula; kept purely for backward-compatible display.
-  const [salesAgg, paymentRows, expCatRows] = await Promise.all([
+  const [salesAgg, paymentRows, expCatRows, productRows] = await Promise.all([
     db.sequelize
       .query(
         `SELECT COUNT(*) as "totalTransactions",
@@ -328,7 +328,37 @@ async function buildReportData({
          GROUP BY ec.name
          ORDER BY total DESC`,
       { replacements, type: db.sequelize.QueryTypes.SELECT }
-    )
+    ),
+    // BA finding #1 (Waroeng Bakso dummy, 2026-10-17): the X/Z report was
+    // aggregates only (totals by tender and expense category) — no
+    // product-level view, so a shift could not be inspected per item.
+    // Same membership rule as the sales aggregate above (register
+    // attribution, lifecycle window, paid) so every quantity/revenue here
+    // reconciles with summary.totalQuantity/totalSales. Rows are grouped
+    // per product id so two products sharing a name stay distinct; SKU
+    // comes from the current product row (nullable for deleted products).
+    db.sequelize
+      .query(
+        `SELECT oi."productName" as "productName",
+                p."sku" as sku,
+                COALESCE(SUM(oi."quantity"), 0)::int as quantity,
+                ROUND(COALESCE(SUM(oi."totalPrice"), 0)::numeric / NULLIF(SUM(oi."quantity"), 0)) as "unitPrice",
+                COALESCE(SUM(oi."totalPrice"), 0) as "totalSales"
+           FROM "order_item" oi
+           JOIN "order" o ON o.id = oi."order"
+           LEFT JOIN "product" p ON p.id = oi."product"
+          WHERE o."store" = :store
+            AND EXISTS (
+              SELECT 1 FROM "transaction" t2
+              WHERE t2."order" = o.id
+                AND COALESCE(t2."cashRegisterId", o."cashRegisterId") = :registerId
+            )
+            AND o."createdAt" >= :openedAt AND o."createdAt" <= :endAt
+            AND o."paymentStatus" = 'paid'
+          GROUP BY oi."product", oi."productName", p."sku"
+          ORDER BY quantity DESC, oi."productName" ASC`,
+        { replacements, type: db.sequelize.QueryTypes.SELECT }
+      )
   ])
 
   const totalSales = Number(salesAgg.totalSales || 0)
@@ -340,6 +370,14 @@ async function buildReportData({
   const payments = bucketPaymentsByCanonical(
     paymentRows.map((r) => ({ typePayment: r.typePayment, total: r.total, count: r.count }))
   ).map((b) => ({ type: b.type, amount: b.total, count: b.count }))
+
+  const salesByProduct = productRows.map((r) => ({
+    productName: r.productName,
+    sku: r.sku || null,
+    quantity: Number(r.quantity || 0),
+    unitPrice: Number(r.unitPrice || 0),
+    totalSales: Number(r.totalSales || 0)
+  }))
 
   const totalNonCashPayment = payments.reduce((s, p) => s + p.amount, 0)
 
@@ -417,6 +455,7 @@ async function buildReportData({
       variance
     },
     payments,
+    salesByProduct,
     expenses: expCatRows.map((r) => ({
       category: r.category,
       amount: Number(r.total || 0),
@@ -440,7 +479,7 @@ async function buildCloseSnapshot({ registerId, store, user, openedAt, endAt, op
     type: db.sequelize.QueryTypes.SELECT,
     ...(transaction ? { transaction } : {})
   }
-  const [salesAgg, paymentRows, expCatRows, ledger] = await Promise.all([
+  const [salesAgg, paymentRows, expCatRows, productRows, ledger] = await Promise.all([
     db.sequelize.query(
       `SELECT COUNT(*) as "totalTransactions",
               COALESCE(SUM("subTotal"), 0) as "totalSubtotal",
@@ -484,10 +523,36 @@ async function buildCloseSnapshot({ registerId, store, user, openedAt, endAt, op
         WHERE e."store" = :store
           AND e."createdAt" >= :openedAt AND e."createdAt" <= :endAt
           AND e."status" = 'approved'
-        GROUP BY ec.name
-        ORDER BY total DESC, ec.name ASC`,
+         GROUP BY ec.name
+         ORDER BY total DESC, ec.name ASC`,
       queryOpts
     ),
+    // BA finding #1: same product-level breakdown as the live X/Z report,
+    // frozen into the close snapshot so a closed register keeps serving
+    // its per-product figures (see buildReportData for the membership
+    // rule rationale).
+    db.sequelize
+      .query(
+        `SELECT oi."productName" as "productName",
+                p."sku" as sku,
+                COALESCE(SUM(oi."quantity"), 0)::int as quantity,
+                ROUND(COALESCE(SUM(oi."totalPrice"), 0)::numeric / NULLIF(SUM(oi."quantity"), 0)) as "unitPrice",
+                COALESCE(SUM(oi."totalPrice"), 0) as "totalSales"
+           FROM "order_item" oi
+           JOIN "order" o ON o.id = oi."order"
+           LEFT JOIN "product" p ON p.id = oi."product"
+          WHERE o."store" = :store
+            AND EXISTS (
+              SELECT 1 FROM "transaction" t2
+              WHERE t2."order" = o.id
+                AND COALESCE(t2."cashRegisterId", o."cashRegisterId") = :registerId
+            )
+            AND o."createdAt" >= :openedAt AND o."createdAt" <= :endAt
+            AND o."paymentStatus" = 'paid'
+          GROUP BY oi."product", oi."productName", p."sku"
+          ORDER BY quantity DESC, oi."productName" ASC`,
+        queryOpts
+      ),
     computeCashLedgerSummary({ registerId, store, openingBalance, openedAt, endAt, transaction })
   ])
   const payments = bucketPaymentsByCanonical(
@@ -497,6 +562,13 @@ async function buildCloseSnapshot({ registerId, store, user, openedAt, endAt, op
     category: r.category,
     total: Number(r.total || 0),
     count: Number(r.count || 0)
+  }))
+  const salesByProduct = productRows.map((r) => ({
+    productName: r.productName,
+    sku: r.sku || null,
+    quantity: Number(r.quantity || 0),
+    unitPrice: Number(r.unitPrice || 0),
+    totalSales: Number(r.totalSales || 0)
   }))
   return {
     expectedCash: ledger.expectedCash,
@@ -517,6 +589,7 @@ async function buildCloseSnapshot({ registerId, store, user, openedAt, endAt, op
     },
     payments,
     expenses,
+    salesByProduct,
     // Cash inputs shared with the scalar columns above, kept inside the
     // document so the snapshot is self-describing for auditors.
     cash: {
@@ -1047,7 +1120,8 @@ const cashRegisterController = {
               closeSnapshot: {
                 gross: snapshot.gross,
                 payments: snapshot.payments,
-                expenses: snapshot.expenses
+                expenses: snapshot.expenses,
+                salesByProduct: snapshot.salesByProduct
               },
               variance,
               varianceApprovalStatus,
@@ -1089,7 +1163,8 @@ const cashRegisterController = {
             closeSnapshot: {
               gross: snapshot.gross,
               payments: snapshot.payments,
-              expenses: snapshot.expenses
+              expenses: snapshot.expenses,
+              salesByProduct: snapshot.salesByProduct
             },
             variance,
             varianceApprovalStatus
@@ -1167,7 +1242,8 @@ const cashRegisterController = {
             varianceApprovalStatus: result.varianceApprovalStatus
           },
           payments: closePayments,
-          expenses: closeExpenses
+          expenses: closeExpenses,
+          salesByProduct: result.closeSnapshot.salesByProduct
         }
       })
     } catch (error) {
@@ -2099,7 +2175,19 @@ const cashRegisterController = {
             varianceApprovalStatus: register.varianceApprovalStatus || null
           },
           payments: frozenPayments.map((p) => ({ type: p.type, amount: num(p.total), count: num(p.count) })),
-          expenses: frozenExpenses.map((e) => ({ category: e.category, amount: num(e.total), count: num(e.count) }))
+          expenses: frozenExpenses.map((e) => ({ category: e.category, amount: num(e.total), count: num(e.count) })),
+          // BA finding #1: per-product breakdown frozen at close time.
+          // Snapshots taken before this field existed carry none → [] (the
+          // FE renders the section only when non-empty).
+          salesByProduct: Array.isArray(snap.salesByProduct)
+            ? snap.salesByProduct.map((r) => ({
+                productName: r.productName,
+                sku: r.sku || null,
+                quantity: num(r.quantity),
+                unitPrice: num(r.unitPrice),
+                totalSales: num(r.totalSales)
+              }))
+            : []
         }
       } else {
         data = await buildReportData({
