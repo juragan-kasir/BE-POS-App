@@ -1179,8 +1179,8 @@ async function syncExpenseJournal({
 // replaying an old/stale job safe: an event enqueued before a later
 // mutation, if processed after that later mutation already landed, just
 // re-derives the SAME current truth instead of replaying a stale snapshot,
-// so it can never revert or resurrect a journal (see Batch 7 design,
-// PHASE-22-BATCH-7-EXPENSE-OUTBOX-DESIGN.md, sections 7-8).
+// so it can never revert or resurrect a journal (Batch 7 expense-outbox
+// design — see the repo history for the original design notes).
 //
 // `paranoid: false` is required here: delete() soft-deletes the expense
 // itself, and a soft-deleted row must still converge to "no journal" —
