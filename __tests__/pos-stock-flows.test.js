@@ -224,6 +224,47 @@ describe('POST /pos/adjust — stock adjustment', () => {
     const fresh = await db.product.findByPk(productAdjust.id)
     expect(Number(fresh.stock)).toBe(15)
   })
+
+  test('fractional qty: stock, history, per-store stock and response share one floored delta', async () => {
+    const before = Number((await db.product.findByPk(productAdjust.id)).stock)
+    const [[storeBeforeRow]] = await db.sequelize.query(
+      'SELECT stock FROM product_store_stock WHERE product = $1 AND store = $2',
+      { bind: [productAdjust.id, storeA.id] }
+    )
+    const storeBefore = Number(storeBeforeRow?.stock || 0)
+
+    const res = await request(app)
+      .post('/pos/adjust')
+      .set('Authorization', `Bearer ${adminAToken}`)
+      .send({ productId: productAdjust.id, qty: 2.7, reason: 'Fractional restock' })
+
+    expect(res.status).toBe(200)
+
+    // KF-NEW-07: only Math.floor(qty) = 2 is ever applied to stock, so the
+    // history row, the per-store row and the response must record the same
+    // delta — never the raw 2.7 and never a pre-transaction stock read.
+    const fresh = await db.product.findByPk(productAdjust.id)
+    expect(Number(fresh.stock)).toBe(before + 2)
+
+    const history = await db.stock_history.findAll({
+      where: { product: productAdjust.id, referenceType: 'adjustment' },
+      order: [['id', 'ASC']]
+    })
+    const row = history[history.length - 1]
+    expect(Number(row.quantityBefore)).toBe(before)
+    expect(Number(row.quantityChange)).toBe(2)
+    expect(Number(row.quantityAfter)).toBe(before + 2)
+
+    expect(Number(res.body.data.adjustment.oldStock)).toBe(before)
+    expect(Number(res.body.data.adjustment.qty)).toBe(2)
+    expect(Number(res.body.data.adjustment.newStock)).toBe(before + 2)
+
+    const [[storeStock]] = await db.sequelize.query(
+      'SELECT stock FROM product_store_stock WHERE product = $1 AND store = $2',
+      { bind: [productAdjust.id, storeA.id] }
+    )
+    expect(Number(storeStock.stock)).toBe(storeBefore + 2)
+  })
 })
 
 describe('POST /pos/transfer — inter-store stock transfer', () => {

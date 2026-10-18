@@ -1095,36 +1095,35 @@ const posController = {
         })
       }
 
-      const product = await db.product.findByPk(productId)
-      if (!product) {
-        return res.status(404).json({
-          success: false,
-          message: 'Product not found'
-        })
-      }
+      const adjStore = storeId || store || req.storeId
 
-      const oldStock = Number(product.stock) || 0
-      const newStock = oldStock + Number(qty)
-
-      if (newStock < 0) {
-        return res.status(400).json({
-          success: false,
-          message: 'Insufficient stock for adjustment'
-        })
-      }
-
+      // KF-NEW-07: read and write under one row lock so the recorded
+      // before/after chain can never be built from a stale pre-transaction
+      // read, and derive ONE floored delta shared by the global stock, the
+      // per-store stock, the stock_history row, the audit entry and the
+      // response — the old code floored only the SQL update while the
+      // history kept the raw fractional qty (e.g. 2.7).
       const result = await db.sequelize.transaction(async (t) => {
-        await product.update(
+        const product = await db.product.findByPk(productId, {
+          transaction: t,
+          lock: t.LOCK.UPDATE
+        })
+        if (!product) return { notFound: true }
+
+        const oldStock = Number(product.stock) || 0
+        const delta = Math.floor(Number(qty)) || 0
+        const newStock = oldStock + delta
+
+        if (newStock < 0) return { insufficient: true }
+
+        await db.product.update(
           {
-            stock: db.sequelize.literal(
-              `GREATEST(stock + ${Math.floor(Number(qty)) || 0}, 0)`
-            )
+            stock: db.sequelize.literal(`GREATEST(stock + ${delta}, 0)`)
           },
-          { transaction: t }
+          { where: { id: productId }, transaction: t }
         )
 
         // Update per-store stock — ponytail: atomic upsert + adjust
-        const adjStore = storeId || store || req.storeId
         if (adjStore) {
           await db.sequelize.query(
             `INSERT INTO product_store_stock (product, store, stock, "createdAt", "updatedAt")
@@ -1134,9 +1133,7 @@ const posController = {
           )
           await db.product_store_stock.update(
             {
-              stock: db.sequelize.literal(
-                `GREATEST(stock + ${Math.floor(Number(qty)) || 0}, 0)`
-              )
+              stock: db.sequelize.literal(`GREATEST(stock + ${delta}, 0)`)
             },
             { where: { product: productId, store: adjStore }, transaction: t }
           )
@@ -1148,7 +1145,7 @@ const posController = {
             store: adjStore,
             referenceType,
             quantityBefore: oldStock,
-            quantityChange: qty,
+            quantityChange: delta,
             quantityAfter: newStock,
             unit: product.unit || 'pcs',
             notes: reason || 'Stock adjustment',
@@ -1163,12 +1160,26 @@ const posController = {
           entityId: productId,
           description: reason || 'Stock adjustment',
           oldValues: { stock: oldStock },
-          newValues: { stock: newStock, qty, reason },
+          newValues: { stock: newStock, qty: delta, reason },
           transaction: t
         })
 
-        return { product, adjustment: { oldStock, newStock, qty, reason } }
+        product.set('stock', newStock)
+        return { product, adjustment: { oldStock, newStock, qty: delta, reason } }
       })
+
+      if (result.notFound) {
+        return res.status(404).json({
+          success: false,
+          message: 'Product not found'
+        })
+      }
+      if (result.insufficient) {
+        return res.status(400).json({
+          success: false,
+          message: 'Insufficient stock for adjustment'
+        })
+      }
 
       return res.status(200).json({
         success: true,
