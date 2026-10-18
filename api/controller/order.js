@@ -1260,8 +1260,7 @@ const priceCounterOrder = async ({
   discountId,
   promoCode,
   customerId,
-  redeemedPoints,
-  useTax
+  redeemedPoints
 }) => {
   const discount = await resolveOrderDiscount({
     discountId,
@@ -1285,8 +1284,10 @@ const priceCounterOrder = async ({
     }
   }
 
-  const useTaxFlag = useTax === undefined ? true : Boolean(useTax)
-  const taxRate = useTaxFlag ? await getActiveTaxRate(store) : 0
+  // DR-24 D-01: the cashier tax toggle is removed — the resolved outlet PPN
+  // (DR-17) is always the rate charged; a tax-free outlet configures 0 %
+  // explicitly. A legacy `useTax` field in the request is ignored.
+  const taxRate = await getActiveTaxRate(store)
   const serviceChargeRate = await getServiceChargeRate(store)
 
   const final = await calculateFinalTotals({
@@ -1322,7 +1323,7 @@ exports.quoteOrder = async (req, res) => {
   const scope = resolveCounterStore(req)
   if (!scope.store) return res.status(scope.status).json(scope.body)
 
-  const { items, discountId, promoCode, customerId, redeemedPoints, useTax } = req.body
+  const { items, discountId, promoCode, customerId, redeemedPoints } = req.body
   try {
     const priced = await priceCounterOrder({
       items,
@@ -1331,8 +1332,7 @@ exports.quoteOrder = async (req, res) => {
       discountId,
       promoCode,
       customerId,
-      redeemedPoints,
-      useTax
+      redeemedPoints
     })
     if (!priced.ok) return res.status(priced.status).json(priced.body)
 
@@ -1364,12 +1364,14 @@ exports.quoteOrder = async (req, res) => {
 // effect) unless the persisted evidence proves it carries a different intent;
 // then it is refused with 409 IDEMPOTENCY_MISMATCH and the fields that differ
 // (see orderIdempotency for the evidence rules). The active PPN rows are read
-// only to disambiguate a 0 % order.
+// only to disambiguate a persisted 0 % order (a legacy order created while
+// the cashier tax toggle still existed, or an outlet configured at 0 % whose
+// rate has since been edited).
 const replayCounterOrder = async (res, orderId, body, store) => {
   const fullOrder = await fetchFullOrder(orderId)
   let activeTaxRate = null
   let activeTaxSetUnchangedSinceCreation = false
-  if (fullOrder && Number(fullOrder.taxRate) === 0 && body.useTax !== false) {
+  if (fullOrder && Number(fullOrder.taxRate) === 0) {
     // Same row set and D3 resolution as getActiveTaxRate (fetchActiveTaxRows
     // scope), with updatedAt as evidence the set is unchanged since the order.
     const rows = await db.taxConfig.findAll({
@@ -1434,7 +1436,6 @@ exports.createOrder = async (req, res) => {
     customerName,
     customerPhone,
     notes,
-    useTax,
     source,
     paymentMethod,
     currencyId,
@@ -1492,8 +1493,7 @@ exports.createOrder = async (req, res) => {
       discountId,
       promoCode,
       customerId,
-      redeemedPoints,
-      useTax
+      redeemedPoints
     })
     if (!priced.ok) return res.status(priced.status).json(priced.body)
     const {
