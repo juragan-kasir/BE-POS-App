@@ -1899,10 +1899,10 @@ describe('PUT /table/update/:id — tenant isolation', () => {
 })
 
 describe('PUT /table/update-status/:id — tenant isolation', () => {
-  test('store 1 kasir cannot update status of store 2 table; row unchanged', async () => {
+  test('store 1 admin cannot update status of store 2 table; row unchanged', async () => {
     const res = await request(app)
       .put(`/table/update-status/${table2.id}`)
-      .set('Authorization', `Bearer ${kasirStore1Token}`)
+      .set('Authorization', `Bearer ${adminStore1Token}`)
       .send({ id: table2.id, status: 'occupied' })
 
     expect(res.status).toBe(404)

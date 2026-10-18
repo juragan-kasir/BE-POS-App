@@ -18,16 +18,12 @@ const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 // uniformly open to any authenticated actor across the whole app — a
 // consistent, pre-existing pattern, not unique to this ecosystem.
 //
-// Separately: role.accessMenu (per-role granular action grants) is never
-// read by any backend middleware/controller anywhere in the app — it is
-// returned at login purely for FE menu/button rendering. This is a
-// systemic characteristic of the whole codebase, not a purchasing-
-// specific inconsistency, has no established backend-side contract
-// anywhere to violate, and closing it would require either embedding
-// accessMenu into the JWT (protected: JWT/token architecture) or a new
-// granular-permission-checking middleware (protected: no new permission
-// framework) — both explicitly out of Batch 9's scope. No production
-// change was made; this file locks in the already-correct coarse
+// Separately: at the time of Batch 9, role.accessMenu (per-role granular
+// action grants) was never read by any backend middleware/controller — it was
+// returned at login purely for FE menu/button rendering. DR-24 C-02 has since
+// introduced the deliberate server-side enforcement (`requireMenuAction`,
+// applied to the reference table routes; rollout tracked centrally in
+// api/menuRouteMap.js). This file still locks in the already-correct coarse
 // role-based enforcement as regression evidence.
 
 let store = null

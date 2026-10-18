@@ -1,5 +1,6 @@
 const { Op } = require('sequelize')
 const db = require('../../db/models')
+const { recordAudit, AUDIT_ACTIONS } = require('../../utils/auditLog')
 const Location = db.location
 const Region = db.region
 const sequelize = db.sequelize
@@ -1305,3 +1306,189 @@ exports.listStoreConfigurations = async (req, res) => {
 
 exports.storeConfigurationReadScope = storeConfigurationReadScope
 exports.storeConfigurationListScope = storeConfigurationListScope
+
+// DR-24 C-04 / DR-05 (§35.7): outlet closure is an archive — reversible,
+// audited, and fail-closed while the outlet still carries live operations.
+// Financial/history rows are never rewritten; the destructive legacy
+// /delete-location remains for purge scenarios and is untouched.
+const resolveArchiveTarget = async (req) => {
+  const { id } = req.body
+  if (id === undefined || id === null || id === '') {
+    return {
+      error: { status: 400, body: { success: false, code: 'LOCATION_ID_REQUIRED', message: 'id is required' } }
+    }
+  }
+  const dbId = parseInt(String(id).replace('loc-', ''), 10)
+  if (!Number.isInteger(dbId) || dbId <= 0) {
+    return {
+      error: { status: 400, body: { success: false, code: 'INVALID_LOCATION_ID', message: 'Invalid location id' } }
+    }
+  }
+  const location = await Location.findByPk(dbId)
+  if (!location) {
+    return {
+      error: { status: 404, body: { success: false, code: 'LOCATION_NOT_FOUND', message: 'Location not found' } }
+    }
+  }
+  // D-09: a client admin is store-bound; only the platform super_admin may
+  // act on an arbitrary outlet.
+  if (req.user.roleType !== 'super_admin' && Number(req.user.store) !== dbId) {
+    return {
+      error: {
+        status: 403,
+        body: { success: false, code: 'STORE_SCOPE_DENIED', message: 'This outlet is outside your scope' }
+      }
+    }
+  }
+  return { location }
+}
+
+const readArchiveReason = (req) => (typeof req.body.reason === 'string' ? req.body.reason.trim() : '')
+
+const archivePreconditionFailure = async (storeId) => {
+  const openRegisters = await db.cashRegister.count({ where: { store: storeId, status: 'open' } })
+  if (openRegisters > 0) {
+    return {
+      status: 409,
+      body: {
+        success: false,
+        code: 'STORE_HAS_OPEN_REGISTERS',
+        message: `This outlet still has ${openRegisters} open cash register(s); close them before archiving`
+      }
+    }
+  }
+  const unsettledOrders = await db.order.count({
+    where: { store: storeId, status: { [Op.notIn]: ['paid', 'cancelled', 'void'] } }
+  })
+  if (unsettledOrders > 0) {
+    return {
+      status: 409,
+      body: {
+        success: false,
+        code: 'STORE_HAS_UNSETTLED_ORDERS',
+        message: `This outlet still has ${unsettledOrders} unsettled order(s); settle or cancel them before archiving`
+      }
+    }
+  }
+  const inTransit = await db.stock_transfer.count({
+    where: {
+      [Op.or]: [{ fromStore: storeId }, { toStore: storeId }],
+      status: { [Op.notIn]: ['received', 'cancelled', 'rejected'] }
+    }
+  })
+  if (inTransit > 0) {
+    return {
+      status: 409,
+      body: {
+        success: false,
+        code: 'STORE_HAS_IN_TRANSIT_TRANSFERS',
+        message: `This outlet still has ${inTransit} stock transfer(s) in transit; complete or cancel them before archiving`
+      }
+    }
+  }
+  return null
+}
+
+exports.archiveLocationById = async (req, res) => {
+  try {
+    const { location, error } = await resolveArchiveTarget(req)
+    if (error) return res.status(error.status).json(error.body)
+
+    // A reason is mandatory for this elevated action (D-03).
+    const reason = readArchiveReason(req)
+    if (!reason) {
+      return res.status(400).json({
+        success: false,
+        code: 'ARCHIVE_REASON_REQUIRED',
+        message: 'A reason is required to archive an outlet'
+      })
+    }
+
+    if (location.status === 'archived') {
+      return res.status(400).json({
+        success: false,
+        code: 'STORE_ALREADY_ARCHIVED',
+        message: 'This outlet is already archived'
+      })
+    }
+
+    const precondition = await archivePreconditionFailure(location.id)
+    if (precondition) return res.status(precondition.status).json(precondition.body)
+
+    const previousStatus = location.status
+    await location.update({ status: 'archived', modifiedBy: req.user.id })
+
+    await recordAudit({
+      actor: { id: req.user.id, name: req.user.userName },
+      req,
+      action: AUDIT_ACTIONS.STATUS_CHANGE,
+      entity: 'location',
+      entityId: location.id,
+      storeId: location.id,
+      result: 'SUCCESS',
+      reason,
+      previousState: { status: previousStatus },
+      newState: { status: 'archived' },
+      metadata: { channel: 'location-management' }
+    })
+
+    return res.status(200).json({
+      success: true,
+      message: 'Location archived',
+      data: { id: location.id, status: 'archived' }
+    })
+  } catch (error) {
+    console.error('Error:', error)
+    return res.status(500).json({ success: false, message: 'Internal Server Error' })
+  }
+}
+
+exports.reactivateLocationById = async (req, res) => {
+  try {
+    const { location, error } = await resolveArchiveTarget(req)
+    if (error) return res.status(error.status).json(error.body)
+
+    const reason = readArchiveReason(req)
+    if (!reason) {
+      return res.status(400).json({
+        success: false,
+        code: 'REACTIVATE_REASON_REQUIRED',
+        message: 'A reason is required to reactivate an outlet'
+      })
+    }
+
+    if (location.status !== 'archived') {
+      return res.status(400).json({
+        success: false,
+        code: 'STORE_NOT_ARCHIVED',
+        message: 'This outlet is not archived'
+      })
+    }
+
+    const previousStatus = location.status
+    await location.update({ status: 'active', modifiedBy: req.user.id })
+
+    await recordAudit({
+      actor: { id: req.user.id, name: req.user.userName },
+      req,
+      action: AUDIT_ACTIONS.STATUS_CHANGE,
+      entity: 'location',
+      entityId: location.id,
+      storeId: location.id,
+      result: 'SUCCESS',
+      reason,
+      previousState: { status: previousStatus },
+      newState: { status: 'active' },
+      metadata: { channel: 'location-management' }
+    })
+
+    return res.status(200).json({
+      success: true,
+      message: 'Location reactivated',
+      data: { id: location.id, status: 'active' }
+    })
+  } catch (error) {
+    console.error('Error:', error)
+    return res.status(500).json({ success: false, message: 'Internal Server Error' })
+  }
+}

@@ -12,6 +12,7 @@ const AUDIT_ACTIONS = Object.freeze({
   PAYMENT: 'payment',
   REFUND: 'refund',
   LOGIN: 'login',
+  LOGOUT: 'logout',
   STATUS_CHANGE: 'status_change'
 })
 

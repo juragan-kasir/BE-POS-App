@@ -9,7 +9,7 @@ const Discount = db.discount
 const { Op } = require('sequelize')
 const { fetchActiveTaxRows, pickAppliedPpn } = require('../../utils/taxResolution')
 const { createNotification } = require('../../utils/createNotification')
-const { createAudit, redactAndAudit, AUDIT_ACTIONS } = require('../../utils/auditLog')
+const { createAudit, redactAndAudit, recordAudit, AUDIT_ACTIONS } = require('../../utils/auditLog')
 const {
   hasCapability,
   auditCapabilityDenial,
@@ -1424,6 +1424,19 @@ exports.createOrder = async (req, res) => {
   const scope = resolveCounterStore(req)
   if (!scope.store) return res.status(scope.status).json(scope.body)
   const authorizedStore = scope.store
+
+  // DR-24 C-04: an archived outlet is closed for new business — refuse the
+  // counter sale before any lookup, validation or write.
+  const archivedStore = await db.location.findOne({
+    where: { id: authorizedStore, status: 'archived' },
+    attributes: ['id']
+  })
+  if (archivedStore) {
+    return res.status(409).json({
+      error: 'This outlet is archived and cannot take new orders',
+      code: 'STORE_ARCHIVED'
+    })
+  }
 
   const {
     tableId,
@@ -4176,6 +4189,19 @@ exports.createCustomerOrder = async (req, res) => {
     }
     store = Number(table.store) || Number(bodyStore)
 
+    // DR-24 C-04: a closed (archived) outlet accepts no new QR orders — the
+    // physical table capability of a closed outlet is not a licence to sell.
+    const archivedStore = await db.location.findOne({
+      where: { id: store, status: 'archived' },
+      attributes: ['id']
+    })
+    if (archivedStore) {
+      return res.status(409).json({
+        message: 'This outlet is archived and cannot take new orders',
+        code: 'STORE_ARCHIVED'
+      })
+    }
+
     for (const item of items) {
       const qty = item && item.quantity
       if (!Number.isInteger(qty) || qty <= 0) {
@@ -4718,6 +4744,28 @@ exports.createCustomerOrder = async (req, res) => {
         { model: db.order_item, as: 'items' },
         { model: db.table, as: 'table' }
       ]
+    })
+
+    // DR-24 C-24b / DR-20: this public endpoint has no authenticated actor;
+    // the committed order is still audited as a SYSTEM event with the QR
+    // channel, order identity/scope and the anonymous customer label. An
+    // idempotent replay returns before this point, so the row is written
+    // exactly once per order.
+    await recordAudit({
+      actor: { id: null, name: customerName || null, type: 'SYSTEM' },
+      req,
+      action: AUDIT_ACTIONS.CREATE,
+      entity: 'order',
+      entityId: order.id,
+      storeId: store,
+      result: 'SUCCESS',
+      source: 'qr',
+      metadata: {
+        orderNumber,
+        tableId: table.id,
+        itemCount: orderItems.length,
+        totalPrice: Number(totalPrice) || 0
+      }
     })
 
     createNotification({

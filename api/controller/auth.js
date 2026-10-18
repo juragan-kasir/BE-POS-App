@@ -43,7 +43,7 @@ const {
   uploadToCloudinary,
   deleteFromCloudinary
 } = require('../../utils/cloudinaryStorage')
-const { createAudit } = require('../../utils/auditLog')
+const { createAudit, recordAudit, AUDIT_ACTIONS } = require('../../utils/auditLog')
 const {
   sendEmail,
   buildResetPasswordEmail
@@ -461,6 +461,18 @@ exports.login = async (req, res) => {
     })
 
     if (!findUser) {
+      // DR-24 C-24a / DR-20: every authentication attempt is audited; an
+      // attempt against an unknown identity is attributed to the submitted
+      // name with a safe reason code (no credential material).
+      await recordAudit({
+        actor: { id: null, name: userName },
+        req,
+        action: AUDIT_ACTIONS.LOGIN,
+        entity: 'AUTH',
+        result: 'DENIED',
+        reason: 'USER_NOT_FOUND',
+        source: 'password'
+      })
       return res.status(401).json({
         message: 'User Name / Email Tidak Ditemukan'
       })
@@ -469,6 +481,16 @@ exports.login = async (req, res) => {
     // F5: a soft-deleted account can never authenticate — login must not
     // reactivate it (fail closed; the query above uses paranoid:false).
     if (findUser.deletedAt != null) {
+      await recordAudit({
+        actor: { id: findUser.id, name: findUser.userName },
+        req,
+        action: AUDIT_ACTIONS.LOGIN,
+        entity: 'AUTH',
+        entityId: findUser.id,
+        result: 'DENIED',
+        reason: 'ACCOUNT_DELETED',
+        source: 'password'
+      })
       return res.status(401).json({
         message: 'User Name / Email Tidak Ditemukan'
       })
@@ -480,6 +502,16 @@ exports.login = async (req, res) => {
     // verification like the soft-delete gate above, so denied logins mint
     // no token/session and never reach the presence reactivation below.
     if (findUser.disabledAt != null) {
+      await recordAudit({
+        actor: { id: findUser.id, name: findUser.userName },
+        req,
+        action: AUDIT_ACTIONS.LOGIN,
+        entity: 'AUTH',
+        entityId: findUser.id,
+        result: 'DENIED',
+        reason: 'ACCOUNT_DISABLED',
+        source: 'password'
+      })
       return res.status(401).json({
         message: 'User Name / Email Tidak Ditemukan'
       })
@@ -488,6 +520,16 @@ exports.login = async (req, res) => {
     // Cocokkan password
     const isPasswordValid = await bcrypt.compare(password, findUser.password)
     if (!isPasswordValid) {
+      await recordAudit({
+        actor: { id: findUser.id, name: findUser.userName },
+        req,
+        action: AUDIT_ACTIONS.LOGIN,
+        entity: 'AUTH',
+        entityId: findUser.id,
+        result: 'FAILURE',
+        reason: 'INVALID_PASSWORD',
+        source: 'password'
+      })
       return res.status(401).json({
         message: 'Password Salah'
       })
@@ -528,6 +570,20 @@ exports.login = async (req, res) => {
     })
 
     if (outcome.denied) {
+      // The locked re-check can deny after the password already verified
+      // (account disabled/removed or password changed mid-flight). The
+      // denial is audited with the same safe reason vocabulary.
+      const passwordRejected = outcome.denied === 'Password Salah'
+      await recordAudit({
+        actor: { id: findUser.id, name: findUser.userName },
+        req,
+        action: AUDIT_ACTIONS.LOGIN,
+        entity: 'AUTH',
+        entityId: findUser.id,
+        result: passwordRejected ? 'FAILURE' : 'DENIED',
+        reason: passwordRejected ? 'INVALID_PASSWORD' : 'ACCOUNT_UNAVAILABLE',
+        source: 'password'
+      })
       return res.status(401).json({ message: outcome.denied })
     }
 
@@ -567,6 +623,25 @@ exports.login = async (req, res) => {
     // below (same boundary already applied to register/get-all-user).
     const safeUser = findUser.toJSON()
     delete safeUser.password
+
+    // DR-24 C-24a / DR-20: the successful authentication is audited once the
+    // session is committed, before any response branch. The row carries the
+    // identity, scope and outcome only — never the password or the session
+    // id / JWT (both stay out of every audit payload).
+    await recordAudit({
+      actor: { id: findUser.id, name: findUser.userName },
+      req,
+      action: AUDIT_ACTIONS.LOGIN,
+      entity: 'AUTH',
+      entityId: findUser.id,
+      storeId: account.store,
+      result: 'SUCCESS',
+      source: 'password',
+      metadata: {
+        roleType: findUser.roleType || 'user',
+        userType: findUser.userType
+      }
+    })
 
     // Jika userType bukan admin/user
     if (!['admin', 'user'].includes(findUser.userType)) {
@@ -969,6 +1044,18 @@ exports.logout = async (req, res) => {
     await revokeContextSession(db, session.sessionId, req.user.id)
     // AUTH-1 P4: the revocation is committed; drop this session's live sockets.
     disconnectSession(session.sessionId)
+
+    // DR-24 C-24a / DR-20: the revocation is audited after it committed;
+    // the session id itself never enters the row.
+    await recordAudit({
+      actor: { id: req.user.id },
+      req,
+      action: AUDIT_ACTIONS.LOGOUT,
+      entity: 'AUTH',
+      entityId: req.user.id,
+      result: 'SUCCESS',
+      source: 'session'
+    })
 
     res.clearCookie('token')
 

@@ -4,6 +4,7 @@ const express = require('express')
 const db = require('../../db/models')
 const { tryAcquireSchedulerLock } = require('../../utils/schedulerLock')
 const { expireStaleQrOrders, qrPendingExpiryMinutes } = require('../service/qrOrderExpiry')
+const backupController = require('../controller/backup')
 const { ACTOR_TYPES } = require('../../utils/auditLog')
 const {
   drainAccountingOutbox,
@@ -104,6 +105,49 @@ router.get('/accounting-outbox/health', requireCronSecret, async (req, res) => {
   } catch (error) {
     console.error('Accounting outbox health failed:', error)
     return res.status(500).json({ code: 'INTERNAL_ERROR', message: 'Health check failed' })
+  }
+})
+
+// DR-24 C-24c (L-08): on Vercel the in-process backup scheduler never starts,
+// so Vercel Cron drives the same DB-configured schedule through the shared
+// controller — runScheduledBackupIfDue() is a no-op unless the stored cron
+// matches now, keeping the stored configuration authoritative and the run
+// exactly-once per matching minute. The 'backup' lease is shared with the
+// in-process scheduler so an API instance and the cron never run concurrently.
+//
+// Vercel Hobby fires crons anywhere within the scheduled hour, so the
+// exact-minute match usually misses there. When the stored schedule is enabled
+// but the last scheduled backup is older than 20h, the run catches up so the
+// daily RPO (L-08) holds even on Hobby.
+const BACKUP_STALE_AFTER_MS = 20 * 60 * 60 * 1000
+
+router.get('/backup/run', requireCronSecret, async (req, res) => {
+  try {
+    const gotLease = await tryAcquireSchedulerLock(db, 'backup', LEASE_MS)
+    if (!gotLease) {
+      return res.status(200).json({ skipped: true, reason: 'LEASE_HELD' })
+    }
+    if (await backupController.runScheduledBackupIfDue(new Date())) {
+      return res.status(200).json({ skipped: false, ran: true })
+    }
+    const schedule = backupController.readBackupSchedule()
+    if (!schedule.enabled) {
+      return res.status(200).json({ skipped: false, ran: false, reason: 'SCHEDULE_DISABLED' })
+    }
+    const last = await db.db_backup.findOne({
+      where: { trigger: 'scheduled' },
+      order: [['createdAt', 'DESC']]
+    })
+    const overdue =
+      !last || Date.now() - new Date(last.createdAt).getTime() >= BACKUP_STALE_AFTER_MS
+    if (!overdue) {
+      return res.status(200).json({ skipped: false, ran: false, reason: 'NOT_DUE' })
+    }
+    const ran = await backupController.runScheduledBackup()
+    return res.status(200).json({ skipped: false, ran, catchUp: true })
+  } catch (error) {
+    console.error('Scheduled backup run failed:', error)
+    return res.status(500).json({ code: 'INTERNAL_ERROR', message: 'Backup failed' })
   }
 })
 
