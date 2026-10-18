@@ -85,19 +85,19 @@ const createOrder = (body) =>
       ...body
     }))
 
-describe('Phase 18 Tax Toggle', () => {
-  test('useTax true → taxAmount 1650 total 16650', async () => {
-    const res = await createOrder({ useTax: true })
+describe('DR-24 D-01 — cashier tax toggle removed', () => {
+  test('useTax false is ignored → tax still charged from the resolved rate (1650/16650)', async () => {
+    const res = await createOrder({ useTax: false })
     expect(res.status).toBe(201)
     expect(res.body.data.taxAmount).toBe(1650)
     expect(res.body.data.totalPrice).toBe(16650)
   })
 
-  test('useTax false → taxAmount 0 total 15000', async () => {
-    const res = await createOrder({ useTax: false })
+  test('useTax absent charges the resolved rate (1650/16650)', async () => {
+    const res = await createOrder({})
     expect(res.status).toBe(201)
-    expect(res.body.data.taxAmount).toBe(0)
-    expect(res.body.data.totalPrice).toBe(15000)
+    expect(res.body.data.taxAmount).toBe(1650)
+    expect(res.body.data.totalPrice).toBe(16650)
   })
 
   test('client fake taxRate 0 with useTax true is ignored', async () => {
@@ -107,10 +107,22 @@ describe('Phase 18 Tax Toggle', () => {
     expect(res.body.data.totalPrice).toBe(16650)
   })
 
-  test('client fake taxAmount with useTax false is ignored', async () => {
+  test('client fake taxAmount with useTax false is ignored — tax still charged', async () => {
     const res = await createOrder({ useTax: false, taxRate: 11, taxAmount: 1650, totalPrice: 16650 })
     expect(res.status).toBe(201)
-    expect(res.body.data.taxAmount).toBe(0)
-    expect(res.body.data.totalPrice).toBe(15000)
+    expect(res.body.data.taxAmount).toBe(1650)
+    expect(res.body.data.totalPrice).toBe(16650)
+  })
+
+  test('a tax-free outlet is configured explicitly — a 0 % row charges no tax', async () => {
+    await taxConfig.update({ rate: 0 })
+    try {
+      const res = await createOrder({ useTax: true })
+      expect(res.status).toBe(201)
+      expect(res.body.data.taxAmount).toBe(0)
+      expect(res.body.data.totalPrice).toBe(15000)
+    } finally {
+      await taxConfig.update({ rate: 11 })
+    }
   })
 })

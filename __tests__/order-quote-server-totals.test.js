@@ -156,7 +156,7 @@ describe('POST /order/quote — the quoted total is the charged total', () => {
       const m = await makeMember({ tierId: tier.id })
       return basePayload({ customerId: m.id, discountId: manualDiscount.id })
     }, 'discount'],
-    ['tax switched off', () => basePayload({ useTax: false }), 'none'],
+    ['legacy useTax:false is ignored (DR-24 D-01) — tax still charged', () => basePayload({ useTax: false }), 'none'],
     ['points redeemed (reduce the taxable base)', async () => {
       const m = await makeMember({ totalPoints: 10000 })
       return basePayload({ customerId: m.id, redeemedPoints: 3000 })

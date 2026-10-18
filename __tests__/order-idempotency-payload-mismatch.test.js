@@ -150,6 +150,15 @@ afterAll(async () => {
   await db.order_item.destroy({ where: {}, force: true })
   await db.transaction.destroy({ where: {}, force: true })
   await db.order_status.destroy({ where: {}, force: true })
+  // FK child of orders not owned by this suite's cleanup flow: the split-bill
+  // scenario (m_qr_split) leaves split_bill rows behind, and its order cannot
+  // be deleted while they reference it.
+  const orderIds = (
+    await db.order.findAll({ where: { store: storeIds }, attributes: ['id'] })
+  ).map((row) => row.id)
+  if (orderIds.length) {
+    await db.split_bill.destroy({ where: { order: orderIds }, force: true })
+  }
   await db.order.destroy({ where: { store: storeIds }, force: true })
   await db.table.destroy({ where: { store: storeIds }, force: true })
   await db.discount.destroy({ where: { store: storeIds }, force: true })
@@ -309,9 +318,15 @@ describe('DR-23 §K — same key compares the full order intent', () => {
     )
   })
 
-  test('waiving tax is refused', async () => {
+  test('useTax=false on a retry is ignored (DR-24 D-01) — replays with no new effect', async () => {
     const key = unique('k_tax')
-    await expectRefused(key, counter(key), counter(key, { useTax: false }), 'useTax')
+    const created = await postOrder(counter(key))
+    expect(created.status).toBe(201)
+    const before = await effects(key)
+    const replay = await postOrder(counter(key, { useTax: false }))
+    expect(replay.status).toBe(200)
+    expect(replay.body.data.id).toBe(created.body.data.id)
+    expect(await effects(key)).toEqual(before)
   })
 
   test('adding a promo code is refused', async () => {
@@ -687,12 +702,13 @@ describe('DR-23 §K — replay after legitimate post-create changes', () => {
     expect(refused.body.fields).toEqual(['paymentMethod'])
   })
 
-  test('tax: a PPN rate edited after creation does not refuse an identical retry; an unchanged rate proves a waived-tax retry', async () => {
+  test('tax (DR-24 D-01): an edited PPN rate never refuses an identical retry; an unchanged rate proves a legacy waived-tax order', async () => {
     const post3 = (body) =>
       request(app).post('/order/create').set('Authorization', `Bearer ${token3}`).send(withIdempotencyKey(body))
     const sale3 = (key, extra = {}) => ({ ...counter(key), store: store3.id, ...extra })
 
-    // Created at 0 % with useTax=true; the store's rate is then edited to 11 %.
+    // Created while the store's rate is 0 % (useTax is no longer read by
+    // either path); the store's rate is then edited to 11 %.
     const keyEdited = unique('m_tax_edit')
     const created = await post3(sale3(keyEdited))
     expect(created.status).toBe(201)
@@ -702,12 +718,16 @@ describe('DR-23 §K — replay after legitimate post-create changes', () => {
     expect(replay.status).toBe(200)
     expect(replay.body.data.id).toBe(created.body.data.id)
 
-    // At the (now unchanged) 11 %: a 0 % order can only come from useTax=false,
-    // so a useTax=true retry is provably different.
+    // With D-01 a new order always carries the resolved rate, so a persisted
+    // 0 % order while 11 % is active and unchanged since creation can only be
+    // a legacy tax waiver (the old useTax=false). Emulated by persisting the
+    // 0 % rate onto a fresh order; a retry asking for tax is then provably
+    // different.
     const keyWaived = unique('m_tax_waived')
-    const waived = await post3(sale3(keyWaived, { useTax: false }))
+    const waived = await post3(sale3(keyWaived))
     expect(waived.status).toBe(201)
-    const refused = await post3(sale3(keyWaived, { useTax: true }))
+    await db.order.update({ taxRate: 0 }, { where: { id: waived.body.data.id } })
+    const refused = await post3(sale3(keyWaived))
     expect(refused.status).toBe(409)
     expect(refused.body.fields).toEqual(['useTax'])
   })
