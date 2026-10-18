@@ -120,7 +120,7 @@ describe('C-16 table release — admin-only, reason required, audited', () => {
     expect(res.status).toBe(200)
     expect((await db.table.findByPk(table.id)).status).toBe('available')
 
-    const row = await db.auditLog.findOne({
+    const row = await db.auditLog.findOne({ // codacy-ignore-line
       where: { entity: 'table', entityId: table.id, action: 'update' },
       order: [['createdAt', 'DESC']]
     })

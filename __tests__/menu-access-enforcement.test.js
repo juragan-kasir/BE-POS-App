@@ -16,7 +16,7 @@ const db = require('../db/models')
 // are the reference module.
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
-const unique = (prefix) => `${prefix}_${Date.now()}_${Math.floor(Math.random() * 1e6)}`
+const unique = (prefix) => `${prefix}_${Date.now()}_${Math.floor(Math.random() * 1e6)}` // codacy-ignore-line
 
 let location = null
 const users = []

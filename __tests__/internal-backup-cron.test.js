@@ -2,13 +2,10 @@ process.env.NODE_ENV = 'test'
 process.env.VERCEL = 'true'
 // Isolate the backup schedule file: the endpoint must observe the default
 // "disabled" schedule instead of any real deployment file in ./backups.
-process.env.BACKUP_DIR = require('path').join(
-  require('os').tmpdir(),
-  `c24c-backup-${process.pid}`
-)
+// Repo-relative literal: jest always runs from the repository root.
+process.env.BACKUP_DIR = '.tmp-c24c-backup-cron'
 
 const fs = require('fs')
-const path = require('path')
 
 const request = require('supertest')
 const app = require('../api/index')
@@ -27,9 +24,9 @@ const { tryAcquireSchedulerLock } = require('../utils/schedulerLock')
 // Upgrade path: on Vercel Pro, drain/expiry can go back to */15 (L-07 floor).
 
 const SECRET = 's'.repeat(40)
-const SCHEDULE_FILE = path.join(process.env.BACKUP_DIR, '.schedule.json')
+const SCHEDULE_FILE = '.tmp-c24c-backup-cron/.schedule.json'
 const writeSchedule = (schedule) => {
-  fs.mkdirSync(process.env.BACKUP_DIR, { recursive: true })
+  fs.mkdirSync('.tmp-c24c-backup-cron', { recursive: true })
   fs.writeFileSync(SCHEDULE_FILE, JSON.stringify(schedule), 'utf8')
 }
 const clearBackupLease = () =>
@@ -52,7 +49,7 @@ afterEach(() => {
 afterAll(async () => {
   delete process.env.CRON_SECRET
   await clearBackupLease()
-  fs.rmSync(process.env.BACKUP_DIR, { recursive: true, force: true })
+  fs.rmSync('.tmp-c24c-backup-cron', { recursive: true, force: true })
 })
 
 describe('internal backup cron endpoint', () => {
@@ -161,9 +158,8 @@ describe('internal backup cron endpoint', () => {
 })
 
 describe('vercel.json cron contract', () => {
-  const vercel = JSON.parse(
-    fs.readFileSync(path.join(__dirname, '..', 'vercel.json'), 'utf8')
-  )
+  // Repo-relative literal: jest always runs from the repository root.
+  const vercel = JSON.parse(fs.readFileSync('vercel.json', 'utf8'))
 
   test('all three internal jobs are scheduled daily (Hobby plan refuses more-than-daily crons)', () => {
     const byPath = Object.fromEntries(

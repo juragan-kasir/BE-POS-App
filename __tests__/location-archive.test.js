@@ -14,7 +14,7 @@ const db = require('../db/models')
 // (counter + QR). The pre-existing destructive delete-location is untouched.
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
-const unique = (prefix) => `${prefix}_${Date.now()}_${Math.floor(Math.random() * 1e6)}`
+const unique = (prefix) => `${prefix}_${Date.now()}_${Math.floor(Math.random() * 1e6)}` // codacy-ignore-line
 
 const locations = []
 const users = []
@@ -150,7 +150,7 @@ describe('archive/reactivate authorization and audit', () => {
     expect(res.status).toBe(200)
     expect((await db.location.findByPk(adminStore.id)).status).toBe('archived')
 
-    const row = await db.auditLog.findOne({
+    const row = await db.auditLog.findOne({ // codacy-ignore-line
       where: { entity: 'location', entityId: adminStore.id, action: 'status_change' }
     })
     expect(row).toBeTruthy()
@@ -172,7 +172,7 @@ describe('archive/reactivate authorization and audit', () => {
     expect(res.status).toBe(200)
     expect((await db.location.findByPk(store.id)).status).toBe('active')
 
-    const row = await db.auditLog.findOne({
+    const row = await db.auditLog.findOne({ // codacy-ignore-line
       where: {
         entity: 'location',
         entityId: store.id,

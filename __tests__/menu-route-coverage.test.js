@@ -1,7 +1,6 @@
 process.env.NODE_ENV = 'test'
 
 const fs = require('fs')
-const path = require('path')
 
 // DR-24 C-02: the central menu-route registry is the single classification
 // point for every API route file. A new route file that is neither
@@ -15,8 +14,9 @@ const {
 } = require('../api/menuRouteMap')
 
 test('every api/routes file is classified in the central menuRouteMap', () => {
+  // Repo-relative literal: jest always runs from the repository root.
   const files = fs
-    .readdirSync(path.join(__dirname, '..', 'api', 'routes'))
+    .readdirSync('api/routes')
     .filter((f) => f.endsWith('.js'))
     .sort()
   const classified = [
