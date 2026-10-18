@@ -134,6 +134,24 @@ router.get(
   locationController.getStoreConfiguration
 )
 
+// DR-24 C-04 (DR-05 §35.7): outlet closure by archive — reversible and
+// audited, with fail-closed preconditions (open registers, unsettled orders,
+// in-transit transfers). Admin acts on its own store only (D-09); the
+// platform super_admin on any. The destructive /delete-location is unchanged.
+router.post(
+  '/archive-location',
+  authorization,
+  requireRole('super_admin', 'admin'),
+  locationController.archiveLocationById
+)
+
+router.post(
+  '/reactivate-location',
+  authorization,
+  requireRole('super_admin', 'admin'),
+  locationController.reactivateLocationById
+)
+
 // Delete location - Super Admin only
 router.delete(
   '/delete-location',

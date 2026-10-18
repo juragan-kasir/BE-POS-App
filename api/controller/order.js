@@ -1425,6 +1425,19 @@ exports.createOrder = async (req, res) => {
   if (!scope.store) return res.status(scope.status).json(scope.body)
   const authorizedStore = scope.store
 
+  // DR-24 C-04: an archived outlet is closed for new business — refuse the
+  // counter sale before any lookup, validation or write.
+  const archivedStore = await db.location.findOne({
+    where: { id: authorizedStore, status: 'archived' },
+    attributes: ['id']
+  })
+  if (archivedStore) {
+    return res.status(409).json({
+      error: 'This outlet is archived and cannot take new orders',
+      code: 'STORE_ARCHIVED'
+    })
+  }
+
   const {
     tableId,
     cashierId,
@@ -4175,6 +4188,19 @@ exports.createCustomerOrder = async (req, res) => {
       return res.status(400).json({ message: 'Table not found' })
     }
     store = Number(table.store) || Number(bodyStore)
+
+    // DR-24 C-04: a closed (archived) outlet accepts no new QR orders — the
+    // physical table capability of a closed outlet is not a licence to sell.
+    const archivedStore = await db.location.findOne({
+      where: { id: store, status: 'archived' },
+      attributes: ['id']
+    })
+    if (archivedStore) {
+      return res.status(409).json({
+        message: 'This outlet is archived and cannot take new orders',
+        code: 'STORE_ARCHIVED'
+      })
+    }
 
     for (const item of items) {
       const qty = item && item.quantity
