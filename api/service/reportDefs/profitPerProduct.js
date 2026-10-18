@@ -1,6 +1,7 @@
 'use strict'
 const db = require('../../../db/models')
 const { assertReportStore } = require('./getReportStore')
+const { DEFAULT_TIMEZONE, getStoreDayBounds } = require('../../../utils/businessDate')
 
 const defaultColumns = [
   { key: 'productName', label: 'Produk', type: 'string', width: 28, align: 'left' },
@@ -28,23 +29,37 @@ const getData = async (req) => {
     orderConditions += ` AND o."store" = :store`
     replacements.store = store
   }
-  if (startDate) {
+  // Store-local day windows (same contract as the HTTP report controllers):
+  // date bounds must not depend on the server machine's timezone — the old
+  // setHours(23, 59, 59, 999) dropped 00:00-07:00 WIB sales from the window.
+  let storeTimezone = DEFAULT_TIMEZONE
+  if (store) {
+    try {
+      const loc = await db.location.findByPk(store, { attributes: ['timezone'] })
+      if (loc?.timezone) storeTimezone = loc.timezone
+    } catch {}
+  }
+  const startBounds = startDate
+    ? getStoreDayBounds(String(startDate).slice(0, 10), storeTimezone)
+    : null
+  const endBounds = endDate
+    ? getStoreDayBounds(String(endDate).slice(0, 10), storeTimezone)
+    : null
+  if (startBounds) {
     orderConditions += ` AND o."createdAt" >= :startDate`
-    replacements.startDate = new Date(startDate)
+    replacements.startDate = startBounds.start
   } else {
     // No lower bound given — default to 90 days back instead of scanning
     // the full order/order_item history, which grows unbounded over the
     // life of the store.
-    const defaultStart = endDate ? new Date(endDate) : new Date()
+    const defaultStart = endBounds ? new Date(endBounds.start) : new Date()
     defaultStart.setDate(defaultStart.getDate() - 90)
     orderConditions += ` AND o."createdAt" >= :startDate`
     replacements.startDate = defaultStart
   }
-  if (endDate) {
-    const end = new Date(endDate)
-    end.setHours(23, 59, 59, 999)
+  if (endBounds) {
     orderConditions += ` AND o."createdAt" <= :endDate`
-    replacements.endDate = end
+    replacements.endDate = endBounds.end
   }
 
   // F6-01: hppSnapshot is a PER-UNIT cost (see order.js's createOrderItems/

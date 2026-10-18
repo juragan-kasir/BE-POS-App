@@ -254,7 +254,15 @@ describe('settlement reference (DR-23 §D)', () => {
     const fresh = await makeQrOrder()
     expect((await settlePaid({ id: fresh.id, paymentMethod: 'qris', referenceNumber: 'QR-NEW-1' })).status).toBe(200)
 
-    const day = new Date().toISOString().slice(0, 10)
+    // The cash-flow window is the STORE-LOCAL day (Asia/Jakarta default),
+    // not the UTC day: a UTC-derived date falls outside the window between
+    // 00:00-07:00 WIB, when the UTC date is still the day before.
+    const day = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Jakarta',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }).format(new Date())
     const res = await request(app)
       .get('/report/cash-flow')
       .set('Authorization', `Bearer ${adminToken}`)

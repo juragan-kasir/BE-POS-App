@@ -340,15 +340,26 @@ exports.getCashFlow = async (req, res) => {
       txConditions += ` AND o."store" = :store`
       replacements.store = store
     }
+    // Day windows are STORE-LOCAL days (see getSalesSummary above): the old
+    // new Date(...).setHours(23, 59, 59, 999) built the lower and upper
+    // bounds in different timezones, dropping 00:00-07:00 WIB orders from
+    // every window on a non-store-timezone machine.
+    let storeTimezone = DEFAULT_TIMEZONE
+    if (store) {
+      try {
+        const loc = await db.location.findByPk(store, { attributes: ['timezone'] })
+        if (loc?.timezone) storeTimezone = loc.timezone
+      } catch {}
+    }
     if (startDate) {
+      const startBounds = getStoreDayBounds(String(startDate).slice(0, 10), storeTimezone)
       txConditions += ` AND o."createdAt" >= :startDate`
-      replacements.startDate = new Date(startDate)
+      replacements.startDate = startBounds.start
     }
     if (endDate) {
-      const end = new Date(endDate)
-      end.setHours(23, 59, 59, 999)
+      const endBounds = getStoreDayBounds(String(endDate).slice(0, 10), storeTimezone)
       txConditions += ` AND o."createdAt" <= :endDate`
-      replacements.endDate = end
+      replacements.endDate = endBounds.end
     }
 
     // Aggregate payment breakdown by type in SQL

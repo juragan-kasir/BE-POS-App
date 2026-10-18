@@ -2,6 +2,7 @@
 const db = require('../../../db/models')
 const { assertReportStore } = require('./getReportStore')
 const { bucketCashFlowTenders } = require('../canonicalPayment')
+const { DEFAULT_TIMEZONE, getStoreDayBounds } = require('../../../utils/businessDate')
 
 const defaultColumns = [
   { key: 'keterangan', label: 'Keterangan', type: 'string', width: 28, align: 'left' },
@@ -18,10 +19,26 @@ const getData = async (req) => {
   let txConditions = '1=1'
 
   if (store) { txConditions += ` AND o."store" = :store`; replacements.store = store }
-  if (startDate) { txConditions += ` AND o."createdAt" >= :startDate`; replacements.startDate = new Date(startDate) }
+  // Store-local day windows (same contract as the HTTP cash-flow controller):
+  // never derive bounds from the server machine's clock — the old
+  // setHours(23, 59, 59, 999) dropped 00:00-07:00 WIB orders on machines
+  // whose timezone differs from the store's.
+  let storeTimezone = DEFAULT_TIMEZONE
+  if (store) {
+    try {
+      const loc = await db.location.findByPk(store, { attributes: ['timezone'] })
+      if (loc?.timezone) storeTimezone = loc.timezone
+    } catch {}
+  }
+  if (startDate) {
+    const startBounds = getStoreDayBounds(String(startDate).slice(0, 10), storeTimezone)
+    txConditions += ` AND o."createdAt" >= :startDate`
+    replacements.startDate = startBounds.start
+  }
   if (endDate) {
-    const end = new Date(endDate); end.setHours(23, 59, 59, 999)
-    txConditions += ` AND o."createdAt" <= :endDate`; replacements.endDate = end
+    const endBounds = getStoreDayBounds(String(endDate).slice(0, 10), storeTimezone)
+    txConditions += ` AND o."createdAt" <= :endDate`
+    replacements.endDate = endBounds.end
   }
 
   const paymentRows = await db.sequelize.query(
