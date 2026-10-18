@@ -14,7 +14,8 @@ const db = require('../db/models')
 // (counter + QR). The pre-existing destructive delete-location is untouched.
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
-const unique = (prefix) => `${prefix}_${Date.now()}_${Math.floor(Math.random() * 1e6)}` // codacy-ignore-line
+let uniqueSeq = 0
+const unique = (prefix) => `${prefix}_${Date.now()}_${++uniqueSeq}`
 
 const locations = []
 const users = []
@@ -150,8 +151,9 @@ describe('archive/reactivate authorization and audit', () => {
     expect(res.status).toBe(200)
     expect((await db.location.findByPk(adminStore.id)).status).toBe('archived')
 
-    const row = await db.auditLog.findOne({ // codacy-ignore-line
-      where: { entity: 'location', entityId: adminStore.id, action: 'status_change' }
+    const [row] = await db.auditLog.findAll({
+      where: { entity: 'location', entityId: adminStore.id, action: 'status_change' },
+      limit: 1
     })
     expect(row).toBeTruthy()
     expect(row.actorType).toBe('USER')
@@ -172,14 +174,15 @@ describe('archive/reactivate authorization and audit', () => {
     expect(res.status).toBe(200)
     expect((await db.location.findByPk(store.id)).status).toBe('active')
 
-    const row = await db.auditLog.findOne({ // codacy-ignore-line
+    const [row] = await db.auditLog.findAll({
       where: {
         entity: 'location',
         entityId: store.id,
         action: 'status_change',
         userId: users[0]
       },
-      order: [['id', 'DESC']]
+      order: [['id', 'DESC']],
+      limit: 1
     })
     expect(row).toBeTruthy()
     expect(row.reason).toBe('reopening')

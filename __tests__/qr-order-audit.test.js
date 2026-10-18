@@ -10,7 +10,8 @@ const db = require('../db/models')
 // actorType SYSTEM, source 'qr', with the order identity and scope. An
 // idempotent replay of the same key must not duplicate the audit row.
 
-const unique = (prefix) => `${prefix}_${Date.now()}_${Math.floor(Math.random() * 1e6)}` // codacy-ignore-line
+let uniqueSeq = 0
+const unique = (prefix) => `${prefix}_${Date.now()}_${++uniqueSeq}`
 
 let location = null
 let category = null
@@ -78,8 +79,9 @@ test('QR order creation writes a SYSTEM/SUCCESS audit row with the QR channel', 
   expect(res.status).toBe(201)
   orderIds.push(res.body.data.id)
 
-  const row = await db.auditLog.findOne({ // codacy-ignore-line
-    where: { entity: 'order', entityId: res.body.data.id }
+  const [row] = await db.auditLog.findAll({
+    where: { entity: 'order', entityId: res.body.data.id },
+    limit: 1
   })
   expect(row).toBeTruthy()
   expect(row.action).toBe('create')

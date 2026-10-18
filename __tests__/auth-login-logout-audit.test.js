@@ -10,7 +10,8 @@ const db = require('../db/models')
 // deleted/disabled account) and every logout must leave a record in the
 // append-only audit log with a safe reason code and no credential material.
 
-const unique = (prefix) => `${prefix}_${Date.now()}_${Math.floor(Math.random() * 1e6)}` // codacy-ignore-line
+let uniqueSeq = 0
+const unique = (prefix) => `${prefix}_${Date.now()}_${++uniqueSeq}`
 const PASSWORD = 'Rahasia123!'
 const createdIds = []
 let store
