@@ -464,10 +464,20 @@ exports.cleanupRetention = async () => {
   return removed
 }
 
+exports.readBackupSchedule = () => readSchedule()
+
 exports.runScheduledBackupIfDue = async (date = new Date()) => {
   const schedule = readSchedule()
   if (!schedule.enabled || !parseCron(schedule.cron)) return false
   if (!cronMatches(schedule.cron, date)) return false
+  return exports.runScheduledBackup()
+}
+
+// Unconditional variant used by the cron endpoint when the exact-minute match
+// missed (Vercel Hobby fires crons anywhere within the scheduled hour) but the
+// last scheduled backup is already stale. Callers must enforce the staleness
+// guard and the shared 'backup' lease.
+exports.runScheduledBackup = async () => {
   try {
     const now = new Date()
     const stamp = now.toISOString().replace(/[:.]/g, '-')
