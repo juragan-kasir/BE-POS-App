@@ -9,7 +9,7 @@ const Discount = db.discount
 const { Op } = require('sequelize')
 const { fetchActiveTaxRows, pickAppliedPpn } = require('../../utils/taxResolution')
 const { createNotification } = require('../../utils/createNotification')
-const { createAudit, redactAndAudit, AUDIT_ACTIONS } = require('../../utils/auditLog')
+const { createAudit, redactAndAudit, recordAudit, AUDIT_ACTIONS } = require('../../utils/auditLog')
 const {
   hasCapability,
   auditCapabilityDenial,
@@ -4718,6 +4718,28 @@ exports.createCustomerOrder = async (req, res) => {
         { model: db.order_item, as: 'items' },
         { model: db.table, as: 'table' }
       ]
+    })
+
+    // DR-24 C-24b / DR-20: this public endpoint has no authenticated actor;
+    // the committed order is still audited as a SYSTEM event with the QR
+    // channel, order identity/scope and the anonymous customer label. An
+    // idempotent replay returns before this point, so the row is written
+    // exactly once per order.
+    await recordAudit({
+      actor: { id: null, name: customerName || null, type: 'SYSTEM' },
+      req,
+      action: AUDIT_ACTIONS.CREATE,
+      entity: 'order',
+      entityId: order.id,
+      storeId: store,
+      result: 'SUCCESS',
+      source: 'qr',
+      metadata: {
+        orderNumber,
+        tableId: table.id,
+        itemCount: orderItems.length,
+        totalPrice: Number(totalPrice) || 0
+      }
     })
 
     createNotification({
