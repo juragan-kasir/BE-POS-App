@@ -647,5 +647,5 @@ Deployed on **Vercel** with serverless functions.
 
 - [Frontend App](../FE-POS-App/README.md)
 - [API Documentation](./API_DOCUMENTATION.md) (~210 endpoints with request/response examples)
+- [API Response Contracts — ERP/Akuntansi](./docs/api-response-contracts.md) (envelope, error codes, response shapes untuk FE)
 - [Dashboard Flow](./docs/DASHBOARD_FLOW.md)
-- [Endpoint Audit](./ENDPOINT_AUDIT.md)
