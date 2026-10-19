@@ -106,6 +106,7 @@ const goodsRequestRoutes = require('./routes/goodsRequest')
 const businessTripRoutes = require('./routes/businessTrip')
 const regionRoutes = require('./routes/region')
 const internalRoutes = require('./routes/internal')
+const assistantRoutes = require('./routes/assistant')
 const shiftTemplateRoutes = require('./routes/shiftTemplate')
 const shiftSwapRoutes = require('./routes/shiftSwap')
 const attendanceRoutes = require('./routes/attendance')
@@ -213,6 +214,8 @@ const routes = [
   { path: '/order', route: orderRoutes },
   // DR-10: cron-authenticated scheduler endpoints (inert without CRON_SECRET).
   { path: '/internal', route: internalRoutes },
+  // AI personal assistant (Telegram): service data API + owner link flow.
+  { path: '/assistant', route: assistantRoutes },
   { path: '/table', route: tableRoutes },
   { path: '/discount', route: discountRoutes },
   { path: '/shift', route: shiftRoutes },
