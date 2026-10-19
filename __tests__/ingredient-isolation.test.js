@@ -101,6 +101,8 @@ afterAll(async () => {
   if (ingStore1) ids.push(ingStore1.id)
   if (ingStore2) ids.push(ingStore2.id)
   if (ids.length > 0) {
+    // adjust-stock ledger rows reference the ingredient (FK) — remove first
+    await db.stock_history.destroy({ where: { ingredient: ids }, force: true })
     await db.ingredient.destroy({ where: { id: ids }, force: true })
   }
 })

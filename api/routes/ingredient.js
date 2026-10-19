@@ -8,7 +8,8 @@ const { validateStoreAccess } = require('../../utils/storeValidation')
 const { validate } = require('../middleware/validate')
 const {
   createIngredientSchema,
-  updateIngredientSchema
+  updateIngredientSchema,
+  adjustIngredientStockSchema
 } = require('../validation/schemas')
 
 const upload = multer({
@@ -65,7 +66,15 @@ router.put(
   authorization,
   validateStoreAccess,
   requireRole('super_admin', 'admin'),
+  validate(adjustIngredientStockSchema),
   ingredientController.adjustStock
+)
+router.get(
+  '/stock-summary',
+  authorization,
+  validateStoreAccess,
+  requireRole('super_admin', 'admin'),
+  ingredientController.stockSummary
 )
 router.delete(
   '/delete/:id',
