@@ -2,6 +2,7 @@ const db = require('../../db/models')
 const { Op } = require('sequelize')
 const { enrichAuditFields } = require('../../utils/auditFields')
 const { arrayStoreScope } = require('../../utils/tenantScope')
+const { DEFAULT_TIMEZONE, getStoreDayBounds, getStoreLocalDate } = require('../../utils/businessDate')
 
 const calculateGrade = (score) => {
   if (score >= 90) return 'A'
@@ -154,38 +155,55 @@ const supplierPerformanceController = {
       const storeFilter =
         storeIds && storeIds.length > 0 ? { store: { [Op.in]: storeIds } } : {}
 
+      // Default period windows are STORE-LOCAL calendar windows: the old
+      // setDate/setMonth/setHours defaults were built from the server
+      // machine's clock, which dropped orders written just after local
+      // midnight on the period's first day whenever the machine timezone
+      // differs from the store's (e.g. GitHub CI running in UTC).
+      let storeTimezone = DEFAULT_TIMEZONE
+      const tzStoreId = Array.isArray(storeIds) ? storeIds[0] : storeIds
+      if (tzStoreId) {
+        try {
+          const loc = await db.location.findByPk(tzStoreId, { attributes: ['timezone'] })
+          if (loc?.timezone) storeTimezone = loc.timezone
+        } catch {}
+      }
+      const localDayStr = getStoreLocalDate(storeTimezone, new Date())
+      const [localYear, localMonth] = localDayStr.split('-').map(Number)
+      const dayStr = (y, m, d) =>
+        `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+      const lastDayOfMonth = (y, m) => new Date(Date.UTC(y, m, 0)).getUTCDate()
+      const boundForDay = (y, m, d) => getStoreDayBounds(dayStr(y, m, d), storeTimezone)
+
       const startDate = periodStart ? new Date(periodStart) : new Date()
       const endDate = periodEnd ? new Date(periodEnd) : new Date()
 
       if (period === 'monthly') {
         if (!periodStart) {
-          startDate.setDate(1)
-          startDate.setHours(0, 0, 0, 0)
+          startDate.setTime(boundForDay(localYear, localMonth, 1).start.getTime())
         }
         if (!periodEnd) {
-          endDate.setMonth(endDate.getMonth() + 1)
-          endDate.setDate(0)
-          endDate.setHours(23, 59, 59, 999)
+          endDate.setTime(
+            boundForDay(localYear, localMonth, lastDayOfMonth(localYear, localMonth)).end.getTime()
+          )
         }
       } else if (period === 'quarterly') {
+        const quarterStartMonth = Math.floor((localMonth - 1) / 3) * 3 + 1
+        const quarterEndMonth = quarterStartMonth + 2
         if (!periodStart) {
-          const quarter = Math.floor(startDate.getMonth() / 3)
-          startDate.setMonth(quarter * 3, 1)
-          startDate.setHours(0, 0, 0, 0)
+          startDate.setTime(boundForDay(localYear, quarterStartMonth, 1).start.getTime())
         }
         if (!periodEnd) {
-          const quarter = Math.floor(endDate.getMonth() / 3)
-          endDate.setMonth(quarter * 3 + 3, 0)
-          endDate.setHours(23, 59, 59, 999)
+          endDate.setTime(
+            boundForDay(localYear, quarterEndMonth, lastDayOfMonth(localYear, quarterEndMonth)).end.getTime()
+          )
         }
       } else if (period === 'yearly') {
         if (!periodStart) {
-          startDate.setMonth(0, 1)
-          startDate.setHours(0, 0, 0, 0)
+          startDate.setTime(boundForDay(localYear, 1, 1).start.getTime())
         }
         if (!periodEnd) {
-          endDate.setMonth(11, 31)
-          endDate.setHours(23, 59, 59, 999)
+          endDate.setTime(boundForDay(localYear, 12, 31).end.getTime())
         }
       }
 

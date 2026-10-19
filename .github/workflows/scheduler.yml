@@ -1,11 +1,14 @@
 name: Production Schedulers
 
 # The in-process schedulers never run on serverless (api/index.js starts
-# them only when !VERCEL), and Vercel Cron cannot send the Authorization
-# header the /internal endpoints require — so GitHub Actions drives them
-# instead. Required repo configuration (Settings → Secrets and variables →
-# Actions): secret CRON_SECRET (>= 32 chars, same value as the Vercel project
-# env CRON_SECRET) and variable PROD_API_URL (e.g. https://api.example.com).
+# them only when !VERCEL). Vercel Hobby allows only daily crons, so GitHub
+# Actions drives the frequent jobs here; the daily Vercel crons in
+# vercel.json (drain, QR expiry, backup) authenticate automatically because
+# Vercel sends `Authorization: Bearer $CRON_SECRET` with cron invocations
+# when the CRON_SECRET env var is set on the project. Required repo
+# configuration (Settings → Secrets and variables → Actions): secret
+# CRON_SECRET (>= 32 chars, same value as the Vercel project env
+# CRON_SECRET) and variable PROD_API_URL (e.g. https://api.example.com).
 
 on:
   schedule:

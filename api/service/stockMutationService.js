@@ -1,6 +1,7 @@
 'use strict'
 
 const db = require('../../db/models')
+const { assertDecimalQuantity } = require('../../utils/decimalQuantityGuard')
 
 /**
  * Single authoritative path for mutating a product's stock (product.stock
@@ -320,7 +321,7 @@ async function adjustIngredientStockBatch({
     const projected = Number(ing.stock) + delta
     if (delta < 0 && projected < 0) {
       const e = new Error(
-        `Stok bahan baku "${ing.name}" tidak mencukupi. Tersedia: ${ing.stock}, dibutuhkan: ${-delta}`
+        `Stok bahan baku "${ing.name}" tidak mencukupi. Tersedia: ${Number(ing.stock)}, dibutuhkan: ${-delta}`
       )
       e.statusCode = 409
       // Stable machine-readable refusal (docs/order-create-client-contract
@@ -388,6 +389,151 @@ async function adjustIngredientStockBatch({
   })
 }
 
+
+/**
+ * Manual stock entry for ONE ingredient (opening stock, correction, count):
+ * the single-row counterpart of adjustIngredientStockBatch. The row is
+ * locked first and the change is computed from the LOCKED value, then
+ * applied as one atomic SQL delta — a concurrent sale's decrement landing
+ * between the operator's read and this commit is never overwritten.
+ *
+ * mode 'set' always writes a history row, even when the delta is 0: a
+ * counted zero is a recorded fact, distinct from stock never entered.
+ *
+ * @param {object} params
+ * @param {number} params.ingredientId
+ * @param {number|null} params.store - the caller's store; the ingredient
+ *   must belong to it (null = a global caller, no store check)
+ * @param {'add'|'subtract'|'set'} params.mode
+ * @param {number} params.quantity - non-negative, ≤ 4 decimals
+ * @param {import('sequelize').Transaction} params.transaction - required
+ * @returns {Promise<{ingredient: object, quantityBefore: number, quantityChange: number, quantityAfter: number}|null>}
+ *   null when the ingredient does not exist (or is outside the store)
+ */
+async function adjustIngredientStock({
+  ingredientId,
+  store = null,
+  mode,
+  quantity,
+  referenceType = 'adjustment',
+  notes = null,
+  createdBy = null,
+  transaction
+}) {
+  if (!transaction) {
+    throw new Error('adjustIngredientStock requires an explicit transaction')
+  }
+  const fail = (statusCode, message, code) => {
+    const e = new Error(message)
+    e.statusCode = statusCode
+    if (code) e.code = code
+    throw e
+  }
+  if (!['add', 'subtract', 'set'].includes(mode)) {
+    fail(400, 'type must be one of add, subtract, set')
+  }
+  const qty = Number(quantity)
+  if (!Number.isFinite(qty) || qty < 0) {
+    fail(400, 'Quantity must be a non-negative number')
+  }
+  assertDecimalQuantity(qty, 'quantity')
+  if (mode !== 'set' && qty === 0) {
+    fail(400, 'Quantity must be greater than 0')
+  }
+
+  const ingredient = await db.ingredient.findOne({
+    where: { id: ingredientId, ...(store != null ? { store } : {}) },
+    transaction,
+    lock: transaction.LOCK.UPDATE
+  })
+  if (!ingredient) return null
+
+  const quantityBefore = Number(ingredient.stock) || 0
+  // Rounded to the column's 4 decimals so before + change === after exactly.
+  const round4 = (n) => Math.round(n * 10000) / 10000
+  const quantityChange = round4(
+    mode === 'add' ? qty : mode === 'subtract' ? -qty : qty - quantityBefore
+  )
+  const quantityAfter = round4(quantityBefore + quantityChange)
+  if (quantityAfter < 0) {
+    fail(
+      409,
+      `Stok bahan baku "${ingredient.name}" tidak mencukupi. Tersedia: ${quantityBefore}, dikurangi: ${qty}`,
+      'INGREDIENT_STOCK_CONFLICT'
+    )
+  }
+
+  if (quantityChange !== 0) {
+    await db.ingredient.update(
+      { stock: db.sequelize.literal(`stock + (${quantityChange})`) },
+      { where: { id: ingredient.id }, transaction }
+    )
+  }
+  ingredient.stock = quantityAfter
+
+  await db.stock_history.create(
+    {
+      store: ingredient.store,
+      ingredient: ingredient.id,
+      ingredientName: ingredient.name,
+      referenceType,
+      referenceId: ingredient.id,
+      quantityBefore,
+      quantityChange,
+      quantityAfter,
+      unit: ingredient.baseUnit || ingredient.unit || 'pcs',
+      notes,
+      createdBy
+    },
+    { transaction }
+  )
+
+  return { ingredient, quantityBefore, quantityChange, quantityAfter }
+}
+
+// stock_history reference types that put a known quantity on an
+// ingredient: manual entry/correction, a physical count, a receipt.
+// Sales, reversals and returns only move an already-known quantity.
+const STOCK_RECORDING_REFERENCE_TYPES = ['adjustment', 'opname', 'purchase']
+
+/**
+ * Whether each ingredient's stock has ever been entered through a recorded
+ * event. An ingredient created with stock 0 and never counted is
+ * "uninitialized" — its 0 is unknown, not a verified zero.
+ *
+ * Also matches legacy manual adjustments written before stock_history
+ * carried the ingredient id (product NULL, referenceId = ingredient id).
+ *
+ * @param {number[]} ingredientIds
+ * @returns {Promise<Map<number, {lastRecordedAt: Date, lastCountedAt: Date|null}>>}
+ *   only ingredients that have at least one recording event
+ */
+async function getIngredientStockRecording(ingredientIds) {
+  const ids = [...new Set((ingredientIds || []).map(Number).filter(Number.isFinite))]
+  if (ids.length === 0) return new Map()
+  const rows = await db.sequelize.query(
+    `SELECT COALESCE(ingredient, "referenceId") AS "ingredientId",
+            MAX("createdAt") AS "lastRecordedAt",
+            MAX("createdAt") FILTER (WHERE "referenceType"::text = 'opname') AS "lastCountedAt"
+       FROM stock_history
+      WHERE "deletedAt" IS NULL
+        AND "referenceType"::text IN (:types)
+        AND (ingredient IN (:ids)
+             OR (ingredient IS NULL AND product IS NULL
+                 AND "referenceType"::text = 'adjustment' AND "referenceId" IN (:ids)))
+      GROUP BY 1`,
+    {
+      replacements: { ids, types: STOCK_RECORDING_REFERENCE_TYPES },
+      type: db.Sequelize.QueryTypes.SELECT
+    }
+  )
+  return new Map(
+    rows.map((r) => [
+      Number(r.ingredientId),
+      { lastRecordedAt: r.lastRecordedAt, lastCountedAt: r.lastCountedAt || null }
+    ])
+  )
+}
 
 // F7 — resolves BOM ingredient requirements for a flat list of
 // (productId, quantity) consumption entries, for products whose
@@ -489,5 +635,8 @@ module.exports = {
   adjustProductStock,
   setProductStock,
   adjustIngredientStockBatch,
+  adjustIngredientStock,
+  getIngredientStockRecording,
+  STOCK_RECORDING_REFERENCE_TYPES,
   resolveBomIngredientRequirements
 }
