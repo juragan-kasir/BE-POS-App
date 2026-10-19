@@ -961,7 +961,29 @@ exports.createIngredientSchema = z.object({
   status: statusEnum
 })
 
-exports.updateIngredientSchema = exports.createIngredientSchema.partial()
+// Explicit (not createIngredientSchema.partial()): under zod 4 a partial
+// schema still applies the create defaults, so an edit that omitted `stock`
+// parsed it as 0 and silently zeroed the ingredient's stock (and reset
+// unit/costPrice/status). Omitted = unchanged.
+exports.updateIngredientSchema = z.object({
+  name: z.string().min(1, 'Ingredient name is required').optional(),
+  store: strToNum().optional().nullable(),
+  category: strToNum().optional().nullable(),
+  supplier: strToNum().optional().nullable(),
+  stock: strToNum().optional(),
+  minStock: strToNum().optional(),
+  unit: z.string().optional(),
+  baseUnit: z.string().optional(),
+  conversionFactor: z.coerce.string().optional(),
+  costPrice: strToNum().optional(),
+  status: statusEnumBase.optional()
+})
+
+exports.adjustIngredientStockSchema = z.object({
+  type: z.enum(['add', 'subtract', 'set']),
+  quantity: z.coerce.number().finite().nonnegative(),
+  notes: z.string().max(500).optional().nullable()
+})
 
 // ===================== User =====================
 const userBaseSchema = z.object({
@@ -1562,7 +1584,9 @@ exports.createBomSchema = z.object({
   productId: strToNum(),
   name: z.string().optional().default(''),
   notes: z.string().optional().default(''),
-  status: z.string().optional().default('active'),
+  // Only an 'active' recipe deducts at sale; 'draft'/'inactive' never do.
+  // An unknown value (a typo) is refused instead of silently disabling it.
+  status: statusEnumBase.optional().default('active'),
   createdBy: strToNum().optional(),
   lines: z
     .array(
@@ -1582,7 +1606,7 @@ exports.createBomSchema = z.object({
 exports.updateBomSchema = z.object({
   name: z.string().optional(),
   notes: z.string().optional(),
-  status: z.string().optional(),
+  status: statusEnumBase.optional(),
   lines: z
     .array(
       z.object({
