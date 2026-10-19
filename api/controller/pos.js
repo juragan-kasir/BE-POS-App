@@ -236,6 +236,118 @@ const transferBoundaryRejection = (res, boundary) =>
       : { success: false, message: boundary.message }
   )
 
+// WhatsApp receipt text for one order of the caller's store, built from
+// the persisted order only (utils/receiptText — same sections and
+// invoice-setting switches as the printed receipt). Null when the order is
+// not the caller's (N-1: a foreign order is indistinguishable from a
+// missing one).
+async function loadOrderReceiptText(req, orderId) {
+  const waAttrs = await orderAttrs()
+  // N-1 (security): order must belong to the caller's tenant. The store
+  // is derived from the authoritative req.storeId (pinned by
+  // validateStoreAccess), never from the body; a foreign order is
+  // indistinguishable from a nonexistent one and is rejected before any
+  // external WhatsApp/email send can occur.
+  const order = await db.order.findOne({
+    where: { id: orderId, ...scalarStoreScope(req) },
+    include: [
+      { model: db.order_item, as: 'items' },
+      { model: db.table, as: 'table' }
+    ],
+    ...(waAttrs ? { attributes: waAttrs } : {})
+  })
+
+  if (!order) return null
+
+  const store = order.store
+    ? await db.location.findByPk(order.store, {
+        attributes: [
+          'name',
+          'address',
+          'detailLocation',
+          'city',
+          'province',
+          'district',
+          'village',
+          'postalCode',
+          'phoneNumber',
+          'email',
+          'socialMedia',
+          'timezone'
+        ]
+      })
+    : null
+  const settings = order.store
+    ? await db.invoice_setting.findOne({ where: { store: order.store } })
+    : null
+
+  // Province/city/district/village are stored as region codes.
+  const regionNames = {}
+  if (store) {
+    const codes = ['province', 'city', 'district', 'village']
+      .map((k) => store[k])
+      .filter(Boolean)
+      .map(String)
+    if (codes.length) {
+      const rows = await db.region.findAll({
+        where: { code: codes },
+        attributes: ['code', 'name']
+      })
+      const byCode = new Map(rows.map((r) => [String(r.code), r.name]))
+      for (const k of ['province', 'city', 'district', 'village']) {
+        if (store[k]) regionNames[k] = byCode.get(String(store[k])) || null
+      }
+    }
+  }
+
+  // Member block: the order's customer phone joined to a member of this
+  // store (D-05: canonical E.164 on both sides; order.customerPhone stays
+  // historical/raw, an unparseable value never joins).
+  let member = null
+  let canonicalCustomerPhone = null
+  if (order.customerPhone) {
+    try {
+      canonicalCustomerPhone = canonicalPhone(order.customerPhone)
+    } catch {
+      canonicalCustomerPhone = null
+    }
+  }
+  if (canonicalCustomerPhone) {
+    const found = await db.member.findOne({
+      where: { phoneNumber: canonicalCustomerPhone, store: order.store }
+    })
+    if (found && found.totalPoints > 0) {
+      let tierName = null
+      if (found.tier) {
+        const tier = await db.member_tier.findByPk(found.tier)
+        if (tier) tierName = tier.name
+      }
+      member = { name: found.name, totalPoints: found.totalPoints, tierName }
+    }
+  }
+
+  // Cash tender from the payment ledger (counter cash sale).
+  const cashRow = await db.transaction.findOne({
+    where: { order: order.id, cashReceived: { [Op.gt]: 0 } },
+    attributes: ['cashReceived', 'changeGiven'],
+    order: [['id', 'ASC']]
+  })
+
+  const { buildReceiptText } = require('../../utils/receiptText')
+  const text = buildReceiptText({
+    order,
+    items: order.items || [],
+    store,
+    regionNames,
+    settings,
+    tableName: order.table ? order.table.name : null,
+    member,
+    tender: cashRow,
+    timezone: (store && store.timezone) || 'Asia/Jakarta'
+  })
+  return { order, text }
+}
+
 const posController = {
   // Barcode lookup untuk POS scan
   async lookupBarcode(req, res) {
@@ -3033,199 +3145,99 @@ order: [['updatedAt', 'DESC']],
   },
 
   // Send invoice via WhatsApp
-  async sendInvoiceWhatsApp(req, res) {
+  // The receipt as WhatsApp text, without sending anything: the FE opens
+  // it through wa.me on the cashier's own WhatsApp (app on phone/iPad,
+  // Desktop or Web). gatewayReady says whether the store can also send it
+  // automatically through the gateway.
+  async getInvoiceWhatsAppText(req, res) {
     try {
-      const { orderId, phone } = req.body
-
-      if (!orderId || !phone) {
-        return res.status(400).json({
-          success: false,
-          message: 'orderId and phone are required'
-        })
+      const orderId = Number(req.params.orderId)
+      if (!Number.isInteger(orderId) || orderId <= 0) {
+        return res
+          .status(400)
+          .json({ success: false, code: 'VALIDATION_ERROR', message: 'Invalid orderId' })
       }
-
-      const waAttrs = await orderAttrs()
-      // N-1 (security): order must belong to the caller's tenant. The store
-      // is derived from the authoritative req.storeId (pinned by
-      // validateStoreAccess), never from the body; a foreign order is
-      // indistinguishable from a nonexistent one and is rejected before any
-      // external WhatsApp/email send can occur.
-      const order = await db.order.findOne({
-        where: { id: orderId, ...scalarStoreScope(req) },
-        include: [
-          { model: db.order_item, as: 'items' },
-          { model: db.table, as: 'table' }
-        ],
-        ...(waAttrs ? { attributes: waAttrs } : {})
-      })
-
-      if (!order) {
-        return res.status(404).json({
-          success: false,
-          message: 'Order not found'
-        })
+      const loaded = await loadOrderReceiptText(req, orderId)
+      if (!loaded) {
+        return res
+          .status(404)
+          .json({ success: false, code: 'ORDER_NOT_FOUND', message: 'Order not found' })
       }
-
-      const status = await getConnectionStatus()
-      if (!status.ready) {
-        return res.status(400).json({
-          success: false,
-          message:
-            status.error || 'WhatsApp tidak terhubung. Silakan cek pengaturan.',
-          data: { waConnected: false }
-        })
-      }
-
-      // Generate PDF
-      const storeData = order.store
-        ? await db.location.findByPk(order.store, {
-            attributes: [
-              'name',
-              'address',
-              'detailLocation',
-              'city',
-              'province',
-              'district',
-              'village',
-              'postalCode',
-              'phoneNumber',
-              'email',
-              'socialMedia'
-            ]
-          })
-        : null
-
-      const invoiceSetting = order.store
-        ? await db.invoice_setting.findOne({
-            where: { store: order.store }
-          })
-        : null
-
-      const settings = invoiceSetting
-        ? {
-            showStoreName: invoiceSetting.showStoreName ?? true,
-            showAddress: invoiceSetting.showAddress ?? true,
-            showMemberInfo: invoiceSetting.showMemberInfo ?? true,
-            showLogo: invoiceSetting.showLogo ?? true,
-            showSocialMedia: invoiceSetting.showSocialMedia ?? true,
-            socialMediaVisibility: invoiceSetting.socialMediaVisibility,
-            addressFieldsVisibility: invoiceSetting.addressFieldsVisibility,
-            memberFieldsVisibility: invoiceSetting.memberFieldsVisibility,
-            logo: invoiceSetting.logo,
-            footer: invoiceSetting.footer
-          }
-        : null
-
-      const { generateInvoicePdf } = require('../../utils/generateInvoicePdf')
-      const { filePath } = await generateInvoicePdf(
-        order,
-        storeData,
-        order.items || [],
-        settings
-      )
-
-      // Look up member points
-      let memberInfo = null
-      // D-05: identity comparison is canonical E.164 on both sides.
-      // order.customerPhone stays historical/raw (never rewritten); an
-      // unparseable historical value (including GUEST-*) never joins.
-      let canonicalCustomerPhone = null
-      if (order.customerPhone) {
-        try {
-          canonicalCustomerPhone = canonicalPhone(order.customerPhone)
-        } catch {
-          canonicalCustomerPhone = null
-        }
-      }
-      if (canonicalCustomerPhone) {
-        const member = await db.member.findOne({
-          where: { phoneNumber: canonicalCustomerPhone, store: order.store }
-        })
-        if (member && member.totalPoints > 0) {
-          let tierName = null
-          if (member.tier) {
-            const tier = await db.member_tier.findByPk(member.tier)
-            if (tier) tierName = tier.name
-          }
-          memberInfo = {
-            name: member.name,
-            totalPoints: member.totalPoints,
-            tierName
-          }
-        }
-      }
-
-      // Format items text
-      const itemLines = (order.items || [])
-        .map((i) => {
-          return `• ${i.productName || 'Item'}  ${i.quantity}x  Rp ${(i.totalPrice || 0).toLocaleString('id')}`
-        })
-        .join('\n')
-
-      const date = new Date(order.createdAt).toLocaleString('id-ID', {
-        weekday: 'long',
-        day: 'numeric',
-        month: 'long',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      })
-
-      const tableInfo = order.table ? `Meja: ${order.table.name}\n` : ''
-      const customerInfo = order.customerName
-        ? `Pelanggan: ${order.customerName}\n`
-        : ''
-      const itemsSection = order.items?.length
-        ? `\n━━━ *PESANAN* ━━━\n${itemLines}`
-        : ''
-
-      const statusText =
-        order.paymentStatus === 'paid'
-          ? 'LUNAS ✅'
-          : order.paymentStatus || 'BELUM DIBAYAR'
-
-      // Build member points section
-      let pointsSection = ''
-      if (memberInfo) {
-        pointsSection =
-          `\n━━━ *POIN MEMBER* ━━━\n` +
-          `Nama: ${memberInfo.name}\n` +
-          `Total Poin: ${memberInfo.totalPoints.toLocaleString('id')}\n` +
-          (memberInfo.tierName ? `Tier: ${memberInfo.tierName}\n` : '') +
-          `\n`
-      }
-
-      const caption =
-        `╔══════════════════════╗\n` +
-        `      *STRUK PEMBAYARAN*\n` +
-        `╚══════════════════════╝\n\n` +
-        `No. Invoice: *${order.orderNumber || order.id}*\n` +
-        `Tanggal: ${date}\n` +
-        `${customerInfo}` +
-        `${tableInfo}` +
-        `Status: ${statusText}\n` +
-        `${itemsSection}\n\n` +
-        `──────────────────────\n` +
-        `*Total: Rp ${(order.totalPrice || 0).toLocaleString('id')}*\n` +
-        `Pembayaran: ${order.paymentMethod || '-'}\n` +
-        `──────────────────────\n` +
-        `${pointsSection}` +
-        `Terima kasih telah berbelanja 🙏`
-
-      // Send PDF via WhatsApp
-      await sendDocument(phone, filePath, caption)
-
+      const status = await getConnectionStatus(loaded.order.store)
       return res.status(200).json({
         success: true,
-        message: 'Invoice berhasil dikirim via WhatsApp',
-        data: { orderId, phone }
+        message: 'Success get invoice WhatsApp text',
+        data: { orderId, text: loaded.text, gatewayReady: !!status.ready }
       })
     } catch (error) {
       console.error('Error =>', error)
       return res.status(500).json({
         success: false,
-        message: error.message || 'Gagal mengirim invoice via WhatsApp'
+        code: 'INTERNAL_ERROR',
+        message: 'Gagal menyiapkan pesan WhatsApp'
       })
+    }
+  },
+
+  // Digital receipt over WhatsApp (Fonnte gateway). The message is built
+  // server-side from the persisted order with the same sections and
+  // invoice-setting switches as the printed receipt (utils/receiptText).
+  // Every refusal carries a stable code and, once the order is resolved,
+  // the message text — the FE offers it through wa.me when the gateway
+  // cannot send.
+  async sendInvoiceWhatsApp(req, res) {
+    const fail = (status, code, message, extra = {}) =>
+      res.status(status).json({ success: false, code, message, ...extra })
+    try {
+      const { orderId, phone } = req.body
+
+      if (!orderId || !phone) {
+        return fail(400, 'VALIDATION_ERROR', 'orderId and phone are required')
+      }
+
+      let target
+      try {
+        target = canonicalPhone(phone)
+      } catch {
+        return fail(400, 'INVALID_PHONE', 'Nomor WhatsApp tidak valid')
+      }
+
+      const loaded = await loadOrderReceiptText(req, orderId)
+      if (!loaded) {
+        return fail(404, 'ORDER_NOT_FOUND', 'Order not found')
+      }
+      const { order, text } = loaded
+      // wa.me / gateway target: digits only, country code first.
+      const waPhone = target.replace(/[^0-9]/g, '')
+
+      const status = await getConnectionStatus(order.store)
+      if (!status.ready) {
+        return fail(
+          422,
+          'WA_NOT_CONFIGURED',
+          status.error || 'WhatsApp belum dikonfigurasi untuk toko ini.',
+          { data: { waConnected: false, phone: waPhone, text } }
+        )
+      }
+
+      try {
+        // The gateway sends text only (no attachment), so no PDF is built.
+        await sendDocument(waPhone, null, text, order.store)
+      } catch (sendError) {
+        console.error('WhatsApp send failed =>', sendError.message)
+        return fail(502, 'WA_SEND_FAILED', 'Gagal mengirim via WhatsApp gateway', {
+          data: { waConnected: true, phone: waPhone, text }
+        })
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: 'Invoice berhasil dikirim via WhatsApp',
+        data: { orderId: order.id, phone: waPhone }
+      })
+    } catch (error) {
+      console.error('Error =>', error)
+      return fail(500, 'INTERNAL_ERROR', 'Gagal mengirim invoice via WhatsApp')
     }
   },
 

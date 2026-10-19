@@ -137,6 +137,13 @@ router.put(
 )
 
 // Digital receipt (WA)
+// Text only (no send) — opened through wa.me on the cashier's WhatsApp.
+router.get(
+  '/invoice/wa-text/:orderId',
+  authorization,
+  validateStoreAccess,
+  posController.getInvoiceWhatsAppText
+)
 router.post(
   '/invoice/send-wa',
   authorization,
