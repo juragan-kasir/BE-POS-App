@@ -107,7 +107,7 @@ describe('D-05 invoice member join (canonical E.164 on both sides)', () => {
     const res = await sendInvoice(order.id)
     expect(res.status).toBe(200)
     const caption = captionOfLastSend()
-    expect(caption).toContain('POIN MEMBER')
+    expect(caption).toContain('INFO MEMBER')
     expect(caption).toContain('D05L Canonical Member')
   })
 
@@ -116,7 +116,7 @@ describe('D-05 invoice member join (canonical E.164 on both sides)', () => {
     const res = await sendInvoice(order.id)
     expect(res.status).toBe(200)
     const caption = captionOfLastSend()
-    expect(caption).toContain('POIN MEMBER')
+    expect(caption).toContain('INFO MEMBER')
     expect(caption).toContain('D05L Canonical Member')
   })
 
@@ -140,7 +140,7 @@ describe('D-05 invoice member join (canonical E.164 on both sides)', () => {
     const res = await sendInvoice(order.id)
     expect(res.status).toBe(200)
     const caption = captionOfLastSend()
-    expect(caption).not.toContain('POIN MEMBER')
+    expect(caption).not.toContain('INFO MEMBER')
     expect(caption).not.toContain('D05L Legacy Raw Member')
   })
 
@@ -156,7 +156,7 @@ describe('D-05 invoice member join (canonical E.164 on both sides)', () => {
     const res = await sendInvoice(order.id)
     expect(res.status).toBe(200)
     const caption = captionOfLastSend()
-    expect(caption).not.toContain('POIN MEMBER')
+    expect(caption).not.toContain('INFO MEMBER')
     expect(caption).not.toContain('D05L Guest Member')
   })
 })
