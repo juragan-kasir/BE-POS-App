@@ -15,6 +15,24 @@ const { Op } = require('sequelize')
 // cancelled with an 'expired' status note, its table is released when no
 // other open order holds it, and the expiry is audited. A QR order takes
 // no stock before payment, so there is nothing to give back.
+// The status note that marks a system expiry (vs a staff cancellation).
+// Matched in full (prefix + fixed wording), so a staff note that merely
+// starts with "expired:" is never mistaken for the system's expiry.
+const EXPIRY_NOTE_PREFIX = 'expired:'
+const EXPIRY_NOTE_PATTERN = `${EXPIRY_NOTE_PREFIX} unpaid QR order after % minutes`
+
+// Which of these cancelled orders ended by expiry rather than by staff —
+// read from the expiry's status row, never from free text the diner sees.
+const expiredOrderIds = async (orderIds) => {
+  const ids = (orderIds || []).map(Number).filter(Number.isInteger)
+  if (!ids.length) return new Set()
+  const rows = await db.order_status.findAll({
+    where: { order: ids, status: 'cancelled', notes: { [Op.like]: EXPIRY_NOTE_PATTERN } },
+    attributes: ['order']
+  })
+  return new Set(rows.map((r) => Number(r.order)))
+}
+
 const qrPendingExpiryMinutes = () => {
   const minutes = Number(process.env.QR_PENDING_EXPIRY_MINUTES)
   return Number.isInteger(minutes) && minutes > 0 ? minutes : null
@@ -50,7 +68,7 @@ const expireOne = async (orderId, cutoff, minutes, actorType) =>
         order: order.id,
         status: 'cancelled',
         createdBy: null,
-        notes: `expired: unpaid QR order after ${minutes} minutes`
+        notes: `${EXPIRY_NOTE_PREFIX} unpaid QR order after ${minutes} minutes`
       },
       { transaction: t }
     )
@@ -123,4 +141,9 @@ const expireStaleQrOrders = async ({
   return expired
 }
 
-module.exports = { qrPendingExpiryMinutes, expireStaleQrOrders }
+module.exports = {
+  EXPIRY_NOTE_PREFIX,
+  expiredOrderIds,
+  qrPendingExpiryMinutes,
+  expireStaleQrOrders
+}
