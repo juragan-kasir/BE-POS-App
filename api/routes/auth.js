@@ -57,9 +57,22 @@ const router = express.Router()
 // Login Post
 router.post('/login', loginLimiter, validate(loginSchema), authController.login)
 
-// Register (public)
+// DR-24 D-08: public self-registration is closed — staff accounts are
+// created by the owner (Employee → Add). The route answers only when it is
+// explicitly opened with PUBLIC_REGISTRATION_ENABLED=true (e.g. a local
+// demo); read per request so the switch needs no redeploy-time code path.
+const requirePublicRegistration = (req, res, next) => {
+  if (process.env.PUBLIC_REGISTRATION_ENABLED === 'true') return next()
+  return res.status(403).json({
+    code: 'REGISTRATION_CLOSED',
+    message: 'Pendaftaran akun mandiri ditutup. Akun karyawan dibuat oleh pemilik toko.'
+  })
+}
+
+// Register (public — closed unless explicitly enabled, see above)
 router.post(
   '/register',
+  requirePublicRegistration,
   validate(registerSchema),
   authController.registerNewUser
 )

@@ -308,7 +308,9 @@ describe('P0-1 exploit chain is broken', () => {
   test('register → login → enumerate → request reset → obtain token → reset victim fails', async () => {
     const victim = await makeUser('victim', { roleType: 'super_admin', userType: 'admin', store: null })
 
-    // 1. public registration
+    // 1. public registration — closed by default (D-08); opened here to prove
+    // the chain stays broken even where an operator enables it.
+    process.env.PUBLIC_REGISTRATION_ENABLED = 'true'
     const userName = unique('p01_attacker')
     const registered = await request(app).post('/auth/register').send({
       userName,
@@ -316,6 +318,7 @@ describe('P0-1 exploit chain is broken', () => {
       password: PASSWORD,
       confirmPassword: PASSWORD
     })
+    delete process.env.PUBLIC_REGISTRATION_ENABLED
     expect(registered.status).toBe(200)
     const attacker = await db.user.findOne({ where: { userName: userName.toLowerCase() } })
     createdUserIds.push(attacker.id)

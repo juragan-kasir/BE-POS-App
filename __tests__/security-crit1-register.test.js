@@ -1,5 +1,8 @@
 process.env.NODE_ENV = 'test'
 process.env.VERCEL = 'true'
+// D-08: /auth/register is closed by default; this suite tests the hardening
+// of the (explicitly enabled) registration path.
+process.env.PUBLIC_REGISTRATION_ENABLED = 'true'
 
 const request = require('supertest')
 const jwt = require('jsonwebtoken')
