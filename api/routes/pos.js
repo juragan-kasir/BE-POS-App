@@ -12,7 +12,6 @@ const {
   createPosReturnSchema,
   createSalesReturnSchema,
   updatePriceByStoreSchema,
-  sendInvoiceWaSchema,
   sendInvoiceEmailSchema,
   addBatchSchema
 } = require('../validation/schemas')
@@ -145,40 +144,11 @@ router.get(
   posController.getInvoiceWhatsAppText
 )
 router.post(
-  '/invoice/send-wa',
-  authorization,
-  validateStoreAccess,
-  validate(sendInvoiceWaSchema),
-  posController.sendInvoiceWhatsApp
-)
-router.post(
   '/invoice/send-email',
   authorization,
   validateStoreAccess,
   validate(sendInvoiceEmailSchema),
   posController.sendInvoiceEmail
-)
-
-// WhatsApp connection management
-router.get(
-  '/whatsapp/status',
-  authorization,
-  validateStoreAccess,
-  posController.getWhatsAppStatus
-)
-router.post(
-  '/whatsapp/logout',
-  authorization,
-  validateStoreAccess,
-  requireRole('super_admin', 'admin'),
-  posController.logoutWhatsApp
-)
-router.post(
-  '/whatsapp/restart',
-  authorization,
-  validateStoreAccess,
-  requireRole('super_admin', 'admin'),
-  posController.restartWhatsApp
 )
 
 // Stock by batch/expiry

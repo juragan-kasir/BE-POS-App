@@ -4,7 +4,6 @@ const { Op } = require('sequelize')
 const db = require('../../db/models')
 const { createAudit } = require('../../utils/auditLog')
 const { createNotification } = require('../../utils/createNotification')
-const { sendWhatsAppText } = require('../../utils/whatsappClient')
 
 const Overtime = db.overtime
 const User = db.user
@@ -107,35 +106,6 @@ const timesOverlap = (aStart, aEnd, bStart, bEnd) => {
   const [wa1, wa2] = win(a1, a2)
   const [wb1, wb2] = win(b1, b2)
   return Math.max(wa1, wb1) < Math.min(wa2, wb2)
-}
-
-// WhatsApp best-effort: jangan pernah merusak alur utama bila gagal / tidak dikonfigurasi.
-const sendOvertimeWhatsApp = async ({
-  type,
-  employeeName,
-  phone,
-  date,
-  shiftName,
-  from,
-  to,
-  duration,
-  store
-}) => {
-  if (!phone) return
-  const lines = [
-    `*Notifikasi Lembur — Toko #${store || '-'}*`,
-    `Status: *${type}*`,
-    `Karyawan: ${employeeName || '-'}`,
-    `Tanggal: ${date || '-'}`,
-    `Shift: ${shiftName || '-'}`,
-    `Jam: ${String(from || '').slice(0, 5)} - ${String(to || '').slice(0, 5)}`,
-    `Durasi: ${String(duration || '0').replace('.', ',')} jam`
-  ]
-  try {
-    await sendWhatsAppText(phone, lines.join('\n'), store)
-  } catch (e) {
-    console.warn('[whatsapp] overtime notif skip:', e.message)
-  }
 }
 
 const getWhere = (req) => {
@@ -360,18 +330,6 @@ exports.createOvertime = async (req, res, next) => {
       req.user.id
     )
 
-    await sendOvertimeWhatsApp({
-      type: 'Diajukan',
-      employeeName: employee.fullName || `Karyawan #${finalEmployeeId}`,
-      phone: employee.phoneNumber,
-      date: otDate,
-      shiftName: shift.name,
-      from: start_time,
-      to: end_time,
-      duration,
-      store: storeId
-    })
-
     res.status(201).json({
       success: true,
       message: 'Pengajuan lembur berhasil dibuat',
@@ -463,18 +421,6 @@ exports.updateOvertimeStatus = async (req, res, next) => {
       [employee?.fullName || `Karyawan #${ot.employee_id}`, ot.date, note || undefined],
       req.user.id
     )
-
-    await sendOvertimeWhatsApp({
-      type: status === 'approved' ? 'Disetujui' : 'Ditolak',
-      employeeName: employee?.fullName || `Karyawan #${ot.employee_id}`,
-      phone: employee?.phoneNumber,
-      date: ot.date,
-      shiftName: null,
-      from: ot.start_time,
-      to: ot.end_time,
-      duration: ot.duration_hours,
-      store: ot.store
-    })
 
     res.json({
       success: true,

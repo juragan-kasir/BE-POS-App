@@ -4832,12 +4832,12 @@ Auth required (super_admin/admin).
 }
 ```
 
-### POST `/pos/invoice/send-wa`
-Auth required.
+### GET `/pos/invoice/wa-text/:orderId`
+Auth required (store-scoped; another store's order → 404). Returns the receipt as WhatsApp text — same sections and invoice-setting switches as the printed receipt. Nothing is sent: the client opens `https://wa.me/<number>?text=<text>` on the cashier's own WhatsApp.
 
-**Request:**
+**Response:**
 ```json
-{ "orderId": "number (required)", "phone": "string (required)" }
+{ "success": true, "data": { "orderId": 42, "text": "*WARUNG A*\n…\n*TOTAL: Rp20.000*" } }
 ```
 
 ### POST `/pos/invoice/send-email`
@@ -4847,25 +4847,6 @@ Auth required.
 ```json
 { "orderId": "number (required)", "email": "string (required, valid email)" }
 ```
-
-### GET `/pos/whatsapp/status`
-Auth required.
-
-**Response:**
-```json
-{
-  "success": true,
-  "data": { "connected": true, "number": "6281234567890" }
-}
-```
-
----
-
-### POST `/pos/whatsapp/logout`
-Auth required (super_admin/admin).
-
-### POST `/pos/whatsapp/restart`
-Auth required (super_admin/admin).
 
 ### POST `/pos/product/add-batch`
 Auth required (super_admin/admin).

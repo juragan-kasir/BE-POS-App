@@ -26,17 +26,11 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json ./
-# whatsapp-web.js pulls in puppeteer transitively; this container only runs
-# api/index.js (never whatsapp-server.js, which the codebase already documents
-# as a separate local/ngrok-only process — see whatsapp-server.js's own header
-# comment), so skip Puppeteer's ~300MB bundled Chromium download entirely.
-ENV PUPPETEER_SKIP_DOWNLOAD=true
 RUN npm ci --omit=dev
 
 # ---- runtime: slim final image, no build tools, non-root ----
 FROM node:20-slim AS runtime
-ENV NODE_ENV=production \
-    PUPPETEER_SKIP_DOWNLOAD=true
+ENV NODE_ENV=production
 WORKDIR /app
 
 RUN groupadd --system app && useradd --system --gid app --home /app app

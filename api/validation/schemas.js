@@ -1984,11 +1984,6 @@ exports.updatePriceByStoreSchema = z.object({
     .min(1, 'At least one store price is required')
 })
 
-exports.sendInvoiceWaSchema = z.object({
-  orderId: z.union([z.number(), strToNum()]),
-  phone: z.string().min(1, 'Phone is required')
-})
-
 exports.sendInvoiceEmailSchema = z.object({
   orderId: z.union([z.number(), strToNum()]),
   email: z.string().email('Invalid email')

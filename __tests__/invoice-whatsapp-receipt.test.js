@@ -3,22 +3,13 @@ process.env.VERCEL = 'true'
 
 // Client request: send the invoice to the member/customer over WhatsApp.
 // The message mirrors the printed receipt (same sections and invoice-setting
-// switches) and every refusal is coded, carrying the message text so the FE
-// can fall back to wa.me when the gateway cannot send.
-jest.mock('../utils/whatsappClient', () => {
-  const actual = jest.requireActual('../utils/whatsappClient')
-  return {
-    ...actual,
-    getConnectionStatus: jest.fn(async () => ({ ready: true, error: null })),
-    sendDocument: jest.fn(async () => {})
-  }
-})
+// switches); the FE opens it through wa.me on the cashier's own WhatsApp
+// (the Fonnte gateway was removed 2026-10-20).
 
 const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
-const whatsapp = require('../utils/whatsappClient')
 const { buildReceiptText } = require('../utils/receiptText')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
@@ -32,12 +23,6 @@ let category = null
 let product = null
 let adminToken = null
 let kasirToken = null
-
-const send = (token, body) =>
-  request(app)
-    .post('/pos/invoice/send-wa')
-    .set('Authorization', `Bearer ${token}`)
-    .send(body)
 
 describe('buildReceiptText — same content and switches as the printed receipt', () => {
   const base = {
@@ -150,7 +135,7 @@ describe('buildReceiptText — same content and switches as the printed receipt'
   })
 })
 
-describe('POST /pos/invoice/send-wa', () => {
+describe('GET /pos/invoice/wa-text/:orderId', () => {
   beforeAll(async () => {
     store = await db.location.create({
       name: 'WA Receipt Store',
@@ -245,80 +230,7 @@ describe('POST /pos/invoice/send-wa', () => {
     await db.location.destroy({ where: { id: store?.id }, force: true })
   })
 
-  beforeEach(() => {
-    whatsapp.sendDocument.mockReset().mockResolvedValue()
-    whatsapp.getConnectionStatus
-      .mockReset()
-      .mockResolvedValue({ ready: true, error: null })
-  })
-
-  test('sends the receipt text to the normalised number (national form accepted)', async () => {
-    const res = await send(kasirToken, {
-      orderId: order.id,
-      phone: '0812-3456-7890'
-    })
-    expect(res.status).toBe(200)
-    expect(res.body.data.phone).toBe('6281234567890')
-    expect(whatsapp.sendDocument).toHaveBeenCalledTimes(1)
-    const [to, file, text] = whatsapp.sendDocument.mock.calls[0]
-    expect(to).toBe('6281234567890')
-    expect(file).toBeNull()
-    expect(text).toContain('*WA RECEIPT STORE*')
-    expect(text).toContain('Jl. Kenanga 1')
-    expect(text).toContain('  1 x Rp20.000 = Rp20.000')
-    expect(text).toContain('*TOTAL: Rp20.000*')
-    expect(text).toContain('_Sampai jumpa lagi_')
-    expect(text).toContain('Instagram: @wa.store')
-  })
-
-  test('an invalid number is refused before anything is sent', async () => {
-    const res = await send(adminToken, { orderId: order.id, phone: '12' })
-    expect(res.status).toBe(400)
-    expect(res.body.code).toBe('INVALID_PHONE')
-    expect(whatsapp.sendDocument).not.toHaveBeenCalled()
-  })
-
-  test('gateway not configured → 422 WA_NOT_CONFIGURED with the text for a wa.me fallback', async () => {
-    whatsapp.getConnectionStatus.mockResolvedValue({
-      ready: false,
-      error: 'FONNTE_TOKEN not set'
-    })
-    const res = await send(adminToken, {
-      orderId: order.id,
-      phone: '081234567890'
-    })
-    expect(res.status).toBe(422)
-    expect(res.body.code).toBe('WA_NOT_CONFIGURED')
-    expect(res.body.data.phone).toBe('6281234567890')
-    expect(res.body.data.text).toContain('*TOTAL: Rp20.000*')
-    expect(whatsapp.sendDocument).not.toHaveBeenCalled()
-  })
-
-  test('gateway failure → 502 WA_SEND_FAILED with the text, raw gateway error not leaked', async () => {
-    whatsapp.sendDocument.mockRejectedValue(
-      new Error('Fonnte: device disconnected token=abc')
-    )
-    const res = await send(adminToken, {
-      orderId: order.id,
-      phone: '081234567890'
-    })
-    expect(res.status).toBe(502)
-    expect(res.body.code).toBe('WA_SEND_FAILED')
-    expect(res.body.data.text).toContain('Mie Ayam')
-    expect(JSON.stringify(res.body)).not.toContain('token=abc')
-  })
-
-  test('an unknown order is 404 and sends nothing', async () => {
-    const res = await send(adminToken, {
-      orderId: 999999999,
-      phone: '081234567890'
-    })
-    expect(res.status).toBe(404)
-    expect(res.body.code).toBe('ORDER_NOT_FOUND')
-    expect(whatsapp.sendDocument).not.toHaveBeenCalled()
-  })
-
-  describe('GET /pos/invoice/wa-text/:orderId (wa.me, no gateway)', () => {
+  describe('wa.me text (nothing is sent)', () => {
     let otherStore = null
     let otherToken = null
     const OTHER = 9783
@@ -357,35 +269,22 @@ describe('POST /pos/invoice/send-wa', () => {
         await db.location.destroy({ where: { id: otherStore.id }, force: true })
     })
 
-    beforeEach(() => {
-      whatsapp.sendDocument.mockReset().mockResolvedValue()
-      whatsapp.getConnectionStatus
-        .mockReset()
-        .mockResolvedValue({ ready: false, error: 'not set' })
-    })
-
     const getText = (token, id) =>
       request(app)
         .get(`/pos/invoice/wa-text/${id}`)
         .set('Authorization', `Bearer ${token}`)
 
-    test('returns the same receipt text as the gateway path, sends nothing', async () => {
+    test('returns the receipt text: header, items, total, footer and social from the invoice settings', async () => {
       const res = await getText(kasirToken, order.id)
       expect(res.status).toBe(200)
-      expect(res.body.data.gatewayReady).toBe(false)
-      expect(res.body.data.text).toContain('*WA RECEIPT STORE*')
-      expect(res.body.data.text).toContain('*TOTAL: Rp20.000*')
-      expect(whatsapp.sendDocument).not.toHaveBeenCalled()
-
-      whatsapp.getConnectionStatus.mockResolvedValue({ ready: true })
-      await send(kasirToken, { orderId: order.id, phone: '081234567890' })
-      expect(whatsapp.sendDocument.mock.calls[0][2]).toBe(res.body.data.text)
-    })
-
-    test('reports gatewayReady when the store gateway is configured', async () => {
-      whatsapp.getConnectionStatus.mockResolvedValue({ ready: true })
-      const res = await getText(adminToken, order.id)
-      expect(res.body.data.gatewayReady).toBe(true)
+      const text = res.body.data.text
+      expect(res.body.data).not.toHaveProperty('gatewayReady')
+      expect(text).toContain('*WA RECEIPT STORE*')
+      expect(text).toContain('Jl. Kenanga 1')
+      expect(text).toContain('  1 x Rp20.000 = Rp20.000')
+      expect(text).toContain('*TOTAL: Rp20.000*')
+      expect(text).toContain('_Sampai jumpa lagi_')
+      expect(text).toContain('Instagram: @wa.store')
     })
 
     test("another store's order is 404 and its content is not disclosed", async () => {
