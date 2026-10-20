@@ -19,7 +19,6 @@ Point of Sale (POS) backend API built with Node.js, Express, and PostgreSQL.
 | **File Storage** | AWS S3, Cloudinary |
 | **PDF Generation** | Puppeteer, PDFKit |
 | **Excel** | ExcelJS |
-| **WhatsApp** | whatsapp-web.js |
 | **Security** | Helmet, CORS, express-rate-limit |
 | **Deployment** | Vercel |
 
@@ -155,7 +154,6 @@ BE-POS-APP/
 │   ├── createNotification.js # Notification helper
 │   ├── storeValidation.js    # Store access validation
 │   ├── userContext.js        # AsyncLocalStorage user context
-│   └── whatsappClient.js     # WhatsApp client
 ├── scripts/                  # Migration & utility scripts
 ├── docs/                     # Documentation
 ├── API_DOCUMENTATION.md      # Full API reference (~210 endpoints)
@@ -538,15 +536,8 @@ BE-POS-APP/
 | GET | `/invoice/footer` | Get footers |
 | POST | `/invoice/footer` | Create footer |
 | GET | `/receipt/:orderId` | Get order receipt |
-| POST | `/pos/invoice/send-wa` | Send receipt via WhatsApp |
+| GET | `/pos/invoice/wa-text/:orderId` | Receipt as WhatsApp text (opened via wa.me; nothing is sent) |
 | POST | `/pos/invoice/send-email` | Send receipt via email |
-
-### WhatsApp Integration
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/pos/whatsapp/status` | WhatsApp connection status |
-| POST | `/pos/whatsapp/logout` | Logout WhatsApp |
-| POST | `/pos/whatsapp/restart` | Restart WhatsApp |
 
 ### Social Media
 | Method | Endpoint | Description |

@@ -1,6 +1,5 @@
 process.env.NODE_ENV = 'test'
 process.env.VERCEL = 'true'
-process.env.FONNTE_TOKEN = 'test-token'
 
 // D-05 phone identity lookups (locked contract): every phone identity
 // comparison canonicalizes to E.164 first.
@@ -12,20 +11,11 @@ process.env.FONNTE_TOKEN = 'test-token'
 // - admin/POS phone search: national input still finds E.164-stored members
 //
 // Phone range 0815000002xx and D05L_* names are unique to this file.
-jest.mock('../utils/whatsappClient', () => {
-  const actual = jest.requireActual('../utils/whatsappClient')
-  return {
-    ...actual,
-    getConnectionStatus: jest.fn(async () => ({ ready: true, hasQR: false, qrBase64: null, error: null })),
-    sendDocument: jest.fn(async () => {})
-  }
-})
 
 const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
-const whatsapp = require('../utils/whatsappClient')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -52,18 +42,25 @@ beforeAll(async () => {
 })
 
 afterAll(async () => {
-  const members = await db.member.findAll({ where: { store: store?.id }, paranoid: false, raw: true })
-  await db.member_point_history.destroy({ where: { member: members.map((m) => m.id) }, force: true })
+  const members = await db.member.findAll({
+    where: { store: store?.id },
+    paranoid: false,
+    raw: true
+  })
+  await db.member_point_history.destroy({
+    where: { member: members.map((m) => m.id) },
+    force: true
+  })
   await db.order_item.destroy({ where: { order: orderIds }, force: true })
   await db.order.destroy({ where: { id: orderIds }, force: true })
   await db.member.destroy({ where: { store: store?.id }, force: true })
-  await db.auditLog.destroy({ where: { userId: 9301 }, force: true, __auditMaintenance: true })
+  await db.auditLog.destroy({
+    where: { userId: 9301 },
+    force: true,
+    __auditMaintenance: true
+  })
   await db.user.destroy({ where: { id: 9301 }, force: true })
   await db.location.destroy({ where: { id: store?.id }, force: true })
-})
-
-beforeEach(() => {
-  whatsapp.sendDocument.mockClear()
 })
 
 const createOrder = async (customerPhone) => {
@@ -81,16 +78,12 @@ const createOrder = async (customerPhone) => {
   return order
 }
 
+// The member block of the WhatsApp receipt text (GET /pos/invoice/wa-text,
+// opened via wa.me) carries the joined member.
 const sendInvoice = (orderId) =>
   request(app)
-    .post('/pos/invoice/send-wa')
+    .get(`/pos/invoice/wa-text/${orderId}`)
     .set('Authorization', `Bearer ${adminToken}`)
-    .send({ orderId, phone: '6281234567890' })
-
-const captionOfLastSend = () => {
-  expect(whatsapp.sendDocument).toHaveBeenCalledTimes(1)
-  return whatsapp.sendDocument.mock.calls[0][2]
-}
 
 describe('D-05 invoice member join (canonical E.164 on both sides)', () => {
   beforeAll(async () => {
@@ -106,7 +99,7 @@ describe('D-05 invoice member join (canonical E.164 on both sides)', () => {
     const order = await createOrder('081500000201')
     const res = await sendInvoice(order.id)
     expect(res.status).toBe(200)
-    const caption = captionOfLastSend()
+    const caption = res.body.data.text
     expect(caption).toContain('INFO MEMBER')
     expect(caption).toContain('D05L Canonical Member')
   })
@@ -115,7 +108,7 @@ describe('D-05 invoice member join (canonical E.164 on both sides)', () => {
     const order = await createOrder('+62 815-0000-0201')
     const res = await sendInvoice(order.id)
     expect(res.status).toBe(200)
-    const caption = captionOfLastSend()
+    const caption = res.body.data.text
     expect(caption).toContain('INFO MEMBER')
     expect(caption).toContain('D05L Canonical Member')
   })
@@ -139,7 +132,7 @@ describe('D-05 invoice member join (canonical E.164 on both sides)', () => {
     const order = await createOrder('12345678')
     const res = await sendInvoice(order.id)
     expect(res.status).toBe(200)
-    const caption = captionOfLastSend()
+    const caption = res.body.data.text
     expect(caption).not.toContain('INFO MEMBER')
     expect(caption).not.toContain('D05L Legacy Raw Member')
   })
@@ -155,7 +148,7 @@ describe('D-05 invoice member join (canonical E.164 on both sides)', () => {
     const order = await createOrder(guestPhone)
     const res = await sendInvoice(order.id)
     expect(res.status).toBe(200)
-    const caption = captionOfLastSend()
+    const caption = res.body.data.text
     expect(caption).not.toContain('INFO MEMBER')
     expect(caption).not.toContain('D05L Guest Member')
   })

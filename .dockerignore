@@ -15,10 +15,6 @@ __tests__
 *.test.js
 .early.coverage
 
-# WhatsApp session state — belongs to the separate whatsapp-server.js
-# process (documented as local/ngrok-only), not this container.
-.wwebjs_auth
-.wwebjs_auth_default
 
 # Local backup artifacts (see PHASE 6D-0: not a durable destination on
 # Render's ephemeral filesystem either way — never ship stale local dumps).

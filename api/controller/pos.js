@@ -12,18 +12,14 @@ const {
   reportingBucket,
   CANONICAL_METHOD_ORDER
 } = require('../service/canonicalPayment')
-const {
-  getConnectionStatus,
-  sendDocument,
-  logout,
-  restartClient
-} = require('../../utils/whatsappClient')
 
-// N-3 (security): authoritative store for WhatsApp session management. For
+// N-3 (security): authoritative store for reads scoped by ?storeId. For
 // non-super-admin the store MUST be req.storeId (pinned by validateStoreAccess);
 // a client-supplied ?storeId that targets another store is rejected. Only
 // super_admin may explicitly target an arbitrary store. Returns a numeric store
-// id or null.
+// id or null. Its WhatsApp-session callers are gone (Fonnte removed); it stays
+// for the cashier table panel endpoints (feat/cashier-table-release).
+// eslint-disable-next-line no-unused-vars
 const getAuthorizedStoreId = (req) => {
   if (isSuperAdmin(req)) {
     const s = Number(req.query.storeId)
@@ -3144,11 +3140,9 @@ order: [['updatedAt', 'DESC']],
     }
   },
 
-  // Send invoice via WhatsApp
   // The receipt as WhatsApp text, without sending anything: the FE opens
   // it through wa.me on the cashier's own WhatsApp (app on phone/iPad,
-  // Desktop or Web). gatewayReady says whether the store can also send it
-  // automatically through the gateway.
+  // Desktop or Web).
   async getInvoiceWhatsAppText(req, res) {
     try {
       const orderId = Number(req.params.orderId)
@@ -3163,11 +3157,10 @@ order: [['updatedAt', 'DESC']],
           .status(404)
           .json({ success: false, code: 'ORDER_NOT_FOUND', message: 'Order not found' })
       }
-      const status = await getConnectionStatus(loaded.order.store)
       return res.status(200).json({
         success: true,
         message: 'Success get invoice WhatsApp text',
-        data: { orderId, text: loaded.text, gatewayReady: !!status.ready }
+        data: { orderId, text: loaded.text }
       })
     } catch (error) {
       console.error('Error =>', error)
@@ -3176,68 +3169,6 @@ order: [['updatedAt', 'DESC']],
         code: 'INTERNAL_ERROR',
         message: 'Gagal menyiapkan pesan WhatsApp'
       })
-    }
-  },
-
-  // Digital receipt over WhatsApp (Fonnte gateway). The message is built
-  // server-side from the persisted order with the same sections and
-  // invoice-setting switches as the printed receipt (utils/receiptText).
-  // Every refusal carries a stable code and, once the order is resolved,
-  // the message text — the FE offers it through wa.me when the gateway
-  // cannot send.
-  async sendInvoiceWhatsApp(req, res) {
-    const fail = (status, code, message, extra = {}) =>
-      res.status(status).json({ success: false, code, message, ...extra })
-    try {
-      const { orderId, phone } = req.body
-
-      if (!orderId || !phone) {
-        return fail(400, 'VALIDATION_ERROR', 'orderId and phone are required')
-      }
-
-      let target
-      try {
-        target = canonicalPhone(phone)
-      } catch {
-        return fail(400, 'INVALID_PHONE', 'Nomor WhatsApp tidak valid')
-      }
-
-      const loaded = await loadOrderReceiptText(req, orderId)
-      if (!loaded) {
-        return fail(404, 'ORDER_NOT_FOUND', 'Order not found')
-      }
-      const { order, text } = loaded
-      // wa.me / gateway target: digits only, country code first.
-      const waPhone = target.replace(/[^0-9]/g, '')
-
-      const status = await getConnectionStatus(order.store)
-      if (!status.ready) {
-        return fail(
-          422,
-          'WA_NOT_CONFIGURED',
-          status.error || 'WhatsApp belum dikonfigurasi untuk toko ini.',
-          { data: { waConnected: false, phone: waPhone, text } }
-        )
-      }
-
-      try {
-        // The gateway sends text only (no attachment), so no PDF is built.
-        await sendDocument(waPhone, null, text, order.store)
-      } catch (sendError) {
-        console.error('WhatsApp send failed =>', sendError.message)
-        return fail(502, 'WA_SEND_FAILED', 'Gagal mengirim via WhatsApp gateway', {
-          data: { waConnected: true, phone: waPhone, text }
-        })
-      }
-
-      return res.status(200).json({
-        success: true,
-        message: 'Invoice berhasil dikirim via WhatsApp',
-        data: { orderId: order.id, phone: waPhone }
-      })
-    } catch (error) {
-      console.error('Error =>', error)
-      return fail(500, 'INTERNAL_ERROR', 'Gagal mengirim invoice via WhatsApp')
     }
   },
 
@@ -3421,77 +3352,6 @@ order: [['updatedAt', 'DESC']],
     }
   },
 
-  // Get WhatsApp connection status
-  async getWhatsAppStatus(req, res) {
-    try {
-      const storeId = getAuthorizedStoreId(req)
-      if (storeId === null && !isSuperAdmin(req)) {
-        return res.status(403).json({
-          success: false,
-          message: 'Anda hanya dapat mengakses status WhatsApp di toko Anda'
-        })
-      }
-      const status = await getConnectionStatus(storeId == null ? 'default' : storeId)
-      return res.status(200).json({
-        success: true,
-        message: 'WhatsApp status',
-        data: status
-      })
-    } catch (error) {
-      return res.status(500).json({
-        success: false,
-        message: error.message
-      })
-    }
-  },
-
-  // Logout WhatsApp
-  async logoutWhatsApp(req, res) {
-    try {
-      const storeId = getAuthorizedStoreId(req)
-      if (storeId === null && !isSuperAdmin(req)) {
-        return res.status(403).json({
-          success: false,
-          message: 'Anda hanya dapat memutuskan WhatsApp di toko Anda'
-        })
-      }
-      await logout(storeId == null ? 'default' : storeId)
-      return res.status(200).json({
-        success: true,
-        message:
-          'WhatsApp berhasil diputuskan. Silakan refresh halaman untuk scan QR baru.'
-      })
-    } catch (error) {
-      return res.status(500).json({
-        success: false,
-        message: error.message
-      })
-    }
-  },
-
-  // Restart WhatsApp client (logout + re-init)
-  async restartWhatsApp(req, res) {
-    try {
-      const storeId = getAuthorizedStoreId(req)
-      if (storeId === null && !isSuperAdmin(req)) {
-        return res.status(403).json({
-          success: false,
-          message: 'Anda hanya dapat me-restart WhatsApp di toko Anda'
-        })
-      }
-      const result = await restartClient(storeId == null ? 'default' : storeId)
-      return res.status(200).json({
-        success: true,
-        message: 'WhatsApp client restarting',
-        data: { initialized: !!result, storeId: storeId == null ? 'default' : storeId }
-      })
-    } catch (error) {
-      return res.status(500).json({
-        success: false,
-        message: error.message
-      })
-    }
-  }
 }
 
 module.exports = posController
