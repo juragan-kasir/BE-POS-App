@@ -7,6 +7,7 @@ const { redactAndAudit, AUDIT_ACTIONS } = require('../../utils/auditLog')
 const { scalarStoreScope, isSuperAdmin, resolveStoreId } = require('../../utils/tenantScope')
 const { IRREVERSIBLE_STORE_STATUSES } = require('../validation/schemas')
 const { canonicalPhone } = require('../../utils/memberIdentity')
+const { listTableReleaseStatus, releaseTable } = require('../service/tableRelease')
 const { computeOrderFinancials } = require('../service/orderFinancials')
 const {
   reportingBucket,
@@ -349,6 +350,59 @@ async function loadOrderReceiptText(req, orderId) {
 }
 
 const posController = {
+  // Cashier table panel (client request 2026-10-20, BA C-16 amended):
+  // every table of the store with its unpaid open orders and whether the
+  // caller may put it back to "available" (server-decided).
+  async getCashierTables(req, res) {
+    try {
+      const storeId = getAuthorizedStoreId(req)
+      if (storeId === null) {
+        return res
+          .status(400)
+          .json({ success: false, code: 'STORE_REQUIRED', message: 'storeId is required' })
+      }
+      const tables = await listTableReleaseStatus(storeId, req)
+      return res.status(200).json({ success: true, message: 'Success', data: tables })
+    } catch (error) {
+      console.error('Error =>', error)
+      return res.status(500).json({ success: false, message: 'Internal server error' })
+    }
+  },
+
+  // Put one table back to "available" from the cashier. Reason required;
+  // a kasir cannot release a table with an unpaid open order (admin can).
+  async releaseCashierTable(req, res) {
+    try {
+      const tableId = Number(req.params.id)
+      if (!Number.isInteger(tableId) || tableId <= 0) {
+        return res
+          .status(400)
+          .json({ success: false, code: 'VALIDATION_ERROR', message: 'Invalid table id' })
+      }
+      const { changed, table } = await releaseTable(req, {
+        tableId,
+        reason: req.body?.reason,
+        storeScope: scalarStoreScope(req)
+      })
+      return res.status(200).json({
+        success: true,
+        message: changed ? 'Meja tersedia kembali' : 'Meja sudah tersedia',
+        data: { id: table.id, name: table.name, status: 'available', changed }
+      })
+    } catch (error) {
+      if (error.statusCode && error.statusCode < 500) {
+        return res.status(error.statusCode).json({
+          success: false,
+          code: error.code,
+          message: error.message,
+          ...(error.extra || {})
+        })
+      }
+      console.error('Error =>', error)
+      return res.status(500).json({ success: false, message: 'Internal server error' })
+    }
+  },
+
   // Barcode lookup untuk POS scan
   async lookupBarcode(req, res) {
     try {
