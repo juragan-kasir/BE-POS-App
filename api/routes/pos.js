@@ -135,6 +135,25 @@ router.put(
   posController.updatePriceByStore
 )
 
+// Cashier table panel (BA C-16 amended 2026-10-20): list tables with their
+// unpaid open orders, and put a table back to "available" with a reason.
+// kasir may release only tables without an unpaid open order (enforced in
+// api/service/tableRelease.js); staff ("user") have no access.
+router.get(
+  '/tables/status',
+  authorization,
+  validateStoreAccess,
+  requireRole('super_admin', 'admin', 'kasir'),
+  posController.getCashierTables
+)
+router.put(
+  '/tables/:id/release',
+  authorization,
+  validateStoreAccess,
+  requireRole('super_admin', 'admin', 'kasir'),
+  posController.releaseCashierTable
+)
+
 // Digital receipt (WA)
 // Text only (no send) — opened through wa.me on the cashier's WhatsApp.
 router.get(
