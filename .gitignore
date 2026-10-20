@@ -48,3 +48,6 @@ yarn-error.log*
 .superpowers/
 .vercel
 node_modules
+
+# Invoice PDFs are generated at runtime (utils/generateInvoicePdf.js)
+public/invoices/*.pdf
