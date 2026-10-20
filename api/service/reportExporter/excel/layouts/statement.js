@@ -19,6 +19,7 @@ const buildExcelWorkbook = async (spec) => {
 
   // Info block (generation date)
   rowIndex = style.addInfoBlock(ws, spec, rowIndex)
+  const firstSectionHeaderRow = rowIndex
 
   // Group rows by flow
   const incomeRows = (spec.rows || []).filter(r => r.flow === 'in')
@@ -124,12 +125,7 @@ const buildExcelWorkbook = async (spec) => {
   // Footer
   rowIndex = style.addFooter(ws, spec, rowIndex)
 
-  // Freeze header row: we have multiple section headers; freeze after brand+title+info before first section header.
-  let brandRows = 0
-  if (spec.brand?.name) brandRows = 2
-  const titleRows = spec.title ? (spec.subtitle ? 2 : 1) : 0
-  const infoRows = 1
-  const firstSectionHeaderRow = 1 + brandRows + titleRows + infoRows
+  // Freeze above the first section header (brand + title + info stay visible).
   ws.views = [{ state: 'frozen', ySplit: firstSectionHeaderRow, xSplit: 0 }]
 
   return wb

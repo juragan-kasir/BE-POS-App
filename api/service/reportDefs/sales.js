@@ -41,6 +41,13 @@ const getData = async (req) => {
 
   const storeWhere = store ? { id: store } : {}
   const locations = await db.location.findAll({ where: storeWhere, attributes: ['id', 'name', 'city'] })
+  // location.city holds a region code; show the region name.
+  const cityCodes = [...new Set(locations.map((loc) => loc.city).filter(Boolean).map(String))]
+  const cityNames = new Map()
+  if (cityCodes.length && db.region) {
+    const regions = await db.region.findAll({ where: { code: cityCodes }, attributes: ['code', 'name'] })
+    regions.forEach((r) => cityNames.set(String(r.code), r.name))
+  }
   const rows = await Promise.all(
     locations.map(async (loc) => {
       const locWhere = { paymentStatus: 'paid', status: { [Op.notIn]: ['cancelled', 'void'] }, store: loc.id }
@@ -49,12 +56,14 @@ const getData = async (req) => {
         db.order.sum('totalPrice', { where: locWhere }),
         db.order.count({ where: locWhere })
       ])
-      return { name: loc.name, city: loc.city || '-', sales: Number(sales || 0), transactions: Number(ordersCount || 0) }
+      return { name: loc.name, city: (loc.city && (cityNames.get(String(loc.city)) || loc.city)) || '-', sales: Number(sales || 0), transactions: Number(ordersCount || 0) }
     })
   )
 
-  const periodKey = filter || (startDate ? `since-${startDate}` : 'all')
-  return { rows, title: label, subtitle: `Periode: ${periodKey}` }
+  const PERIOD_LABELS = { today: 'Hari ini', weekly: 'Minggu ini', monthly: 'Bulan ini' }
+  const period = PERIOD_LABELS[filter] ||
+    (startDate && endDate ? `${startDate} - ${endDate}` : 'Semua periode')
+  return { rows, title: label, subtitle: `Periode: ${period}` }
 }
 
 const archetype = 'summary'

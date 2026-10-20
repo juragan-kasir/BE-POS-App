@@ -19,19 +19,34 @@ const renderPdf = (spec, res) => {
   const right = doc.page.width - 40
   const usable = right - left
 
-  // Header: brand block
+  // Header: logo + brand block. Each line follows its /report/settings
+  // switch (logo, address, phone, email).
+  const branding = { showLogo: true, showAddress: true, showPhone: true, showEmail: true, ...(spec.branding || {}) }
+  const brand = spec.brand || {}
+  let textLeft = left
+  if (branding.showLogo && brand.logoImage) {
+    try {
+      doc.image(brand.logoImage.buffer, left, 36, { fit: [64, 52] })
+      textLeft = left + 76
+    } catch {
+      textLeft = left // unreadable image: header without a logo
+    }
+  }
+  const textWidth = usable - (textLeft - left)
   doc.font('Helvetica-Bold').fontSize(14).fillColor('#0f172a')
-  doc.text(spec.brand?.name || '', left, 40, { width: usable })
+  doc.text(brand.name || '', textLeft, 40, { width: textWidth })
   let hy = doc.y + 4
   const lines = []
-  if (spec.brand?.address) lines.push(spec.brand.address)
-  const cityLine = [spec.brand?.city, spec.brand?.province, spec.brand?.postalCode].filter(Boolean).join(', ')
-  if (cityLine) lines.push(cityLine)
-  if (spec.brand?.phoneNumber) lines.push(`Telp: ${spec.brand.phoneNumber}`)
-  if (spec.brand?.email) lines.push(spec.brand.email)
+  if (branding.showAddress && brand.address) lines.push(brand.address)
+  if (branding.showAddress) {
+    const cityLine = [brand.city, brand.province, brand.postalCode].filter(Boolean).join(', ')
+    if (cityLine) lines.push(cityLine)
+  }
+  if (branding.showPhone && brand.phoneNumber) lines.push(`Telp: ${brand.phoneNumber}`)
+  if (branding.showEmail && brand.email) lines.push(brand.email)
   doc.font('Helvetica').fontSize(8).fillColor('#64748b')
   lines.forEach((line) => {
-    doc.text(line, left, hy, { width: usable })
+    doc.text(line, textLeft, hy, { width: textWidth })
     hy = doc.y + 2
   })
 
