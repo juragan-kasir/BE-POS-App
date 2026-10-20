@@ -23,7 +23,7 @@ const buildExcelWorkbook = async (spec) => {
   augColumns.push(...spec.columns)
   // Share column
   if (hasValue) {
-    augColumns.push({ key: '__share', label: 'Share %', type: 'percent', width: 10, align: 'right' })
+    augColumns.push({ key: '__share', label: 'Porsi', type: 'percent', width: 10, align: 'right' })
   }
 
   // Build augmented rows: prepend rank (1-based), append share (value/total)
@@ -38,7 +38,7 @@ const buildExcelWorkbook = async (spec) => {
     if (hasValue) {
       const val = Number(row[valueKey] || 0)
       const share = totalValue === 0 ? 0 : val / totalValue
-      newRow.__share = share
+      newRow.__share = share * 100 // whole-number percent, like report columns
     }
     augRows.push(newRow)
   })
@@ -54,7 +54,9 @@ const buildExcelWorkbook = async (spec) => {
   // Info block (generation date)
   rowIndex = style.addInfoBlock(ws, spec, rowIndex)
 
-  // Table header (using augColumns)
+  // Table header (using augColumns). Its row index depends on which brand
+  // lines/logo are shown, so it is tracked rather than recomputed.
+  const tableHeaderRow = rowIndex
   const headerRow = ws.getRow(rowIndex)
   augColumns.forEach((col, i) => {
     const cell = headerRow.getCell(i + 1)
@@ -116,7 +118,7 @@ const buildExcelWorkbook = async (spec) => {
       cell.value = '' // empty
     } else if (i === 0) {
       // first original column after rank: we could put count here
-      cell.value = `${augRows.length} item${augRows.length !== 1 ? 's' : ''}`
+      cell.value = `${augRows.length} item`
       cell.font = { bold: true }
     } else {
       cell.value = ''
@@ -135,13 +137,7 @@ const buildExcelWorkbook = async (spec) => {
     // augColumns: [rank] + orig[0..valueColIdx] + [valueCol] + orig[valueColIdx+1..] + [share]
     // So value column position = 1 (rank) + valueColIdx (original index) + 1 = valueColIdx + 2
     const valueColPos = valueColIdx + 2 // 1-based column index in augColumns
-    // Let's compute startRow similarly as summary: but we can approximate 4; for small data it's fine.
-    // Actually compute: brandRows + titleRows + infoRows + 1 (header) = first data row
-    let brandRows = 0
-    if (spec.brand?.name) brandRows = 2
-    const titleRows = spec.title ? (spec.subtitle ? 2 : 1) : 0
-    const infoRows = 1
-    const firstDataRow = 1 + brandRows + titleRows + infoRows + 1 // +1 for header row
+    const firstDataRow = tableHeaderRow + 1
     const endRow = firstDataRow + augRows.length - 1
     style.addDataBar(ws, spec, firstDataRow, endRow, valueColPos)
   }
@@ -153,12 +149,7 @@ const buildExcelWorkbook = async (spec) => {
   rowIndex = style.addFooter(ws, spec, rowIndex)
 
   // Freeze header row (table header)
-  let brandRows = 0
-  if (spec.brand?.name) brandRows = 2
-  const titleRows = spec.title ? (spec.subtitle ? 2 : 1) : 0
-  const infoRows = 1
-  const tableStartRow = 1 + brandRows + titleRows + infoRows
-  ws.views = [{ state: 'frozen', ySplit: tableStartRow, xSplit: 0 }]
+  ws.views = [{ state: 'frozen', ySplit: tableHeaderRow, xSplit: 0 }]
 
   return wb
 }

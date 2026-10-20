@@ -70,7 +70,7 @@ describe('reportConfig routes', () => {
     const res = await request(app)
       .put('/report-config/daily')
       .set('Authorization', `Bearer ${token}`)
-      .send({ config: { selectedColumns: ['tanggal', 'netProfit'], accentColor: '#123456' } })
+      .send({ config: { selectedColumns: ['date', 'netProfit'], accentColor: '#123456' } })
       .expect(200)
     expect(res.body.data.key).toBe('daily')
     expect(res.body.data.config.accentColor).toBe('#123456')
@@ -91,7 +91,7 @@ describe('reportConfig routes', () => {
     const res = await request(app)
       .put('/report-config/daily')
       .set('Authorization', `Bearer ${kasirToken}`)
-      .send({ config: { selectedColumns: ['tanggal'], accentColor: '#ff0000' } })
+      .send({ config: { selectedColumns: ['date'], accentColor: '#ff0000' } })
     expect(res.status).toBe(403)
   })
 

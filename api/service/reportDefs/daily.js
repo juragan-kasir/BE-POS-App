@@ -13,9 +13,9 @@ const defaultColumns = [
   { key: 'totalPenjualanBersih', label: 'Penjualan Bersih', type: 'currency', width: 18, align: 'right' },
   { key: 'totalHpp', label: 'HPP', type: 'currency', width: 18, align: 'right' },
   { key: 'grossProfit', label: 'Laba Kotor', type: 'currency', width: 18, align: 'right' },
-  { key: 'operationalExpense', label: 'Biaya Ops', type: 'currency', width: 16, align: 'right' },
+  { key: 'operationalExpense', label: 'Biaya Operasional', type: 'currency', width: 16, align: 'right' },
   { key: 'netProfit', label: 'Laba Bersih', type: 'currency', width: 18, align: 'right' },
-  { key: 'totalCovers', label: 'Covers', type: 'number', width: 10, align: 'right' }
+  { key: 'totalCovers', label: 'Jumlah Tamu', type: 'number', width: 12, align: 'right' }
 ]
 
 const totals = ['totalTransaksi', 'totalPenjualanBersih', 'totalHpp', 'grossProfit', 'netProfit', 'totalCovers']

@@ -21,29 +21,23 @@ const applyColumnWidths = (ws, columns) => {
 
 const addBrandHeader = (ws, spec, startRow) => {
   const brand = spec.brand || {}
-  const branding = spec.branding || { showLogo: true, showAddress: true, showPhone: true }
+  const branding = { showLogo: true, showAddress: true, showPhone: true, showEmail: true, ...(spec.branding || {}) }
   let r = startRow
   const colCount = spec.columns.length
 
-  // Logo (if any) as image - try fetch if URL
-  if (branding.showLogo && brand.logo) {
+  // Logo: embedded image on its own row (loaded once by the export
+  // controller — see logoImage.js); skipped when off or unavailable.
+  if (branding.showLogo && brand.logoImage) {
     try {
-      // Note: fetch may not be available in test env; guard
-      if (typeof fetch === 'function') {
-        // This is best-effort; if fails, continue without logo
-        // We'll add a placeholder text instead for simplicity in MVP
-        // To keep implementation simple and test-safe, we skip actual image embed
-        // and render a text label instead.
-        ws.getCell(r, 1).value = '[LOGO]'
-        ws.getCell(r, 1).font = { size: 10 }
-        ws.getCell(r, 1).alignment = { horizontal: 'center', vertical: 'middle' }
-        // consume one column for logo placeholder
-        // Actually for simplicity, we'll put brand info in first merged area and ignore logo column
-        // We'll treat logo as taking no extra column; just show brand name left-aligned.
-        // For MVP: skip image embed, show text placeholder if needed.
-      }
+      const imageId = ws.workbook.addImage({
+        buffer: brand.logoImage.buffer,
+        extension: brand.logoImage.extension
+      })
+      ws.getRow(r).height = 42
+      ws.addImage(imageId, { tl: { col: 0, row: r - 1 }, ext: { width: 72, height: 54 } })
+      r++
     } catch {
-      // ignore
+      // unreadable image: header without a logo
     }
   }
 
@@ -101,7 +95,10 @@ const addInfoBlock = (ws, spec, startRow) => {
   // For simplicity: show generation date/time
   const colCount = spec.columns.length
   let r = startRow
-  const genDate = new Date().toLocaleString('id-ID')
+  // In the store's own time zone (the server runs in UTC).
+  const genDate = new Date().toLocaleString('id-ID', {
+    timeZone: spec.brand?.timezone || 'Asia/Jakarta'
+  })
   ws.getCell(r, 1).value = `Dicetak: ${genDate}`
   ws.getCell(r, 1).font = { size: 8, color: { argb: 'FF94A3B8' } }
   mergeWidth(ws, r, colCount)

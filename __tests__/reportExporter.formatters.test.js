@@ -19,15 +19,18 @@ describe('reportExporter formatters', () => {
     expect(formatCurrency(null)).toBe('Rp 0')
   })
 
-  test('formatPercent accepts fraction or whole-number percent', () => {
-    expect(formatPercent(0.34)).toBe('34%')
+  test('formatPercent renders whole-number percents with id-ID decimals', () => {
     expect(formatPercent(34)).toBe('34%')
+    expect(formatPercent(12.5)).toBe('12,5%')
+    // a sub-1% margin is not mistaken for a fraction
+    expect(formatPercent(0.75)).toBe('0,75%')
     expect(formatPercent(null)).toBe('0%')
   })
 
-  test('formatDate renders dd MMM yyyy in English month', () => {
+  test('formatDate renders dd MMM yyyy with Indonesian month names', () => {
     expect(formatDate('2026-09-01')).toBe('01 Sep 2026')
     expect(formatDate(new Date('2026-09-01T00:00:00'))).toBe('01 Sep 2026')
+    expect(formatDate('2026-10-05')).toBe('05 Okt 2026')
     expect(formatDate(null)).toBe('')
   })
 
@@ -35,7 +38,7 @@ describe('reportExporter formatters', () => {
     expect(formatValue(1500000, 'currency')).toBe('Rp 1.500.000')
     expect(formatValue(1234567, 'number')).toBe('1.234.567')
     expect(formatValue('2026-09-01', 'date')).toBe('01 Sep 2026')
-    expect(formatValue(0.34, 'percent')).toBe('34%')
+    expect(formatValue(34, 'percent')).toBe('34%')
     expect(formatValue('plain text', 'string')).toBe('plain text')
     expect(formatValue(42, 'unknown')).toBe('42')
     expect(formatValue(null, 'string')).toBe('')
