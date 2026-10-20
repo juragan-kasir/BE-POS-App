@@ -4146,6 +4146,10 @@ exports.getCustomerMenu = async (req, res) => {
   }
 }
 
+// A diner session is an opaque per-device token (BISA: UUID; QR codes
+// printed before D-10: 8 chars). Anything else is treated as no session.
+const DINER_SESSION_PATTERN = /^[A-Za-z0-9_-]{8,128}$/
+
 exports.createCustomerOrder = async (req, res) => {
   const {
     store: bodyStore,
@@ -4546,7 +4550,12 @@ exports.createCustomerOrder = async (req, res) => {
       qrOrderData.promoCampaignId = appliedCampaignId
     }
     if (await hasOrderColumn('session')) {
-      qrOrderData.session = session || null
+      // Only a well-formed diner token is kept (D-10): it is the key the
+      // diner's own order list is read by.
+      qrOrderData.session =
+        typeof session === 'string' && DINER_SESSION_PATTERN.test(session.trim())
+          ? session.trim()
+          : null
     }
     // Public QR orders are always created unpaid. Stock deduction, ledger
     // and accounting entries happen exactly once, later, when the cashier
@@ -5095,10 +5104,19 @@ exports.getCustomerOrders = async (req, res) => {
       return res.status(400).json({ message: 'Table not found' })
     }
 
-    const where = { store: storeId, source: 'qr', tableId: tableIdNum }
-    if (session && (await hasOrderColumn('session'))) {
-      where.session = session
+    // D-10 (DR-24): only the diner's own session — no session (or one that
+    // is not a well-formed token) means no list. The table alone would
+    // disclose every diner's orders at it.
+    const dinerSession = typeof session === 'string' ? session.trim() : ''
+    if (!DINER_SESSION_PATTERN.test(dinerSession) || !(await hasOrderColumn('session'))) {
+      return res.status(200).json({
+        success: true,
+        message: 'Success',
+        data: [],
+        pagination: { total: 0, page: Number(page), limit: Number(limit), totalPages: 0 }
+      })
     }
+    const where = { store: storeId, source: 'qr', tableId: tableIdNum, session: dinerSession }
 
     const offset = (Number(page) - 1) * Number(limit)
 
@@ -5120,7 +5138,6 @@ exports.getCustomerOrders = async (req, res) => {
         'paymentStatus',
         'notes',
         'source',
-        'session',
         'createdAt',
         'tableId',
         'splitCount'

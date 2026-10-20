@@ -391,91 +391,127 @@ describe('SEC-001/SEC-006 — quantity trust boundary on customer-create', () =>
   })
 })
 
-describe('SEC-002 — customer-orders scoped to an authorized table', () => {
+// D-10 (DR-24): a diner's order list is only ever the diner's own session —
+// no session (or an unknown/malformed one) means no list, and a session
+// token is never echoed back (it would let one diner read another's list).
+describe('SEC-002 / D-10 — customer-orders scoped to the table AND the diner session', () => {
+  const S1 = 'sec002-diner-session-one'
+  const S2 = 'sec002-diner-session-two'
+  const S3 = 'sec002-diner-session-three'
+
   beforeAll(async () => {
+    await makeDirectOrder(store1.id, table1.id, { session: S1 })
+    await makeDirectOrder(store1.id, table1.id, { session: S1 })
     await makeDirectOrder(store1.id, table1.id, { session: null })
-    await makeDirectOrder(store1.id, table1.id, { session: null })
-    await makeDirectOrder(store1.id, table2.id)
-    await makeDirectOrder(store1.id, table2.id)
-    await makeDirectOrder(store1.id, table2.id)
-    await makeDirectOrder(store2.id, table2Store2.id)
-    await makeDirectOrder(store2.id, table2Store2.id)
+    await makeDirectOrder(store1.id, table2.id, { session: S2 })
+    await makeDirectOrder(store1.id, table2.id, { session: S2 })
+    await makeDirectOrder(store1.id, table2.id, { session: S2 })
+    await makeDirectOrder(store2.id, table2Store2.id, { session: S3 })
+    await makeDirectOrder(store2.id, table2Store2.id, { session: S3 })
   })
 
+  const list = (query) => request(app).get('/order/customer-orders').query(query)
+
   test('bare store query (no tableId) is rejected — no store-wide disclosure', async () => {
-    const res = await request(app).get('/order/customer-orders').query({ store: store1.id })
+    const res = await list({ store: store1.id })
     expect(res.status).toBe(400)
     expect(res.body.data).toBeUndefined()
   })
 
   test('non-numeric or unknown tableId is rejected', async () => {
-    const bad = await request(app)
-      .get('/order/customer-orders')
-      .query({ store: store1.id, tableId: 'abc' })
-    expect(bad.status).toBe(400)
-
-    const wrong = await request(app)
-      .get('/order/customer-orders')
-      .query({ store: store1.id, tableId: 99999999 })
-    expect(wrong.status).toBe(400)
+    expect((await list({ store: store1.id, tableId: 'abc' })).status).toBe(400)
+    expect((await list({ store: store1.id, tableId: 99999999 })).status).toBe(400)
   })
 
-  test('table 1 returns ONLY table 1 orders, scoped count included', async () => {
-    const res = await request(app)
-      .get('/order/customer-orders')
-      .query({ store: store1.id, tableId: table1.id })
-
+  test('no session = no list (nothing about the table is disclosed)', async () => {
+    const res = await list({ store: store1.id, tableId: table1.id })
     expect(res.status).toBe(200)
-    expect(res.body.pagination.total).toBe(2)
-    expect(res.body.data.length).toBe(2)
-    for (const order of res.body.data) {
-      expect(order.tableId).toBe(table1.id)
+    expect(res.body.data).toEqual([])
+    expect(res.body.pagination.total).toBe(0)
+  })
+
+  test('an unknown or malformed session sees nothing', async () => {
+    for (const session of ['someone-elses-session', 'a', '%%%%%%%%%%', ' '.repeat(12)]) {
+      const res = await list({ store: store1.id, tableId: table1.id, session })
+      expect(res.status).toBe(200)
+      expect(res.body.data).toEqual([])
+      expect(res.body.pagination.total).toBe(0)
     }
   })
 
-  test('table 2 does not disclose table 1 orders', async () => {
-    const res = await request(app)
-      .get('/order/customer-orders')
-      .query({ store: store1.id, tableId: table2.id })
-
+  test("the diner's own session returns only their orders at that table", async () => {
+    const res = await list({ store: store1.id, tableId: table1.id, session: S1 })
     expect(res.status).toBe(200)
-    expect(res.body.pagination.total).toBe(3)
-    expect(res.body.data.every((o) => o.tableId === table2.id)).toBe(true)
+    expect(res.body.pagination.total).toBe(2)
+    expect(res.body.data.every((o) => o.tableId === table1.id)).toBe(true)
   })
 
-  test('pagination total stays scoped to the authorized table', async () => {
-    const page1 = await request(app)
-      .get('/order/customer-orders')
-      .query({ store: store1.id, tableId: table1.id, page: 1, limit: 1 })
-    expect(page1.status).toBe(200)
+  test('two diners at the same table never see each other', async () => {
+    await makeDirectOrder(store1.id, table2.id, { session: 'sec002-other-diner-same-table' })
+    const mine = await list({ store: store1.id, tableId: table2.id, session: S2 })
+    const theirs = await list({
+      store: store1.id,
+      tableId: table2.id,
+      session: 'sec002-other-diner-same-table'
+    })
+    expect(mine.body.pagination.total).toBe(3)
+    expect(theirs.body.pagination.total).toBe(1)
+    const mineIds = mine.body.data.map((o) => o.id)
+    expect(theirs.body.data.some((o) => mineIds.includes(o.id))).toBe(false)
+  })
+
+  test('a session from another table does not open this table', async () => {
+    const res = await list({ store: store1.id, tableId: table2.id, session: S1 })
+    expect(res.body.data).toEqual([])
+  })
+
+  test('the session token is never echoed back', async () => {
+    const res = await list({ store: store1.id, tableId: table1.id, session: S1 })
+    expect(res.body.data.length).toBeGreaterThan(0)
+    for (const order of res.body.data) expect(order).not.toHaveProperty('session')
+    expect(JSON.stringify(res.body)).not.toContain(S1)
+  })
+
+  test('pagination total stays scoped to the table and session', async () => {
+    const page1 = await list({ store: store1.id, tableId: table1.id, session: S1, page: 1, limit: 1 })
     expect(page1.body.data.length).toBe(1)
     expect(page1.body.pagination.total).toBe(2)
-
-    const page2 = await request(app)
-      .get('/order/customer-orders')
-      .query({ store: store1.id, tableId: table1.id, page: 2, limit: 1 })
-    expect(page2.status).toBe(200)
+    const page2 = await list({ store: store1.id, tableId: table1.id, session: S1, page: 2, limit: 1 })
     expect(page2.body.data.length).toBe(1)
     expect(page2.body.pagination.total).toBe(2)
   })
 
-  test('optional session narrows the authorized table further', async () => {
-    await makeDirectOrder(store2.id, table2Store2.id, { session: 'sec-session-a' })
+  test('customer-create keeps a well-formed diner session and drops a malformed one', async () => {
+    const place = async (name, session) => {
+      const table = await db.table.create({ store: store1.id, name })
+      const res = await request(app)
+        .post('/order/customer-create')
+        .send({
+          store: store1.id,
+          tableId: table.id,
+          paymentMethod: 'cash',
+          session,
+          items: [{ productId: product.id, productName: product.nameProduct, quantity: 1 }]
+        })
+      expect(res.status).toBe(201)
+      return { table, order: await db.order.findByPk(res.body.data.id) }
+    }
 
-    const res = await request(app)
-      .get('/order/customer-orders')
-      .query({ store: store2.id, tableId: table2Store2.id, session: 'sec-session-a' })
+    const good = await place('SEC_D10_GOOD', '1f0c6c7e-2b1d-4c55-9f1e-7d3a2b9c0e11')
+    expect(good.order.session).toBe('1f0c6c7e-2b1d-4c55-9f1e-7d3a2b9c0e11')
+    const mine = await list({
+      store: store1.id,
+      tableId: good.table.id,
+      session: '1f0c6c7e-2b1d-4c55-9f1e-7d3a2b9c0e11'
+    })
+    expect(mine.body.data.map((o) => o.id)).toEqual([good.order.id])
 
-    expect(res.status).toBe(200)
-    expect(res.body.pagination.total).toBe(1)
-    expect(res.body.data.every((o) => o.session === 'sec-session-a')).toBe(true)
+    const bad = await place('SEC_D10_BAD', 'x y')
+    expect(bad.order.session).toBeNull()
   })
 
   test('store 1 cannot read another store table 2 orders (wrong store/table pair)', async () => {
-    const res = await request(app)
-      .get('/order/customer-orders')
-      .query({ store: store2.id, tableId: table2.id })
-
+    const res = await list({ store: store2.id, tableId: table2.id, session: S2 })
     expect(res.status).toBe(400)
     expect(res.body.data).toBeUndefined()
   })
