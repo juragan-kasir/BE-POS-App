@@ -278,9 +278,18 @@ const splitBillController = {
           const { paymentMethod: bodyMethod, cashAmount, changeAmount, referenceNumber } = req.body
 
           // P1 (DR-PAY-ATTR-06): the persisted tender is always canonical.
-          // Absent method keeps the established exact-cash fallback; an
-          // unknown method is refused with 422 before any mutation.
-          const method = normalizePaymentMethod(bodyMethod || 'cash')
+          // DR-24 C-10 / DR-23 §O: the tender is stated explicitly — an
+          // omitted method is refused, never assumed to be cash (a QRIS split
+          // booked as exact cash would corrupt the drawer). An unknown method
+          // is refused with 422 too. Both before any read or mutation.
+          if (typeof bodyMethod !== 'string' || bodyMethod.trim() === '') {
+            throw financialError(
+              422,
+              'PAYMENT_METHOD_REQUIRED',
+              'A payment method is required to pay a split'
+            )
+          }
+          const method = normalizePaymentMethod(bodyMethod)
 
           // Peek (unlocked) purely to learn the parent order id, so the
           // order can be locked FIRST — uniform with create/cancel/merge.
