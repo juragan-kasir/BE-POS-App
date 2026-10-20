@@ -251,3 +251,61 @@ describe('BA 019 QR pending order expiry (DR-09)', () => {
     })
   })
 })
+
+// BISA showed every cancelled order as "Ditolak oleh kasir", including the
+// ones the system expired. The public order endpoints now say how an order
+// ended — coarsely, never exposing staff notes.
+describe('public order endReason (expired vs cancelled)', () => {
+  const qrOrderWithSession = (table, session) =>
+    request(app)
+      .post('/order/customer-create')
+      .send({
+        store: store.id,
+        tableId: table.id,
+        customerName: 'Tamu',
+        session,
+        items: [{ productId: product.id, productName: product.nameProduct, quantity: 1 }],
+        idempotencyKey: unique('endkey')
+      })
+
+  test('an expired order reads endReason "expired"; a staff cancel reads "cancelled"; open orders null', async () => {
+    await withExpiry(30, async () => {
+      const session = `diner-${crypto.randomBytes(6).toString('hex')}`
+      const tableA = await makeTable()
+      const expiredOrder = await qrOrderWithSession(tableA, session)
+      expect(expiredOrder.status).toBe(201)
+      await ageOrder(expiredOrder.body.data.id, 31)
+      const next = await qrOrderWithSession(tableA, session) // triggers the expiry
+      expect(next.status).toBe(201)
+
+      const tableB = await makeTable()
+      const staffCancelled = await qrOrderWithSession(tableB, session)
+      const cancel = await request(app)
+        .put('/order/update-status')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ id: staffCancelled.body.data.id, status: 'cancelled', notes: 'expired: typed by staff' })
+      expect(cancel.status).toBe(200)
+
+      const read = async (id) => {
+        const row = await db.order.findByPk(id, { attributes: ['publicToken'] })
+        return request(app).get(`/order/customer-order/${row.publicToken}`)
+      }
+      expect((await read(expiredOrder.body.data.id)).body.data.endReason).toBe('expired')
+      expect((await read(next.body.data.id)).body.data.endReason).toBeNull()
+
+      const list = await request(app)
+        .get('/order/customer-orders')
+        .query({ store: store.id, tableId: tableA.id, session })
+      const byId = new Map(list.body.data.map((o) => [o.id, o]))
+      expect(byId.get(expiredOrder.body.data.id).endReason).toBe('expired')
+      expect(byId.get(next.body.data.id).endReason).toBeNull()
+      // no staff note ever reaches the diner
+      expect(JSON.stringify(list.body)).not.toMatch(/unpaid QR order after/)
+
+      // A staff cancel is "cancelled" even when the staff note mimics the
+      // expiry text: only the system's own expiry row counts.
+      const staffRow = await read(staffCancelled.body.data.id)
+      expect(staffRow.body.data.endReason).toBe('cancelled')
+    })
+  })
+})

@@ -39,7 +39,7 @@ const {
 } = require('../service/orderFinancials')
 const { normalizePaymentMethod, requireTenderReference } = require('../service/canonicalPayment')
 const { assertSettlementReferenceUnused } = require('../service/settlementReference')
-const { expireStaleQrOrders } = require('../service/qrOrderExpiry')
+const { expireStaleQrOrders, expiredOrderIds } = require('../service/qrOrderExpiry')
 const {
   counterOrderMismatches,
   customerOrderMismatches,
@@ -4871,6 +4871,27 @@ exports.getCustomerMember = async (req, res) => {
 // raw sequential id — the id alone is guessable/enumerable and would let
 // anyone read any store's orders with no credentials (see
 // db/migrations/20260904000003-add-order-public-token.js).
+// How a diner-facing order ended, coarse on purpose (staff notes and void
+// reasons are never exposed publicly): 'expired' when the system expired an
+// unpaid QR order (DR-09), 'cancelled' for any other cancellation, 'void'
+// for a voided order, null while it is still open or completed.
+const withEndReason = (orders, expiredIds) =>
+  orders.map((order) => {
+    const plain = typeof order.toJSON === 'function' ? order.toJSON() : order
+    let endReason = null
+    if (plain.status === 'cancelled') {
+      endReason = expiredIds.has(Number(plain.id)) ? 'expired' : 'cancelled'
+    } else if (plain.status === 'void') {
+      endReason = 'void'
+    }
+    return { ...plain, endReason }
+  })
+
+const publicOrdersWithEndReason = async (orders) => {
+  const cancelledIds = orders.filter((o) => o.status === 'cancelled').map((o) => o.id)
+  return withEndReason(orders, await expiredOrderIds(cancelledIds))
+}
+
 exports.getCustomerOrder = async (req, res) => {
   const { token } = req.params
   if (!token) return res.status(404).json({ message: 'Order not found' })
@@ -4907,7 +4928,8 @@ exports.getCustomerOrder = async (req, res) => {
       ]
     })
     if (!order) return res.status(404).json({ message: 'Order not found' })
-    return res.status(200).json({ data: order })
+    const [withReason] = await publicOrdersWithEndReason([order])
+    return res.status(200).json({ data: withReason })
   } catch (error) {
     console.error('Error:', error)
     return res.status(500).json({ error: 'Internal Server Error' })
@@ -5175,7 +5197,7 @@ exports.getCustomerOrders = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: 'Success',
-      data: rows,
+      data: await publicOrdersWithEndReason(rows),
       pagination: {
         total: count,
         page: Number(page),
