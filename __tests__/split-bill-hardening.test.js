@@ -427,3 +427,51 @@ describe('Split bill — pay() and cancel() P0 race regression (named)', () => {
     }
   })
 })
+
+// DR-24 C-10 / DR-23 §O: a split is never assumed to be paid in cash. An
+// omitted (or blank) method used to book an exact-cash settlement into the
+// drawer even when the diner paid with QRIS.
+describe('Split bill — payment method is required (C-10)', () => {
+  test.each([
+    ['omitted', {}],
+    ['empty', { paymentMethod: '' }],
+    ['blank', { paymentMethod: '   ' }],
+    ['null', { paymentMethod: null }]
+  ])('a %s payment method is refused with 422 and changes nothing', async (_label, body) => {
+    const order = await makeOrder({ qty: 1, totalPrice: 40000 })
+    const createRes = await request(app)
+      .post('/split-bill/create')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ order: order.id, items: [{ amount: 15000 }, { amount: 25000 }] })
+    expect(createRes.status).toBe(201)
+    const [split] = createRes.body.data
+
+    const res = await request(app)
+      .put(`/split-bill/pay/${split.id}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send(body)
+    expect(res.status).toBe(422)
+    expect(res.body.code).toBe('PAYMENT_METHOD_REQUIRED')
+
+    expect((await db.split_bill.findByPk(split.id)).status).toBe('pending')
+    expect(await db.transaction.count({ where: { order: order.id } })).toBe(0)
+    expect((await db.order.findByPk(order.id)).paymentStatus).toBe('unpaid')
+  })
+
+  test('an explicit method still pays the split', async () => {
+    const order = await makeOrder({ qty: 1, totalPrice: 40000 })
+    const createRes = await request(app)
+      .post('/split-bill/create')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ order: order.id, items: [{ amount: 15000 }, { amount: 25000 }] })
+    const [split] = createRes.body.data
+    const res = await request(app)
+      .put(`/split-bill/pay/${split.id}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ paymentMethod: 'cash' })
+    expect(res.status).toBe(200)
+    const [row] = await db.transaction.findAll({ where: { order: order.id } })
+    expect(row.typePayment).toBe('CASH')
+    expect(Number(row.amount)).toBe(15000)
+  })
+})
