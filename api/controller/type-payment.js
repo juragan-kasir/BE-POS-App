@@ -39,7 +39,8 @@ const buildStoreWhere = (store) => {
 }
 
 exports.getAllTypePaymentByLocationAndActive = async (req, res) => {
-  const store = req.query.store || req.user?.store
+  const store = req.query.store ||
+      (req.user?.roleType !== 'super_admin' ? req.user?.store : null)
   const { page = 1, limit = 10, search } = req.query
 
   try {
@@ -92,7 +93,8 @@ exports.getAllTypePaymentByLocationAndActive = async (req, res) => {
 }
 
 exports.getAllTypePayment = async (req, res) => {
-  const store = req.query.store || req.user?.store
+  const store = req.query.store ||
+      (req.user?.roleType !== 'super_admin' ? req.user?.store : null)
   const {
     page = 1,
     pageSize = req.query.limit || 10,

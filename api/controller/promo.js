@@ -9,7 +9,7 @@ const promoController = {
   async getCampaigns(req, res) {
     try {
       const { search, status, type, page = 1, limit = 10 } = req.query
-      const store = req.query.store || req.user?.store
+      const store = req.query.store
 
       const where = {}
       const andConditions = []
@@ -624,7 +624,7 @@ const promoController = {
 
   async getCampaignStats(req, res) {
     try {
-      const store = req.query.store || req.user?.store
+      const store = req.query.store
 
       const where = {}
       const storeFilter = req.user?.roleType !== 'super_admin'

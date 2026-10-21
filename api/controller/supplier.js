@@ -405,9 +405,18 @@ const supplierController = {
         includeProducts
       } = req.query
 
-      const store = req.query.store || req.user?.store
+      // The request filter is authoritative. An absent or empty `store` means
+      // "no store narrowing" — the FE sends `store=` for the "All Stores"
+      // control (FE src/services/supplier.js:8) and "all" for the same intent
+      // (FE src/hooks/useGlobalStoreFilter.js:9). Falling back to the caller's
+      // own `users.store` here silently turned "All Stores" into "my store"
+      // for a store-bound super_admin, hiding every supplier that was not
+      // tagged with that one store.
+      const store = req.query.store
       const where = {}
       if (req.user?.roleType !== 'super_admin') {
+        // Outlet staff stay confined to their own outlet plus the shared
+        // (unassigned / global) suppliers — BR-ORG-001.
         if (req.user?.store) {
           const storeId = Number(req.user.store)
           where[Op.or] = [
@@ -418,11 +427,15 @@ const supplierController = {
         }
       } else if (store && store !== '') {
         const storeId = Number(store)
-        where[Op.or] = [
-          { store: null },
-          { store: { [Op.contains]: [storeId] } },
-          db.sequelize.literal('"supplier"."store" = \'[]\'::jsonb')
-        ]
+        // An unrecognised filter value must not build a NaN predicate; it is
+        // treated as "no narrowing" instead.
+        if (Number.isFinite(storeId) && storeId > 0) {
+          where[Op.or] = [
+            { store: null },
+            { store: { [Op.contains]: [storeId] } },
+            db.sequelize.literal('"supplier"."store" = \'[]\'::jsonb')
+          ]
+        }
       }
 
       if (search) {

@@ -22,7 +22,7 @@ const deliveryController = {
   async getDeliveryOrders(req, res) {
     try {
       const { search, status, source, page = 1, limit = 10 } = req.query
-      const store = req.query.store || req.user?.store
+      const store = req.query.store
 
       const where = {}
       if (req.user?.roleType !== 'super_admin') {
@@ -432,7 +432,7 @@ const deliveryController = {
   async getDrivers(req, res) {
     try {
       const { search, status, page = 1, limit = 10 } = req.query
-      const store = req.query.store || req.user?.store
+      const store = req.query.store
 
       const where = {}
       if (req.user?.roleType !== 'super_admin') {

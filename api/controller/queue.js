@@ -18,7 +18,7 @@ const queueController = {
   async getQueueList(req, res) {
     try {
       const { search, status, priority, page = 1, limit = 20 } = req.query
-      const store = req.query.store || req.user?.store
+      const store = req.query.store
 
       const where = {}
       if (req.user?.roleType !== 'super_admin') {
@@ -334,7 +334,7 @@ const queueController = {
 
   async getQueueStats(req, res) {
     try {
-      const store = req.query.store || req.user?.store
+      const store = req.query.store
 
       const where = {}
       if (req.user?.roleType !== 'super_admin') {

@@ -9,7 +9,8 @@ const { enrichAuditFields } = require('../../utils/auditFields')
 const { scalarStoreScope } = require('../../utils/tenantScope')
 
 exports.getTablesByStore = async (req, res) => {
-  const store = req.query.store || req.user?.store
+  const store = req.query.store ||
+      (req.user?.roleType !== 'super_admin' ? req.user?.store : null)
   const page = parseInt(req.query.page) || 1
   const limit = parseInt(req.query.limit) || 10
   const search = req.query.search || ''
@@ -94,7 +95,8 @@ exports.getTablesByStore = async (req, res) => {
 }
 
 exports.getTableWithActiveOrders = async (req, res) => {
-  const store = req.query.store || req.user?.store
+  const store = req.query.store ||
+      (req.user?.roleType !== 'super_admin' ? req.user?.store : null)
 
   try {
     const locations = await Location.findAll({ attributes: ['id', 'name'] })
@@ -144,7 +146,8 @@ exports.getTableWithActiveOrders = async (req, res) => {
 }
 
 exports.getTableAvailability = async (req, res) => {
-  const store = req.query.store || req.user?.store
+  const store = req.query.store ||
+      (req.user?.roleType !== 'super_admin' ? req.user?.store : null)
 
   try {
     const replacements = {}

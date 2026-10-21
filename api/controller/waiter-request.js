@@ -149,7 +149,8 @@ const waiterRequestController = {
   async getPendingList(req, res) {
     try {
       const { page = 1, limit = 50 } = req.query
-      const store = req.query.store || req.user?.store
+      const store = req.query.store ||
+      (req.user?.roleType !== 'super_admin' ? req.user?.store : null)
 
       const where = { status: 'pending' }
       if (store) {
@@ -198,7 +199,8 @@ const waiterRequestController = {
   async getList(req, res) {
     try {
       const { status, page = 1, limit = 20 } = req.query
-      const store = req.query.store || req.user?.store
+      const store = req.query.store ||
+      (req.user?.roleType !== 'super_admin' ? req.user?.store : null)
 
       const where = {}
       if (status && status !== 'all') where.status = status

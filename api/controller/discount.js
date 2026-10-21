@@ -29,7 +29,7 @@ const attachStoreData = async (rows) => {
 }
 
 exports.getAllDiscountByLocationAndActive = async (req, res) => {
-  let store = req.query.store || req.user?.store
+  let store = req.query.store
   if (!store && req.user?.roleType !== 'super_admin' && req.user?.store) {
     store = req.user.store
   }
@@ -86,7 +86,7 @@ exports.getAllDiscountByLocationAndActive = async (req, res) => {
 }
 
 exports.getAllDiscount = async (req, res) => {
-  let store = req.query.store || req.user?.store
+  let store = req.query.store
   if (!store && req.user?.roleType !== 'super_admin' && req.user?.store) {
     store = req.user.store
   }
@@ -594,7 +594,8 @@ exports.postNewDiscount = async (req, res) => {
 
 exports.lookupByCode = async (req, res) => {
   const { code } = req.params
-  const store = req.query.store || req.user?.store
+  const store = req.query.store ||
+      (req.user?.roleType !== 'super_admin' ? req.user?.store : null)
 
   try {
     if (!code) {
