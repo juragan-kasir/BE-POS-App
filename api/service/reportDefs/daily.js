@@ -1,5 +1,6 @@
 'use strict'
 const db = require('../../../db/models')
+const { completedSaleSql } = require('../../../utils/completedSaleSql')
 const { assertReportStore } = require('./getReportStore')
 const { getStoreDayBounds, DEFAULT_TIMEZONE } = require('../../../utils/businessDate')
 
@@ -47,7 +48,7 @@ const getData = async (req) => {
   // the original sale must stay in gross figures; the return-side queries
   // below are what reduce it to a net figure, not this filter.
   // Cancelled/void orders are never active revenue, regardless of paymentStatus.
-  let orderConditions = `"paymentStatus" IN ('paid', 'refunded') AND o.status NOT IN ('cancelled', 'void')`
+  let orderConditions = completedSaleSql('o.')
 
   if (store) {
     orderConditions += ` AND o."store" = :store`

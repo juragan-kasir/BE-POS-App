@@ -6,6 +6,11 @@ const { withDeadlockRetry } = require('../../utils/deadlockRetry')
 const { scalarStoreScope } = require('../../utils/tenantScope')
 const { assertIntegerRupiah } = require('../../utils/moneyGuard')
 const { reportingBucket, CANONICAL_METHOD_ORDER } = require('../service/canonicalPayment')
+const {
+  completedSaleSql,
+  unsettledSaleSql,
+  approvedReturnExistsSql
+} = require('../../utils/completedSaleSql')
 
 // P1 (DR-PAY-ATTR-06): payment-breakdown bucketing speaks canonical
 // methods. Historical rows whose tender cannot be mapped are summed into
@@ -293,7 +298,7 @@ async function buildReportData({
                AND COALESCE(t2."cashRegisterId", o."cashRegisterId") = :registerId
            )
            AND o."createdAt" >= :openedAt AND o."createdAt" <= :endAt
-           AND o."paymentStatus" = 'paid'`,
+           AND ${completedSaleSql('o.')}`,
         { replacements, type: db.sequelize.QueryTypes.SELECT }
       )
       .then((r) => r[0]),
@@ -306,7 +311,7 @@ async function buildReportData({
          WHERE o."store" = :store
            AND COALESCE(t."cashRegisterId", o."cashRegisterId") = :registerId
            AND o."createdAt" >= :openedAt AND o."createdAt" <= :endAt
-           AND o."paymentStatus" = 'paid'
+           AND ${completedSaleSql('o.')}
          GROUP BY t."typePayment"
          ORDER BY total DESC, t."typePayment" ASC`,
       { replacements, type: db.sequelize.QueryTypes.SELECT }
@@ -354,7 +359,7 @@ async function buildReportData({
                 AND COALESCE(t2."cashRegisterId", o."cashRegisterId") = :registerId
             )
             AND o."createdAt" >= :openedAt AND o."createdAt" <= :endAt
-            AND o."paymentStatus" = 'paid'
+            AND ${completedSaleSql('o.')}
           GROUP BY oi."product", oi."productName", p."sku"
           ORDER BY quantity DESC, oi."productName" ASC`,
         { replacements, type: db.sequelize.QueryTypes.SELECT }
@@ -497,7 +502,7 @@ async function buildCloseSnapshot({ registerId, store, user, openedAt, endAt, op
                AND COALESCE(t2."cashRegisterId", o."cashRegisterId") = :registerId
            )
            AND o."createdAt" >= :openedAt AND o."createdAt" <= :endAt
-           AND o."paymentStatus" = 'paid'`,
+           AND ${completedSaleSql('o.')}`,
       queryOpts
     ).then((r) => r[0]),
     db.sequelize.query(
@@ -509,7 +514,7 @@ async function buildCloseSnapshot({ registerId, store, user, openedAt, endAt, op
          WHERE o."store" = :store
            AND COALESCE(t."cashRegisterId", o."cashRegisterId") = :registerId
            AND o."createdAt" >= :openedAt AND o."createdAt" <= :endAt
-           AND o."paymentStatus" = 'paid'
+           AND ${completedSaleSql('o.')}
          GROUP BY t."typePayment"
          ORDER BY total DESC, t."typePayment" ASC`,
       queryOpts
@@ -548,7 +553,7 @@ async function buildCloseSnapshot({ registerId, store, user, openedAt, endAt, op
                 AND COALESCE(t2."cashRegisterId", o."cashRegisterId") = :registerId
             )
             AND o."createdAt" >= :openedAt AND o."createdAt" <= :endAt
-            AND o."paymentStatus" = 'paid'
+            AND ${completedSaleSql('o.')}
           GROUP BY oi."product", oi."productName", p."sku"
           ORDER BY quantity DESC, oi."productName" ASC`,
         queryOpts
@@ -659,7 +664,7 @@ async function buildRegisterReconciliation({ registerId, store, user, openedAt, 
   const excludedQueries = {
     UNPAID: [
       'UNPAID',
-      'Order is not paid yet (paymentStatus is unpaid/partial), so it is not a recognized sale.'
+      'Order is not paid yet (unpaid, or a partially paid split bill), so it is not a recognized sale.'
     ],
     CANCELLED_VOID: [
       'CANCELLED_VOID',
@@ -667,7 +672,7 @@ async function buildRegisterReconciliation({ registerId, store, user, openedAt, 
     ],
     REFUNDED: [
       'REFUNDED',
-      'Order was refunded; its cash effect nets inside the cash ledger, not gross sales.'
+      'Order was refunded (fully, or partially by an approved sales return); its cash effect nets inside the cash ledger, not gross sales.'
     ],
     OTHER_CREATOR: [
       'OTHER_CREATOR',
@@ -683,7 +688,7 @@ async function buildRegisterReconciliation({ registerId, store, user, openedAt, 
       `SELECT id, "totalPrice" FROM "order"
         WHERE "store" = :store AND "createdBy" = :user
           AND "createdAt" >= :openedAt AND "createdAt" <= :endAt
-          AND "paymentStatus" IN ('unpaid', 'partial')
+          AND ${unsettledSaleSql()}
           AND "status" NOT IN ('cancelled', 'void') ORDER BY id`,
       { replacements: base, ...queryOpts }
     ),
@@ -698,7 +703,8 @@ async function buildRegisterReconciliation({ registerId, store, user, openedAt, 
       `SELECT id, "totalPrice" FROM "order"
         WHERE "store" = :store AND "createdBy" = :user
           AND "createdAt" >= :openedAt AND "createdAt" <= :endAt
-          AND "paymentStatus" = 'refunded'
+          AND ("paymentStatus" = 'refunded'
+            OR ("paymentStatus" = 'partial' AND ${approvedReturnExistsSql()}))
           AND "status" NOT IN ('cancelled', 'void') ORDER BY id`,
       { replacements: base, ...queryOpts }
     ),
@@ -707,16 +713,14 @@ async function buildRegisterReconciliation({ registerId, store, user, openedAt, 
         WHERE "store" = :store
           AND ("createdBy" IS DISTINCT FROM :user)
           AND "createdAt" >= :openedAt AND "createdAt" <= :endAt
-          AND "paymentStatus" IN ('paid', 'refunded')
-          AND "status" NOT IN ('cancelled', 'void') ORDER BY id`,
+          AND ${completedSaleSql()} ORDER BY id`,
       { replacements: base, ...queryOpts }
     ),
     db.sequelize.query(
       `SELECT id, "totalPrice" FROM "order"
         WHERE "store" = :store AND "createdBy" = :user
           AND ("createdAt" < :openedAt OR "createdAt" > :endAt)
-          AND "paymentStatus" IN ('paid', 'refunded')
-          AND "status" NOT IN ('cancelled', 'void') ORDER BY id`,
+          AND ${completedSaleSql()} ORDER BY id`,
       { replacements: base, ...queryOpts }
     )
   ])
@@ -1746,7 +1750,7 @@ const cashRegisterController = {
                 COALESCE(SUM("totalPrice"), 0) as "totalSales"
            FROM "order"
           WHERE "store" = :store AND "createdBy" = :user
-            AND "createdAt" >= :openedAt AND "paymentStatus" = 'paid'`,
+            AND "createdAt" >= :openedAt AND ${completedSaleSql()}`,
         {
           replacements: { store, user: userId, openedAt: cashRegister.openedAt },
           type: db.sequelize.QueryTypes.SELECT
@@ -1863,7 +1867,7 @@ const cashRegisterController = {
                     COALESCE(SUM("totalPrice"), 0) as "totalSales"
              FROM "order"
              WHERE "store" = :store AND "createdBy" = :user
-               AND "createdAt" >= :openedAt AND "paymentStatus" = 'paid'`,
+               AND "createdAt" >= :openedAt AND ${completedSaleSql()}`,
             {
               replacements: {
                 store: d.store,
@@ -1930,8 +1934,7 @@ const cashRegisterController = {
                FROM "order"
               WHERE "store" = :store AND "createdBy" = :user
                 AND ("createdAt" < :openedAt OR "createdAt" > :endAt)
-                AND "paymentStatus" IN ('paid', 'refunded')
-                AND "status" NOT IN ('cancelled', 'void')`,
+                AND ${completedSaleSql()}`,
             {
               replacements: {
                 store: d.store,
