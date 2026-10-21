@@ -25,7 +25,8 @@ const DEFAULT_TEMPLATE = {
 const invoiceController = {
   async getSetting(req, res) {
     try {
-      const store = req.query.store || req.user?.store
+      const store = req.query.store ||
+      (req.user?.roleType !== 'super_admin' ? req.user?.store : null)
       const setting = await db.invoice_setting.findOne({
         where: store ? { store } : {}
       })

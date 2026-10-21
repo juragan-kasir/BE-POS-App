@@ -64,7 +64,7 @@ exports.getAllMember = async (req, res) => {
     } = req.query
     const filters = {}
 
-    let store = req.query.store || req.user?.store
+    let store = req.query.store
     if (req.user?.roleType !== 'super_admin') {
       store = req.user?.store
     }

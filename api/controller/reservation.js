@@ -8,7 +8,8 @@ const { enrichAuditFields } = require('../../utils/auditFields')
 const { scalarStoreScope } = require('../../utils/tenantScope')
 
 exports.getAll = async (req, res) => {
-  const store = req.query.store || req.user?.store
+  const store = req.query.store ||
+      (req.user?.roleType !== 'super_admin' ? req.user?.store : null)
   const { page = 1, size = 10, date, status, search } = req.query
   const limit = parseInt(size)
   const offset = (parseInt(page) - 1) * limit
@@ -69,7 +70,8 @@ exports.getAll = async (req, res) => {
 
 exports.getById = async (req, res) => {
   const { id } = req.params
-  const store = req.query.store || req.user?.store
+  const store = req.query.store ||
+      (req.user?.roleType !== 'super_admin' ? req.user?.store : null)
 
   try {
     const reservation = await Reservation.findOne({
@@ -302,7 +304,8 @@ exports.remove = async (req, res) => {
 }
 
 exports.getAvailableTables = async (req, res) => {
-  const store = req.query.store || req.user?.store
+  const store = req.query.store ||
+      (req.user?.roleType !== 'super_admin' ? req.user?.store : null)
   const { date, startTime, endTime } = req.query
 
   try {

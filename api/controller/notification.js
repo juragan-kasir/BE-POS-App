@@ -14,13 +14,17 @@ exports.getAllNotifications = async (req, res) => {
     // is never trusted here. super_admin filters via the client ?store= when
     // provided, otherwise sees all/global notifications.
     const userStore = req.storeId ?? req.user?.store
+    // A super_admin narrows only by an explicitly requested store. Its own
+    // store must not be substituted for an absent/empty filter, or the
+    // "All Stores" control silently becomes "my store".
+    const requestedStore = req.storeId
 
     let whereCondition = {}
 
     if (userRole === 'admin' || userRole === 'user') {
       whereCondition.store = userStore
-    } else if (userRole === 'super_admin' && userStore !== undefined && userStore !== null) {
-      whereCondition.store = userStore
+    } else if (userRole === 'super_admin' && requestedStore !== undefined && requestedStore !== null) {
+      whereCondition.store = requestedStore
     }
 
     if (isRead !== undefined && isRead !== '') {

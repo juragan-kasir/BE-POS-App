@@ -17,7 +17,7 @@ const stockHistoryController = {
         limit = 50
       } = req.query
 
-      let store = queryStore || req.user?.store
+      let store = queryStore
       if (req.user?.roleType !== 'super_admin') {
         // HIGH-4: always use the pinned server-side store (validateStoreAccess
         // already blocked a foreign ?store for tenant roles). req.storeId is
