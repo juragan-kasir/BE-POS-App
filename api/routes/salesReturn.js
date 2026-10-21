@@ -6,8 +6,8 @@ const { validateStoreAccess } = require('../../utils/storeValidation')
 const { requireCapability } = require('../../utils/financialCapabilities')
 const { validate } = require('../middleware/validate')
 const {
-  approveSalesReturnSchema,
-  rejectSalesReturnSchema
+  salesReturnIdParamsSchema,
+  approveSalesReturnSchema
 } = require('../validation/schemas')
 
 router.get(
@@ -29,6 +29,7 @@ router.patch(
   authorization,
   validateStoreAccess,
   requireCapability('refund.approve', { entity: 'sales_return', entityIdFrom: (req) => req.params.id }),
+  validate(salesReturnIdParamsSchema, 'params'),
   validate(approveSalesReturnSchema),
   salesReturnController.approve
 )
@@ -38,7 +39,7 @@ router.patch(
   authorization,
   validateStoreAccess,
   requireCapability('refund.approve', { entity: 'sales_return', entityIdFrom: (req) => req.params.id }),
-  validate(rejectSalesReturnSchema),
+  validate(salesReturnIdParamsSchema, 'params'),
   salesReturnController.reject
 )
 
