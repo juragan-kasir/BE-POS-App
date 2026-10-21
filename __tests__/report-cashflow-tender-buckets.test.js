@@ -6,6 +6,7 @@ const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
 const cashFlowDef = require('../api/service/reportDefs/cashFlow')
+const { bucketCashFlowTenders } = require('../api/service/canonicalPayment')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -21,15 +22,20 @@ let store = null
 let adminToken = null
 let orderId = null
 
-// Tender -> amount fixture table (mixed canonical + legacy spellings, as
-// stored by write boundaries old and new).
+// Tender -> amount fixture table.
+//
+// Canonical spellings only: since migration 20261013000005 the
+// `transaction_typepayment_canonical` CHECK constraint rejects legacy
+// spellings on INSERT, so a row can no longer be written as 'debit' /
+// 'other' / 'TRANSFER'. The legacy -> canonical alias mapping itself is
+// covered by __tests__/canonical-payment.test.js.
 const TENDERS = [
   ['CASH', 100000],
-  ['debit', 200000],
+  ['CARD', 200000],
   ['QRIS', 50000],
   ['POINTS', 10000],
-  ['other', 5000],
-  ['TRANSFER', 30000]
+  ['OTHER', 5000],
+  ['BANK_TRANSFER', 30000]
 ]
 
 const EXPECTED = { tunai: 100000, qris: 50000, transfer: 30000, lainnya: 215000 }
@@ -120,7 +126,18 @@ describe('cash-flow tender buckets (GET /report/cash-flow)', () => {
 })
 
 describe('cash-flow tender edge cases', () => {
-  test('unknown tender never inflates Tunai and never throws', async () => {
+  test('unknown tender never inflates Tunai and never throws', () => {
+    // Since migration 20261013000005 the `transaction_typepayment_canonical`
+    // CHECK constraint rejects a non-canonical typePayment on INSERT, so an
+    // unknown tender can no longer exist in the table. The report's defence
+    // against one is asserted here as a pure unit call, and the new database
+    // invariant is asserted separately below.
+    const buckets = bucketCashFlowTenders([{ typePayment: 'CRYPTOPAY', total: 7000 }])
+    expect(buckets.tunai).toBe(0)
+    expect(buckets.lainnya).toBe(7000)
+  })
+
+  test('the database rejects a non-canonical tender outright', async () => {
     const otherStore = await db.location.create({ name: `CF_UNKNOWN_${SUFFIX}`, status: 'active' })
     try {
       const order = await db.order.create({
@@ -131,12 +148,9 @@ describe('cash-flow tender edge cases', () => {
         source: 'pos',
         totalPrice: 7000
       })
-      await db.transaction.create({ order: order.id, typePayment: 'CRYPTOPAY', amount: 7000 })
-      const { rows } = await cashFlowDef.getData(reqFor(otherStore.id))
-      const byKeterangan = Object.fromEntries(rows.map((r) => [r.keterangan, r.nominal]))
-      expect(byKeterangan['Penerimaan Tunai']).toBe(0)
-      expect(byKeterangan['Lainnya']).toBe(7000)
-      await db.transaction.destroy({ where: { order: order.id }, force: true })
+      await expect(
+        db.transaction.create({ order: order.id, typePayment: 'CRYPTOPAY', amount: 7000 })
+      ).rejects.toThrow()
       await db.order.destroy({ where: { id: order.id }, force: true })
     } finally {
       await db.location.destroy({ where: { id: otherStore.id }, force: true })
