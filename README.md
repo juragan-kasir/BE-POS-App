@@ -99,8 +99,16 @@ npm run sync -- --force            # requires NODE_ENV=development/test, explici
 
 npm run sync:inventory    # UNAVAILABLE — referenced script is not present in this repo; do not use
 
+# Fresh local database (empty or not yet created) — run this FIRST:
+npm run db:bootstrap               # loads scripts/dev-schema.sql, stamps db/migration-baseline.txt, then runs npm run migrate
+npm run db:bootstrap -- --env test # same for the test database
+npx sequelize-cli db:seed:all      # optional: default roles, admin users, payment methods, tax configs
+
 # Sequelize migration workflow (incremental, ledger-tracked):
 npm run migrate                    # npx sequelize-cli db:migrate (never run against production in this phase)
+# NOTE: the migration chain is snapshot-first — core tables (user, product,
+# order, location, category) have no createTable migration, so `migrate` on
+# an EMPTY database fails at the second file. Use db:bootstrap for that.
 
 # Test/dev database setup (deterministic, isolated test DB):
 # Jest globalSetup (scripts/setup-test-db.js) clones the dev schema and
