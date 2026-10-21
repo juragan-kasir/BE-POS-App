@@ -39,6 +39,7 @@ const { createAudit } = require('../../utils/auditLog')
 const { enrichAuditFields } = require('../../utils/auditFields')
 const { resolveAuthorizationContext } = require('../../utils/authContext')
 const { okPage } = require('../../utils/canonicalHttp')
+const { superAdminStoreIds } = require('../../utils/tenantScope')
 const { page: pageOf, paginated } = require('../service/scopeVisibilityService')
 const { assertOperationalStoreTenant, resolveRequestedLifecycleStatus } = require('../validation/schemas')
 
@@ -140,6 +141,12 @@ exports.getAllLocationInTable = async (req, res) => {
 
     if (userRole === 'super_admin' && queryStore) {
       whereClause.id = queryStore
+    } else if (userRole === 'super_admin') {
+      // A store-bound super_admin lists only its own tenant's stores — the
+      // store pickers built from this list must not offer another tenant's
+      // outlet (validateStoreAccess refuses it anyway).
+      const scope = await superAdminStoreIds(req)
+      if (scope) whereClause.id = { [Op.in]: scope }
     }
 
     if (search) {
@@ -988,6 +995,13 @@ exports.getLocationById = async (req, res) => {
       req.user?.roleType !== 'super_admin' &&
       Number(dbId) !== Number(req.storeId)
     ) {
+      return res
+        .status(404)
+        .json({ success: false, message: 'Location not found' })
+    }
+    // A store-bound super_admin reads only its own tenant's stores.
+    const superAdminScope = await superAdminStoreIds(req)
+    if (superAdminScope && !superAdminScope.includes(Number(dbId))) {
       return res
         .status(404)
         .json({ success: false, message: 'Location not found' })
