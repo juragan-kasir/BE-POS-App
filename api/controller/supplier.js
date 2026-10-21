@@ -4,6 +4,10 @@ const { createNotification } = require('../../utils/createNotification')
 const { createAudit } = require('../../utils/auditLog')
 const { enrichAuditFields } = require('../../utils/auditFields')
 const ExcelJS = require('exceljs')
+const {
+  superAdminStoreIds,
+  nullableArrayStoresWhere
+} = require('../../utils/tenantScope')
 const Location = db.location
 
 let _spExists = null
@@ -17,6 +21,39 @@ const hasSupplierProductTable = async () => {
   }
   return _spExists
 }
+
+// Store scope of a supplier query (list, export, comparison):
+// - outlet staff: their own outlet plus shared suppliers (BR-ORG-001);
+// - super_admin with an explicit outlet filter: that outlet plus shared
+//   suppliers (validateStoreAccess already refused a foreign outlet);
+// - super_admin "All Stores": unrestricted for a global super_admin, every
+//   outlet of its tenant plus shared suppliers for a store-bound one (DR-02).
+// Returns a WHERE fragment, or null for no narrowing.
+const supplierListScope = async (req, requestedStore) => {
+  if (req.user?.roleType !== 'super_admin') {
+    const ownStore = Number(req.user?.store)
+    return nullableArrayStoresWhere([Number.isFinite(ownStore) ? ownStore : -1])
+  }
+  const storeId = Number(requestedStore)
+  if (requestedStore !== undefined && requestedStore !== null && requestedStore !== '' &&
+      Number.isFinite(storeId) && storeId > 0) {
+    return nullableArrayStoresWhere([storeId])
+  }
+  const scope = await superAdminStoreIds(req)
+  return scope ? nullableArrayStoresWhere(scope) : null
+}
+
+// A store-bound super_admin reaches only suppliers of its own tenant's
+// outlets (plus shared ones). Out-of-scope rows answer 404, like a missing
+// row, so another tenant's supplier ids disclose nothing.
+const inSuperAdminScope = async (req, supplierStores) => {
+  const scope = await superAdminStoreIds(req)
+  if (!scope || supplierStores.length === 0) return true
+  return supplierStores.some((id) => scope.includes(Number(id)))
+}
+
+const supplierNotFound = (res) =>
+  res.status(404).json({ success: false, message: 'Supplier not found' })
 
 const normalizeStores = (stores) => {
   if (!Array.isArray(stores)) return []
@@ -318,6 +355,7 @@ const supplierController = {
           message: 'Anda tidak memiliki akses untuk melihat supplier ini'
         })
       }
+      if (!(await inSuperAdminScope(req, supplierStores))) return supplierNotFound(res)
 
       let productCount = 0
       let products = []
@@ -412,31 +450,9 @@ const supplierController = {
       // own `users.store` here silently turned "All Stores" into "my store"
       // for a store-bound super_admin, hiding every supplier that was not
       // tagged with that one store.
-      const store = req.query.store
-      const where = {}
-      if (req.user?.roleType !== 'super_admin') {
-        // Outlet staff stay confined to their own outlet plus the shared
-        // (unassigned / global) suppliers — BR-ORG-001.
-        if (req.user?.store) {
-          const storeId = Number(req.user.store)
-          where[Op.or] = [
-            { store: null },
-            { store: { [Op.contains]: [storeId] } },
-            db.sequelize.literal('"supplier"."store" = \'[]\'::jsonb')
-          ]
-        }
-      } else if (store && store !== '') {
-        const storeId = Number(store)
-        // An unrecognised filter value must not build a NaN predicate; it is
-        // treated as "no narrowing" instead.
-        if (Number.isFinite(storeId) && storeId > 0) {
-          where[Op.or] = [
-            { store: null },
-            { store: { [Op.contains]: [storeId] } },
-            db.sequelize.literal('"supplier"."store" = \'[]\'::jsonb')
-          ]
-        }
-      }
+      // An unrecognised filter value is treated as "All Stores", never a
+      // NaN predicate (supplierListScope).
+      const where = { ...(await supplierListScope(req, req.query.store)) }
 
       if (search) {
         const searchClause = [
@@ -659,6 +675,7 @@ const supplierController = {
           message: 'Anda tidak memiliki akses untuk melihat supplier ini'
         })
       }
+      if (!(await inSuperAdminScope(req, supplierStores))) return supplierNotFound(res)
 
       const storeNames = await resolveStoreNames(supplierStores)
       let products = []
@@ -737,12 +754,27 @@ const supplierController = {
       // relationship to. Only super_admin may assign an arbitrary set of
       // stores; everyone else is pinned to their own, regardless of body
       // content.
-      const store =
+      let store =
         req.user?.roleType === 'super_admin' && Array.isArray(req.body.store)
           ? req.body.store
           : req.user?.store
             ? [Number(req.user.store)]
             : []
+      // A store-bound super_admin works inside its tenant (DR-02): an empty
+      // selection ("all stores") means every outlet of that tenant — never a
+      // shared supplier every other tenant would see — and an outlet outside
+      // the tenant is refused (validateStoreAccess already rejects it).
+      const tenantStores = await superAdminStoreIds(req)
+      if (tenantStores) {
+        const requested = normalizeStores(store).map(Number)
+        if (requested.some((id) => !tenantStores.includes(id))) {
+          return res.status(403).json({
+            success: false,
+            message: 'Anda hanya dapat mengakses data di toko Anda'
+          })
+        }
+        store = requested.length > 0 ? requested : [...tenantStores]
+      }
       const {
         name,
         contactPerson,
@@ -948,6 +980,11 @@ const supplierController = {
         })
       }
 
+      // Was referenced below without being defined: every non-super_admin
+      // update threw a ReferenceError (500) instead of reaching the guard.
+      const supplierStores = normalizeStores(supplier.store).map(Number)
+      if (!(await inSuperAdminScope(req, supplierStores))) return supplierNotFound(res)
+
       // C-9: `supplierStores.length > 0 &&` short-circuited for a global
       // supplier (store: null/[]) — any tenant admin could mutate it. Reads
       // of a global supplier stay open to every store (list queries already
@@ -1014,10 +1051,22 @@ const supplierController = {
       // whether they were even authorized to edit this supplier at all,
       // letting them expand its association to stores they don't belong
       // to. Only super_admin may reassign an arbitrary set of stores.
-      const newStore =
+      let newStore =
         req.user?.roleType === 'super_admin' && Array.isArray(req.body.store)
           ? req.body.store
           : undefined
+      // Store-bound super_admin: same tenant rule as create.
+      const tenantStores = await superAdminStoreIds(req)
+      if (tenantStores && newStore !== undefined) {
+        const requested = normalizeStores(newStore).map(Number)
+        if (requested.some((storeId) => !tenantStores.includes(storeId))) {
+          return res.status(403).json({
+            success: false,
+            message: 'Anda hanya dapat mengakses data di toko Anda'
+          })
+        }
+        newStore = requested.length > 0 ? requested : [...tenantStores]
+      }
 
       await supplier.update({
         name: trimmedName ?? supplier.name,
@@ -1125,6 +1174,7 @@ const supplierController = {
           message: 'Anda tidak memiliki akses untuk menghapus supplier ini'
         })
       }
+      if (!(await inSuperAdminScope(req, supplierStores))) return supplierNotFound(res)
 
       if (await hasSupplierProductTable()) {
         await db.supplier_product.destroy({ where: { supplier: id } })
@@ -1221,16 +1271,9 @@ const supplierController = {
 
   async downloadData(req, res) {
     try {
-      const { store } = req.query
-      const where = {}
-      if (store) {
-        const storeId = Number(store)
-        where[Op.or] = [
-          { store: null },
-          { store: { [Op.contains]: [storeId] } },
-          db.sequelize.literal('"supplier"."store" = \'[]\'::jsonb')
-        ]
-      }
+      // Same scope as the list: an outlet admin exporting without a store
+      // filter used to receive every outlet's suppliers.
+      const where = { ...(await supplierListScope(req, req.query.store)) }
 
       const suppliers = await db.supplier.findAll({
         where,
@@ -1540,6 +1583,9 @@ const supplierController = {
             message: 'Supplier not found'
           })
         }
+        if (!(await inSuperAdminScope(req, normalizeStores(supplier.store)))) {
+          return supplierNotFound(res)
+        }
       }
 
       if (!req.file) {
@@ -1661,7 +1707,7 @@ const supplierController = {
             model: db.supplier,
             as: 'supplierData',
             attributes: ['id', 'name', 'phone', 'email', 'status'],
-            where: { status: 'active' }
+            where: { status: 'active', ...(await supplierListScope(req, req.query.store)) }
           }
         ],
         attributes: [

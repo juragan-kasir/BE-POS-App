@@ -227,7 +227,58 @@ function relatedStoreInclude(req, { model, as, attributes, parentShape = 'scalar
   }
 }
 
+// ---------------------------------------------------------------------------
+// super_admin store scope (legacy path, DR-02 "super_admin ≠ all stores ≠
+// all tenants").
+//
+// - Global super_admin (users.store null): unrestricted — returns null.
+// - Store-bound super_admin (users.store set, e.g. a business owner's own
+//   account): every store of the tenant its own store belongs to. It is
+//   subordinate to that tenant and must never see or address another
+//   tenant's stores.
+// - Store-bound super_admin whose store has no tenant: unrestricted — no
+//   tenant boundary exists yet (BA §35.2), so behavior is unchanged.
+//
+// Resolved once per request (cached on req). Callers treat null as "no
+// narrowing" and an array as the exact set of addressable store ids.
+// ---------------------------------------------------------------------------
+async function superAdminStoreIds(req) {
+  if (!isSuperAdmin(req)) return null
+  const ownStore = Number(req.user?.store)
+  if (!Number.isInteger(ownStore) || ownStore <= 0) return null
+  if (req._superAdminStoreIds !== undefined) return req._superAdminStoreIds
+
+  const db = require('../db/models')
+  const own = await db.location.findByPk(ownStore, { attributes: ['id', 'tenantId'] })
+  let ids = null
+  if (own?.tenantId != null) {
+    const stores = await db.location.findAll({
+      where: { tenantId: own.tenantId },
+      attributes: ['id']
+    })
+    ids = stores.map((row) => Number(row.id))
+    if (!ids.includes(ownStore)) ids.push(ownStore)
+  }
+  req._superAdminStoreIds = ids
+  return ids
+}
+
+// WHERE fragment for the nullable-array shape (supplier, driver) limited to
+// a set of stores: shared rows (store null / []) plus any row tagged with at
+// least one of the stores.
+function nullableArrayStoresWhere(storeIds) {
+  return {
+    [Op.or]: [
+      { store: null },
+      { store: { [Op.eq]: [] } },
+      ...storeIds.map((id) => ({ store: { [Op.contains]: [id] } }))
+    ]
+  }
+}
+
 module.exports = {
+  superAdminStoreIds,
+  nullableArrayStoresWhere,
   isSuperAdmin,
   resolveStoreId,
   scalarStoreScope,

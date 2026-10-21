@@ -272,7 +272,23 @@ const validateStoreAccess = (req, res, next) => {
   
   if (userRole === 'super_admin') {
     req.storeId = uniqueCandidates[0] ?? null
-    return next()
+    // A store-bound super_admin is subordinate to its own store's tenant
+    // (DR-02): every requested store must belong to that tenant. A global
+    // super_admin, a request without a store, and a store without a tenant
+    // pass unchanged (superAdminStoreIds returns null for those).
+    if (uniqueCandidates.length === 0 || req.user.store == null) return next()
+    const { superAdminStoreIds } = require('./tenantScope')
+    return superAdminStoreIds(req)
+      .then((scope) => {
+        if (scope && uniqueCandidates.some((id) => !scope.includes(id))) {
+          return res.status(403).json({
+            message: 'Anda hanya dapat mengakses data di toko Anda',
+            code: 'FOREIGN_STORE'
+          })
+        }
+        return next()
+      })
+      .catch(next)
   }
   
   // If multiple distinct stores were supplied, fail closed (ambiguous/conflicting)
