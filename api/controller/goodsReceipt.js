@@ -9,6 +9,10 @@ const {
 const batchService = require('../service/batchService')
 const { adjustProductStock } = require('../service/stockMutationService')
 const {
+  ingredientBaseUnitCost,
+  ingredientPurchaseUnitCost
+} = require('../service/itemCostService')
+const {
   enqueueAccountingJob,
   attemptJob,
   recordImmediateAttempt
@@ -215,12 +219,20 @@ const applyCostPrice = async ({ item, qty, store, transaction }) => {
     if (ingredient) {
       // Same read-your-own-writes correction as the product branch above —
       // ingredient.stock here already includes this receipt's own qtyStock.
-      const oldStock = (Number(ingredient.stock) || 0) - qtyStock
-      const oldCost = Number(ingredient.costPrice) || 0
-      const newCost = Math.round(
-        (oldStock * oldCost + qtyStock * baseUnitCost) / (oldStock + qtyStock)
+      // ingredient.stock is in base units but ingredient.costPrice is the
+      // price of one PURCHASE unit (itemCostService): average per base unit,
+      // then store the result back per purchase unit. Averaging the stored
+      // per-purchase-unit price against a per-base-unit receipt cost mixed
+      // the two (Rp25.000/kg with Rp26/g) whenever conversionFactor ≠ 1.
+      // A negative pre-receipt stock carries no cost to average against.
+      const oldStock = Math.max(0, (Number(ingredient.stock) || 0) - qtyStock)
+      const oldBaseCost = ingredientBaseUnitCost(ingredient)
+      const newBaseCost =
+        (oldStock * oldBaseCost + qtyStock * baseUnitCost) / (oldStock + qtyStock)
+      await ingredient.update(
+        { costPrice: ingredientPurchaseUnitCost(newBaseCost, ingredient) },
+        { transaction }
       )
-      await ingredient.update({ costPrice: newCost }, { transaction })
     }
   }
 }

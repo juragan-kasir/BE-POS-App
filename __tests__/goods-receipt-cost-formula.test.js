@@ -223,6 +223,50 @@ describe('Goods Receipt weighted-average cost — edge cases', () => {
     expect(updated.costPrice).toBe(9000)
   })
 
+  // ingredient.costPrice is the price of one PURCHASE unit while stock is in
+  // base units (itemCostService). 5 kg in stock at Rp25.000/kg, receiving
+  // 2 kg at Rp26.000/kg: (5000 g × Rp25 + 2000 g × Rp26) / 7000 g × 1000 =
+  // Rp25.285,71 → Rp25.286 per kg. Averaging the stored per-kg price against
+  // the per-gram receipt cost produced Rp17.865.
+  test('purchase-unit ingredient (kg, stocked in g): average stays a per-kg price', async () => {
+    const ingredient = await db.ingredient.create({
+      store: store.id,
+      name: nextTag(),
+      stock: 5000,
+      minStock: 0,
+      unit: 'kg',
+      baseUnit: 'g',
+      conversionFactor: 1000,
+      costPrice: 25000,
+      status: 'active'
+    })
+    const { po, poItemId } = await makePOForIngredient(ingredient, 2, 26000)
+    const res = await request(app)
+      .post('/goods-receipt/create')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        store: store.id,
+        purchaseOrderId: po.id,
+        status: 'completed',
+        items: [
+          {
+            purchaseOrderItem: poItemId,
+            ingredient: ingredient.id,
+            ingredientName: ingredient.name,
+            qtyReceived: 2,
+            conversionToBase: 1000,
+            price: 26000,
+            costPrice: 26000
+          }
+        ]
+      })
+    expect(res.status).toBe(201)
+
+    const updated = await db.ingredient.findByPk(ingredient.id)
+    expect(Number(updated.stock)).toBe(7000)
+    expect(updated.costPrice).toBe(25286)
+  })
+
   test('existing cost = 0 with existing stock > 0: old stock contributes zero value to the blend', async () => {
     const product = await makeProduct(100, 0)
     const updated = await receiveProduct(product, 50, 8000)

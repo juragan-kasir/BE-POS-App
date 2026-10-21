@@ -13,13 +13,14 @@ const defaultColumns = [
   { key: 'serviceCharge', label: 'Service Charge', type: 'currency', width: 16, align: 'right' },
   { key: 'totalPenjualanBersih', label: 'Penjualan Bersih', type: 'currency', width: 18, align: 'right' },
   { key: 'totalHpp', label: 'HPP', type: 'currency', width: 18, align: 'right' },
+  { key: 'qtyTanpaHpp', label: 'Qty tanpa HPP', type: 'number', width: 14, align: 'right' },
   { key: 'grossProfit', label: 'Laba Kotor', type: 'currency', width: 18, align: 'right' },
   { key: 'operationalExpense', label: 'Biaya Operasional', type: 'currency', width: 16, align: 'right' },
   { key: 'netProfit', label: 'Laba Bersih', type: 'currency', width: 18, align: 'right' },
   { key: 'totalCovers', label: 'Jumlah Tamu', type: 'number', width: 12, align: 'right' }
 ]
 
-const totals = ['totalTransaksi', 'totalPenjualanBersih', 'totalHpp', 'grossProfit', 'netProfit', 'totalCovers']
+const totals = ['totalTransaksi', 'totalPenjualanBersih', 'totalHpp', 'qtyTanpaHpp', 'grossProfit', 'netProfit', 'totalCovers']
 
 const filename = () => 'laporan-harian'
 
@@ -81,13 +82,16 @@ const getData = async (req) => {
 
   const rows = []
   if (dailyOrders.length) {
-    // F6-01: hppSnapshot (or its price fallback) is a PER-UNIT figure — it
-    // must be multiplied by quantity, exactly like
-    // accountingService.computeOrderCogs already does for the GL. Summing
-    // it alone silently understates COGS for every line with quantity > 1.
+    // F6-01: hppSnapshot is a PER-UNIT figure — it must be multiplied by
+    // quantity, exactly like accountingService.computeOrderCogs already does
+    // for the GL. Summing it alone silently understates COGS for every line
+    // with quantity > 1. A NULL snapshot is an unknown cost (itemCostService):
+    // it adds nothing to HPP — never the selling price, which reported a
+    // 100 % food cost — and its quantity is reported as qtyTanpaHpp.
     const dailyHpp = await db.sequelize.query(
       `SELECT DATE(o."createdAt" AT TIME ZONE :storeTimezone) as tanggal,
-              COALESCE(SUM(COALESCE(oi."hppSnapshot", oi."price", 0) * oi."quantity"), 0) as "totalHpp"
+              COALESCE(SUM(COALESCE(oi."hppSnapshot", 0) * oi."quantity"), 0) as "totalHpp",
+              COALESCE(SUM(oi."quantity") FILTER (WHERE oi."hppSnapshot" IS NULL), 0) as "qtyTanpaHpp"
        FROM order_item oi
        JOIN "order" o ON o.id = oi."order"
        WHERE ${orderConditions}
@@ -95,7 +99,11 @@ const getData = async (req) => {
       { replacements, type: db.sequelize.QueryTypes.SELECT }
     )
     const hppMap = {}
-    for (const row of dailyHpp) hppMap[row.tanggal] = Number(row.totalHpp || 0)
+    const qtyTanpaHppMap = {}
+    for (const row of dailyHpp) {
+      hppMap[row.tanggal] = Number(row.totalHpp || 0)
+      qtyTanpaHppMap[row.tanggal] = Number(row.qtyTanpaHpp || 0)
+    }
 
     let expenseConditions = `"status" = 'approved'`
     const expReplacements = {}
@@ -176,6 +184,7 @@ const getData = async (req) => {
         totalPenjualanBersih: netRevenue,
         totalRefund,
         totalHpp,
+        qtyTanpaHpp: qtyTanpaHppMap[tanggal] || 0,
         foodCostPersen,
         grossProfit,
         netProfit,

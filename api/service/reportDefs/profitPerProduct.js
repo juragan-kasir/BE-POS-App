@@ -9,10 +9,11 @@ const defaultColumns = [
   { key: 'qtySold', label: 'Qty Terjual', type: 'number', width: 14, align: 'right' },
   { key: 'totalSales', label: 'Total Penjualan', type: 'currency', width: 20, align: 'right' },
   { key: 'totalHpp', label: 'HPP', type: 'currency', width: 20, align: 'right' },
+  { key: 'qtyTanpaHpp', label: 'Qty tanpa HPP', type: 'number', width: 14, align: 'right' },
   { key: 'profit', label: 'Laba', type: 'currency', width: 20, align: 'right' },
   { key: 'margin', label: 'Margin', type: 'percent', width: 12, align: 'right' }
 ]
-const totals = ['qtySold', 'totalSales', 'totalHpp', 'profit']
+const totals = ['qtySold', 'totalSales', 'totalHpp', 'qtyTanpaHpp', 'profit']
 const filename = () => 'laba-per-produk'
 const label = 'Laba per Produk'
 
@@ -74,7 +75,8 @@ const getData = async (req) => {
             COALESCE(MAX(oi."productName"), 'Unknown') as "productName",
             COALESCE(SUM(oi."quantity"), 0) as "qtySold",
             COALESCE(SUM(oi."totalPrice"), 0) as "grossSales",
-            COALESCE(SUM(COALESCE(oi."hppSnapshot", 0) * oi."quantity"), 0) as "grossHpp"
+            COALESCE(SUM(COALESCE(oi."hppSnapshot", 0) * oi."quantity"), 0) as "grossHpp",
+            COALESCE(SUM(oi."quantity") FILTER (WHERE oi."hppSnapshot" IS NULL), 0) as "qtyTanpaHpp"
      FROM order_item oi
      JOIN "order" o ON o.id = oi."order"
      WHERE ${orderConditions}
@@ -130,6 +132,9 @@ const getData = async (req) => {
       qtySold: Number(r.qtySold || 0),
       grossSales: Number(r.grossSales || 0),
       grossHpp: Number(r.grossHpp || 0),
+      // Units sold with an unknown cost (NULL hppSnapshot): their HPP is
+      // missing from totalHpp, so this product's profit is overstated.
+      qtyTanpaHpp: Number(r.qtyTanpaHpp || 0),
       returnedRevenue: 0,
       returnedHpp: 0
     })
@@ -146,6 +151,7 @@ const getData = async (req) => {
         qtySold: 0,
         grossSales: 0,
         grossHpp: 0,
+        qtyTanpaHpp: 0,
         returnedRevenue: Number(r.returnedRevenue || 0),
         returnedHpp: Number(r.returnedHpp || 0)
       })
@@ -162,6 +168,7 @@ const getData = async (req) => {
       qtySold: r.qtySold,
       totalSales,
       totalHpp,
+      qtyTanpaHpp: r.qtyTanpaHpp,
       profit,
       margin: totalSales > 0 ? Math.round((profit / totalSales) * 10000) / 100 : 0
     }
