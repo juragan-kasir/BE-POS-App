@@ -35,6 +35,7 @@ const GATED_LEGACY_ROUTE_FILES = Object.freeze([
   'accounting.js',
   'accountsReceivable.js',
   'assignment.js',
+  'assistant.js',
   'attendance.js',
   'auditLog.js',
   'authorizationContext.js',
