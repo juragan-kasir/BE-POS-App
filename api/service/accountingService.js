@@ -490,28 +490,18 @@ async function postOrderJournal({
   })
 }
 
-// COGS = Σ (hppSnapshot × quantity). Bundles use current component cost.
+// COGS = Σ (hppSnapshot × quantity), bundles included: the snapshot is the
+// unit cost captured at sale time (itemCostService — recipe or purchase
+// cost, a bundle's components summed). A line whose cost was unknown
+// (hppSnapshot NULL) books no COGS rather than an invented one; the reports
+// surface those lines.
 async function computeOrderCogs(orderId) {
   const items = await db.order_item.findAll({ where: { order: orderId } })
   let total = 0
   for (const item of items) {
     const qty = Number(item.quantity) || 0
     if (qty <= 0) continue
-    if (item.bundleId) {
-      const comps = await db.product_bundle_item.findAll({
-        where: { bundleId: item.bundleId }
-      })
-      let bundleCost = 0
-      for (const c of comps) {
-        const p = await db.product.findByPk(c.product)
-        if (p)
-          bundleCost +=
-            (Number(c.quantity) || 0) * (Number(p.costPrice || p.price) || 0)
-      }
-      total += bundleCost * qty
-    } else {
-      total += (Number(item.hppSnapshot) || 0) * qty
-    }
+    total += (Number(item.hppSnapshot) || 0) * qty
   }
   return toNumber(total)
 }

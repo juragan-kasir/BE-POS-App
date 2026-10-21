@@ -1,6 +1,7 @@
 const db = require('../../db/models')
 const { Op } = require('sequelize')
 const { enrichAuditFields } = require('../../utils/auditFields')
+const { ingredientBaseUnitCost } = require('../service/itemCostService')
 
 // Thrown inside the authoring transaction to refuse a BOM with a 400 —
 // nothing is written.
@@ -49,16 +50,11 @@ const validateBomLines = async (lines, store, transaction) => {
   return { bomLines, ingredients }
 }
 
-// Cost of ONE base unit of an ingredient. costPrice is the purchase price
-// per purchase unit (`unit`, e.g. Rp25.000 per kg) and conversionFactor is
-// how many base units one purchase unit holds (1 kg = 25 butir), while BOM
+// Cost of ONE base unit of an ingredient (itemCostService). costPrice is the
+// purchase price per purchase unit (`unit`, e.g. Rp25.000 per kg) while BOM
 // lines are always in the base unit (enforced above). BA finding #4: using
 // costPrice directly priced 5 butir as 5 kg (Rp143.000 instead of Rp6.800).
-const baseUnitCost = (ingredient) => {
-  const costPrice = Number(ingredient?.costPrice || 0)
-  const factor = Number(ingredient?.conversionFactor)
-  return factor > 0 ? costPrice / factor : costPrice
-}
+const baseUnitCost = ingredientBaseUnitCost
 
 // HPP / food-cost / composition snapshot onto the product, from the BOM's
 // current lines and the ingredients' current cost per base unit.

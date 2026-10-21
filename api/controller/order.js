@@ -47,6 +47,11 @@ const {
   existingOrderSummary
 } = require('../service/orderIdempotency')
 const { resolveAttributedRegister } = require('../service/settlementAttribution')
+const {
+  resolveProductUnitCosts,
+  bundleUnitCost,
+  costedProductIds
+} = require('../service/itemCostService')
 
 // DR-23 interim compatibility mapping for the elevated `order.void`
 // capability (DR-12 memberships are not wired yet): legacy admin roles only.
@@ -1880,6 +1885,13 @@ const createOrderItems = async (
   discountValue,
   t
 ) => {
+  // HPP per unit at sale time (itemCostService): recipe or purchase cost,
+  // null when unknown — never the selling price.
+  const unitCosts = await resolveProductUnitCosts(
+    costedProductIds(items, bundleMap),
+    order.store,
+    t
+  )
   for (const item of items) {
     const itemDiscountAmount = Math.max(
       0,
@@ -1887,15 +1899,6 @@ const createOrderItems = async (
     )
     if (item.bundleId && bundleMap[item.bundleId]) {
       const bundle = bundleMap[item.bundleId]
-      // ponytail: HPP bundle = total harga komponen — kalau kosong, laporan
-      // harian fallback ke harga jual sehingga food cost meleset
-      const bundleCost = (bundle.items || []).reduce(
-        (sum, bi) =>
-          sum +
-          Number(bi.productData?.costPrice ?? bi.productData?.price ?? 0) *
-            Number(bi.quantity || 1),
-        0
-      )
       await OrderItem.create(
         {
           order: order.id,
@@ -1912,7 +1915,7 @@ const createOrderItems = async (
           options: item.options || [],
           modifiers: item.modifiers || [],
           notes: item.notes,
-          hppSnapshot: Math.round(bundleCost),
+          hppSnapshot: bundleUnitCost(bundle, unitCosts),
           status: 'pending'
         },
         { transaction: t }
@@ -1923,9 +1926,6 @@ const createOrderItems = async (
     // Reuses the product already fetched in loadAndPriceOrderItems instead
     // of fetching the same row a third time.
     const product = productById.get(item.product || item.productId)
-    const costPrice = product
-      ? Number(product.costPrice || product.price || 0)
-      : 0
     await OrderItem.create(
       {
         order: order.id,
@@ -1940,7 +1940,7 @@ const createOrderItems = async (
         options: item.options || [],
         modifiers: item.modifiers || [],
         notes: item.notes,
-        hppSnapshot: costPrice,
+        hppSnapshot: unitCosts.get(Number(item.product || item.productId)) ?? null,
         status: 'pending'
       },
       { transaction: t }
@@ -4436,21 +4436,17 @@ exports.createCustomerOrder = async (req, res) => {
     let subTotal = 0
     let totalQuantity = 0
     const orderItems = []
+    // HPP per unit at order time (itemCostService); null when unknown.
+    const unitCosts = await resolveProductUnitCosts(
+      costedProductIds(items, bundleMap),
+      store
+    )
     for (const item of items) {
       if (item.bundleId && bundleMap[item.bundleId]) {
         const bundle = bundleMap[item.bundleId]
         const subtotal = bundle.bundlePrice * item.quantity
         subTotal += subtotal
         totalQuantity += item.quantity
-        // ponytail: HPP bundle = total harga komponen — kalau kosong, laporan
-        // harian fallback ke harga jual sehingga food cost meleset
-        const bundleCost = (bundle.items || []).reduce(
-          (sum, bi) =>
-            sum +
-            Number(bi.productData?.costPrice ?? bi.productData?.price ?? 0) *
-              Number(bi.quantity || 1),
-          0
-        )
         orderItems.push({
           product: bundle.items[0]?.product || 0,
           productName: bundle.name,
@@ -4459,7 +4455,7 @@ exports.createCustomerOrder = async (req, res) => {
           bundleId: bundle.id,
           bundleName: bundle.name,
           totalPrice: subtotal,
-          hppSnapshot: Math.round(bundleCost),
+          hppSnapshot: bundleUnitCost(bundle, unitCosts),
           notes: item.notes || null,
           options: item.options || [],
           modifiers: item.modifiers || [],
@@ -4472,14 +4468,13 @@ exports.createCustomerOrder = async (req, res) => {
         const prod = item.productId
           ? await Product.findByPk(item.productId)
           : null
-        const costPrice = prod ? Number(prod.costPrice || prod.price || 0) : 0
         orderItems.push({
           product: item.productId,
           productName: item.productName || prod?.nameProduct || 'Item',
           quantity: item.quantity,
           price: item.price,
           totalPrice: subtotal,
-          hppSnapshot: costPrice,
+          hppSnapshot: unitCosts.get(Number(item.productId)) ?? null,
           notes: item.notes || null,
           options: item.options || [],
           modifiers: item.modifiers || [],
