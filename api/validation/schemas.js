@@ -2325,13 +2325,14 @@ exports.createSalesReturnSchema = z.object({
   idempotencyKey: z.string().max(255).optional().nullable()
 })
 
-exports.approveSalesReturnSchema = z.object({
-  id: strToNum(),
-  refundReference: z.string().max(255).optional().nullable()
+// The return id is the :id route param (the controllers read req.params.id);
+// the FE sends only the optional refund reference in the body.
+exports.salesReturnIdParamsSchema = z.object({
+  id: strToNum()
 })
 
-exports.rejectSalesReturnSchema = z.object({
-  id: strToNum()
+exports.approveSalesReturnSchema = z.object({
+  refundReference: z.string().max(255).optional().nullable()
 })
 
 // ===================== Shift Swap (Ubah Jadwal) =====================

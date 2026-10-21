@@ -229,7 +229,6 @@ describe('DR-23 §J — kasir default grants', () => {
     const approve = await request(app)
       .patch(`/sales-return/approve/${requested.body.data.id}`)
       .set(as('kasir'))
-      .send({ id: requested.body.data.id })
     expect(approve.status).toBe(403)
     expect((await db.sales_return.findByPk(requested.body.data.id)).status).toBe('pending')
     expect((await deniedAudits('sales_return', 'refund.approve')).length).toBeGreaterThan(0)
@@ -255,7 +254,6 @@ describe('DR-23 §C/§G — payment state after an approved return', () => {
     const approve = await request(app)
       .patch(`/sales-return/approve/${created.body.data.id}`)
       .set(as('admin'))
-      .send({ id: created.body.data.id })
     expect(approve.status).toBe(200)
   }
 
@@ -274,6 +272,32 @@ describe('DR-23 §C/§G — payment state after an approved return', () => {
     await returnAndApprove(sale.body.data.id, 1)
 
     expect((await db.order.findByPk(sale.body.data.id)).paymentStatus).toBe('partial')
+  })
+
+  // FE services/sales-return.js: the id travels only in the URL; approve
+  // sends { refundReference } or no body, reject never sends a body.
+  test('approve and reject accept the FE request shape (id only in the URL)', async () => {
+    const requestReturn = async (orderId) => {
+      const created = await request(app)
+        .post(`/pos/order/${orderId}/return`)
+        .set(as('admin'))
+        .send({ items: [{ productId: product.id, qty: 1 }], reason: 'fe shape', idempotencyKey: unique('capret') })
+      expect([200, 201]).toContain(created.status)
+      return created.body.data.id
+    }
+
+    const toReject = await requestReturn((await counterSale('admin', 1)).body.data.id)
+    const rejected = await request(app).patch(`/sales-return/reject/${toReject}`).set(as('admin'))
+    expect(rejected.status).toBe(200)
+    expect((await db.sales_return.findByPk(toReject)).status).toBe('rejected')
+
+    const toApprove = await requestReturn((await counterSale('admin', 1)).body.data.id)
+    const approved = await request(app)
+      .patch(`/sales-return/approve/${toApprove}`)
+      .set(as('admin'))
+      .send({ refundReference: 'FE-REF-1' })
+    expect(approved.status).toBe(200)
+    expect((await db.sales_return.findByPk(toApprove)).status).toBe('approved')
   })
 
   test('a fully returned order cannot be settled again', async () => {
