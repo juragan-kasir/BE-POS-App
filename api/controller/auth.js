@@ -416,21 +416,68 @@ exports.getAllUser = async (req, res) => {
       whereCondition.roleType = { [Op.ne]: 'super_admin' }
     }
 
-    const getAllUser = await User.findAll({
-      where: whereCondition
-    }).then((res) =>
-      res.map((items) => {
-        const getData = {
-          ...items.dataValues
+    // Summary cards (AdminList): the whole visible audience, independent of
+    // the search box. Buckets mirror the list's status badge: a disabled
+    // account (disabledAt) is never counted as active or pending;
+    // `inactive` covers every account that is neither, disabled included.
+    const [counts] = await User.findAll({
+      where: whereCondition,
+      attributes: [
+        [db.sequelize.literal('COUNT(*)'), 'total'],
+        [db.sequelize.literal(`COUNT(*) FILTER (WHERE "disabledAt" IS NULL AND "status" = 'active')`), 'active'],
+        [db.sequelize.literal(`COUNT(*) FILTER (WHERE "disabledAt" IS NULL AND "status" IN ('pending', 'draft'))`), 'pending'],
+        [db.sequelize.literal(`COUNT(*) FILTER (WHERE "disabledAt" IS NOT NULL)`), 'disabled']
+      ],
+      raw: true
+    })
+    const stats = {
+      total: Number(counts?.total || 0),
+      active: Number(counts?.active || 0),
+      pending: Number(counts?.pending || 0),
+      disabled: Number(counts?.disabled || 0)
+    }
+    stats.inactive = stats.total - stats.active - stats.pending
+
+    const search = String(req.query.search || '').trim()
+    const listWhere = search
+      ? {
+          ...whereCondition,
+          [Op.or]: ['userName', 'fullName', 'email'].map((field) => ({
+            [field]: { [Op.iLike]: `%${search}%` }
+          }))
         }
-        delete getData.password
-        return getData
-      })
-    )
+      : whereCondition
+
+    // Paged only when the caller asks for a page; without page/limit the
+    // full list is returned exactly as before.
+    const paged = req.query.page !== undefined || req.query.limit !== undefined
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 10, 1), 100)
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1)
+
+    const { rows, count } = await User.findAndCountAll({
+      where: listWhere,
+      order: [['id', 'ASC']],
+      ...(paged ? { limit, offset: (page - 1) * limit } : {})
+    })
+    const getAllUser = rows.map((items) => {
+      const getData = {
+        ...items.dataValues
+      }
+      delete getData.password
+      return getData
+    })
 
     res.status(200).json({
       message: 'Success',
-      data: getAllUser.length > 0 ? getAllUser : []
+      data: getAllUser,
+      total: count,
+      pagination: {
+        page: paged ? page : 1,
+        limit: paged ? limit : count,
+        total: count,
+        totalPages: paged ? Math.max(Math.ceil(count / limit), 1) : 1
+      },
+      stats
     })
   } catch {
     return res.status(500).json({
