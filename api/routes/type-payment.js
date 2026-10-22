@@ -1,5 +1,9 @@
 const express = require('express')
+const { menuWriteGate } = require('../../utils/menuWriteGate')
 const router = express.Router()
+
+// Role Management checkboxes guard the writes (api/menuRouteMap.js)
+router.use(menuWriteGate('type-payment.js'))
 const multer = require('multer')
 
 const typePaymentController = require('../controller/type-payment')

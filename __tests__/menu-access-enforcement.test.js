@@ -12,8 +12,9 @@ const db = require('../db/models')
 // super_admin, bypass for menu-less super_admin) and confines any account
 // that carries an effective menu to it. Accounts without any effective menu
 // (legacy fixtures/roles not yet migrated) keep the prior role/capability
-// gates — the staged rollout is tracked in api/menuRouteMap.js. Table routes
-// are the reference module.
+// gates — the staged rollout is tracked in api/menuRouteMap.js. Wave 2
+// (utils/menuWriteGate.js): reads stay open — the cashier picks tables at
+// checkout — and writes follow the /table-list menu (legacy /table too).
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 let uniqueSeq = 0
@@ -64,56 +65,57 @@ afterAll(async () => {
   await db.location.destroy({ where: { id: location.id }, force: true })
 })
 
-describe('requireMenuAction enforcement (table module)', () => {
-  test('a scoped account without /table access is denied 403 MENU_ACTION_DENIED', async () => {
+describe('menu write gate (table module)', () => {
+  const expectDenied = (res) => {
+    expect(res.status).toBe(403)
+    expect(res.body.code).toBe('MENU_ACTION_DENIED')
+  }
+  const expectCreated = (res) => {
+    expect(res.status).toBe(201)
+    if (res.body?.data?.id || res.body?.id) tables.push(res.body?.data?.id || res.body?.id)
+  }
+
+  test('reads stay open: a kasir without a table menu can still load tables at checkout', async () => {
     const { token } = await makeAccount({
       roleType: 'kasir',
       store: location.id,
+      accessMenu: [{ menu: '/home', view: true }]
+    })
+    expect((await getTables(token)).status).toBe(200)
+  })
+
+  test('a scoped account without a table menu cannot create a table', async () => {
+    const { token } = await makeAccount({
+      roleType: 'admin',
+      store: location.id,
       accessMenu: [{ menu: '/pos', view: true, add: true }]
     })
-    const res = await getTables(token)
-    expect(res.status).toBe(403)
-    expect(res.body.code).toBe('MENU_ACTION_DENIED')
+    expectDenied(await createTable(token, unique('C02_NO_MENU')))
   })
 
-  test('legacy action vocabulary is normalized (read grants view)', async () => {
+  test('the role-matrix key /table-list grants table writes', async () => {
     const { token } = await makeAccount({
       roleType: 'admin',
       store: location.id,
-      accessMenu: [{ menu: '/table', read: true }]
+      accessMenu: [{ menu: '/table-list', view: true, add: true }]
     })
-    expect((await getTables(token)).status).toBe(200)
+    expectCreated(await createTable(token, unique('C02_MATRIX_KEY')))
   })
 
-  test('stripped menu keys match like the client (table === /table)', async () => {
-    const { token } = await makeAccount({
-      roleType: 'admin',
-      store: location.id,
-      accessMenu: [{ menu: 'table', view: true }]
-    })
-    expect((await getTables(token)).status).toBe(200)
+  test('legacy keys and vocabulary still grant (/table create, stripped "table")', async () => {
+    for (const accessMenu of [[{ menu: '/table', create: true }], [{ menu: 'table', add: true }]]) {
+      const { token } = await makeAccount({ roleType: 'admin', store: location.id, accessMenu })
+      expectCreated(await createTable(token, unique('C02_LEGACY')))
+    }
   })
 
   test('a view-only account cannot use the add action', async () => {
     const { token } = await makeAccount({
       roleType: 'admin',
       store: location.id,
-      accessMenu: [{ menu: '/table', view: true }]
+      accessMenu: [{ menu: '/table-list', view: true }]
     })
-    const res = await createTable(token, unique('C02_DENIED_TABLE'))
-    expect(res.status).toBe(403)
-    expect(res.body.code).toBe('MENU_ACTION_DENIED')
-  })
-
-  test('a granted add action passes the menu gate', async () => {
-    const { token } = await makeAccount({
-      roleType: 'admin',
-      store: location.id,
-      accessMenu: [{ menu: '/table', add: true }]
-    })
-    const res = await createTable(token, unique('C02_GRANTED_TABLE'))
-    expect(res.status).toBe(201)
-    if (res.body?.data?.id || res.body?.id) tables.push(res.body?.data?.id || res.body?.id)
+    expectDenied(await createTable(token, unique('C02_DENIED_TABLE')))
   })
 
   test('a menu-scoped super_admin is enforced, not bypassed', async () => {
@@ -121,49 +123,31 @@ describe('requireMenuAction enforcement (table module)', () => {
       roleType: 'super_admin',
       accessMenu: [{ menu: '/pos', view: true }]
     })
-    const res = await getTables(token)
-    expect(res.status).toBe(403)
-    expect(res.body.code).toBe('MENU_ACTION_DENIED')
+    expectDenied(await createTable(token, unique('C02_SCOPED_SA')))
   })
 
   test('a super_admin without its own menu bypasses the menu gate', async () => {
     const { token } = await makeAccount({ roleType: 'super_admin', accessMenu: [] })
-    expect((await getTables(token)).status).toBe(200)
+    expectCreated(await createTable(token, unique('C02_GLOBAL_SA')))
   })
 
   test('a role-provided menu grants exactly like an own menu (login fallback)', async () => {
-    const role = await db.role.create({
+    const grant = await db.role.create({
       name: unique('C02 Role Table'),
       roleType: 'admin',
       store: null,
-      accessMenu: JSON.stringify([{ menu: '/table', view: true }])
+      accessMenu: JSON.stringify([{ menu: '/table-list', add: true }])
     })
-    roles.push(role.id)
-    const { token } = await makeAccount({
-      roleType: 'admin',
-      store: location.id,
-      roleId: role.id,
-      accessMenu: []
-    })
-    expect((await getTables(token)).status).toBe(200)
-  })
-
-  test('a role-provided menu without /table denies', async () => {
-    const role = await db.role.create({
+    const deny = await db.role.create({
       name: unique('C02 Role Inv'),
       roleType: 'admin',
       store: null,
       accessMenu: JSON.stringify([{ menu: '/inventory', view: true }])
     })
-    roles.push(role.id)
-    const { token } = await makeAccount({
-      roleType: 'admin',
-      store: location.id,
-      roleId: role.id,
-      accessMenu: []
-    })
-    const res = await getTables(token)
-    expect(res.status).toBe(403)
-    expect(res.body.code).toBe('MENU_ACTION_DENIED')
+    roles.push(grant.id, deny.id)
+    const granted = await makeAccount({ roleType: 'admin', store: location.id, roleId: grant.id })
+    const denied = await makeAccount({ roleType: 'admin', store: location.id, roleId: deny.id })
+    expectCreated(await createTable(granted.token, unique('C02_ROLE_OK')))
+    expectDenied(await createTable(denied.token, unique('C02_ROLE_NO')))
   })
 })

@@ -1,5 +1,6 @@
 'use strict'
 const db = require('../../db/models')
+const { createAudit } = require('../../utils/auditLog')
 
 const reportDefs = {
   daily: require('../service/reportDefs/daily'),
@@ -98,11 +99,13 @@ const upsertConfig = async (req, res) => {
       where: { key },
       defaults: { key, config: merged, createdBy: req.user?.id || null }
     })
+    const before = created ? null : row.config
     if (!created) {
       row.config = merged
       row.modifiedBy = req.user?.id || null
       await row.save()
     }
+    createAudit(req, created ? 'create' : 'update', 'report_config', row.id, `Report settings: ${key}`, before, merged)
     return res.json({ success: true, data: { key, config: merged } })
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message })

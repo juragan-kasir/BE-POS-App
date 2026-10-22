@@ -9,6 +9,7 @@ const fs = require('fs')
 
 const {
   MENU_ENFORCED_ROUTES,
+  MENU_WRITE_GATED_ROUTES,
   ALLOWLISTED_ROUTE_FILES,
   GATED_LEGACY_ROUTE_FILES
 } = require('../api/menuRouteMap')
@@ -21,15 +22,21 @@ test('every api/routes file is classified in the central menuRouteMap', () => {
     .sort()
   const classified = [
     ...Object.keys(MENU_ENFORCED_ROUTES),
+    ...Object.keys(MENU_WRITE_GATED_ROUTES),
     ...Object.keys(ALLOWLISTED_ROUTE_FILES),
     ...GATED_LEGACY_ROUTE_FILES
   ].sort()
   expect(classified).toEqual(files)
 })
 
-test('table.js is the reference menu-enforced module', () => {
-  expect(MENU_ENFORCED_ROUTES['table.js']).toBeTruthy()
-  expect(MENU_ENFORCED_ROUTES['table.js'].menus).toContain('/table')
+test('every write-gated route file mounts its menuWriteGate', () => {
+  for (const [file, config] of Object.entries(MENU_WRITE_GATED_ROUTES)) {
+    const source = fs.readFileSync(`api/routes/${file}`, 'utf8')
+    expect([file, source.includes(`router.use(menuWriteGate('${file}'))`)]).toEqual([file, true])
+    expect(config.offered.length).toBeGreaterThan(0)
+  }
+  expect(MENU_WRITE_GATED_ROUTES['table.js'].menu).toBe('/table-list')
+  expect(MENU_WRITE_GATED_ROUTES['table.js'].aliases).toContain('/table')
 })
 
 test('the cron surface stays allowlisted with its fail-closed gate', () => {

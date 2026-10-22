@@ -4,6 +4,7 @@ const { enrichAuditFields } = require('../../utils/auditFields')
 const { emitToStore } = require('../service/socket')
 const { arrayStoreScope } = require('../../utils/tenantScope')
 const { incrementPromoUsage } = require('../service/promoUsageService')
+const { createAudit } = require('../../utils/auditLog')
 
 const promoController = {
   async getCampaigns(req, res) {
@@ -233,6 +234,7 @@ const promoController = {
 
       emitToStore(store, 'promo:created', fullCampaign)
 
+      createAudit(req, 'create', 'promo_campaign', campaign.id, `Created promo campaign: ${campaign.id}`)
       return res.status(201).json({
         success: true,
         message: 'Campaign created',
@@ -325,6 +327,7 @@ const promoController = {
 
       emitToStore(campaign.store, 'promo:updated', fullCampaign)
 
+      createAudit(req, 'update', 'promo_campaign', campaign.id, `Updated promo campaign: ${campaign.id}`)
       return res.status(200).json({
         success: true,
         message: 'Campaign updated',
@@ -360,6 +363,7 @@ const promoController = {
 
       emitToStore(campaign.store, 'promo:statusChanged', { id, status })
 
+      createAudit(req, 'update', 'promo_campaign', campaign.id, `Promo campaign ${campaign.id} status: ${campaign.status}`)
       return res.status(200).json({
         success: true,
         message: `Campaign status updated to ${status}`,
@@ -392,6 +396,7 @@ const promoController = {
 
       emitToStore(campaign.store, 'promo:deleted', { id })
 
+      createAudit(req, 'delete', 'promo_campaign', campaign.id, `Deleted promo campaign: ${campaign.id}`)
       return res.status(200).json({
         success: true,
         message: 'Campaign deleted'
