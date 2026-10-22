@@ -229,6 +229,13 @@ const resolveAuthorizationContext = async (
     ctx.activeTenantId = requestedTenant
   } else if (effective.length === 1) {
     ctx.activeTenantId = effective[0].tenantId
+  } else if (effective.length > 1 && toId(account.store) != null) {
+    // Several effective memberships (e.g. a client's super admin that created
+    // a second tenant): default to the tenant of the account's own persisted
+    // store when it is one of them — still server-derived, never client input.
+    const home = await db.location.findByPk(toId(account.store), { attributes: ['id', 'tenantId'], transaction })
+    const homeTenantId = toId(home?.tenantId)
+    if (homeTenantId != null && effectiveTenantIds.has(homeTenantId)) ctx.activeTenantId = homeTenantId
   }
 
   const activeMembership = effective.find((m) => m.tenantId === ctx.activeTenantId)

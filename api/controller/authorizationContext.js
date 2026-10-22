@@ -19,8 +19,11 @@ const {
   switchSessionStore
 } = require('../../utils/authorizationContextMiddleware')
 const { disconnectSession } = require('../service/socket')
+const { tenantAdministrationScope } = require('../../utils/tenantAdministration')
 
 const sessionOf = (req) => req.authSession || null
+
+const administrationOf = (scope) => (scope ? (scope.all ? 'all' : 'own') : null)
 
 exports.getContext = async (req, res) => {
   const session = sessionOf(req)
@@ -44,6 +47,9 @@ exports.getContext = async (req, res) => {
         permissions: ctx.permissions,
         assignedStoreIds: ctx.assignedStoreIds,
         isPlatformAdmin: ctx.isPlatformAdmin,
+        // 'all' (platform), 'own' (a client's super admin: its own tenants
+        // only) or null — what the /tenants page may administer.
+        tenantAdministration: administrationOf(tenantAdministrationScope(ctx, req.user)),
         reason: ctx.reason
       }
     }
