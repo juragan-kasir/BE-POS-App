@@ -5,6 +5,7 @@ const { exportReport } = require('../service/reportExporter')
 const { loadLogoImage } = require('../service/reportExporter/logoImage')
 const { getReportStore } = require('../service/reportDefs/getReportStore')
 const { DEFAULT_BRANDING } = require('./reportConfig')
+const { recordAudit, AUDIT_ACTIONS } = require('../../utils/auditLog')
 
 const VALID_FORMATS = ['excel', 'pdf', 'csv']
 
@@ -97,6 +98,19 @@ const reportData = async (req, res) => {
 
     const data = await def.getData(req)
     const spec = buildSpecFromDef(def, data, await loadConfig(key), null)
+    await recordAudit({
+      req,
+      action: AUDIT_ACTIONS.REPORT_EXPORT,
+      entity: 'report',
+      entityId: null,
+      description: `Report ${key} data read`,
+      storeId: req.storeId ?? req.user?.store,
+      metadata: {
+        key,
+        rows: Array.isArray(spec.rows) ? spec.rows.length : 0,
+        columns: spec.columns.map((column) => column.key)
+      }
+    })
     return res.status(200).json({
       success: true,
       data: {
@@ -133,6 +147,21 @@ const exportOne = async (req, res) => {
     const showLogo = config?.branding?.showLogo !== false
     const brand = await loadBrand(req, { withLogo: showLogo && format !== 'csv' })
     const spec = buildSpecFromDef(def, data, config, brand)
+
+    await recordAudit({
+      req,
+      action: AUDIT_ACTIONS.REPORT_EXPORT,
+      entity: 'report',
+      entityId: null,
+      description: `Report ${key} exported as ${format}`,
+      storeId: req.storeId ?? req.user?.store,
+      metadata: {
+        key,
+        format,
+        rows: Array.isArray(spec.rows) ? spec.rows.length : 0,
+        columns: spec.columns.map((column) => column.key)
+      }
+    })
 
     await exportReport({ format, spec, filename: def.filename(req), res })
   } catch (err) {

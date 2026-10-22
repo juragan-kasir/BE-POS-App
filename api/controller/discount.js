@@ -631,9 +631,17 @@ exports.lookupByCode = async (req, res) => {
         .json({ success: false, message: 'Promo has expired' })
     }
 
-    return res
-      .status(200)
-      .json({ success: true, message: 'Success', data: discount })
+    return res.status(200).json({
+      success: true,
+      message: 'Success',
+      data: {
+        valid: true,
+        description: discount.name || null,
+        type: discount.type || null,
+        value: discount.value ?? null,
+        minOrder: discount.minimumOrder ?? null
+      }
+    })
   } catch (error) {
     console.error('Error =>', error)
     return res

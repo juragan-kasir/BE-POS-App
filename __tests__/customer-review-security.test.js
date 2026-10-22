@@ -48,8 +48,15 @@ const makeOrder = async (storeId, productId) => {
   return order
 }
 
+let reviewSeq = 0
 const postReview = (payload) =>
-  request(app).post('/order/customer-review').send(payload)
+  request(app)
+    .post('/order/customer-review')
+    .send({
+      ...payload,
+      deviceId:
+        payload.deviceId || `sec007-auto-${Date.now()}-${++reviewSeq}`
+    })
 
 beforeAll(async () => {
   store1 = await db.location.create({ name: 'SEC007_STORE_1', status: 'active' })
@@ -207,8 +214,8 @@ describe('SEC-007 — createCustomerReview (POST /order/customer-review)', () =>
     expect(res.status).toBe(400)
   })
 
-  test('overlong comments are truncated to 2000 chars', async () => {
-    const long = 'x'.repeat(2500)
+  test('overlong comments are rejected instead of truncated', async () => {
+    const long = 'x'.repeat(501)
     const res = await postReview({
       name: 'Panjang',
       productId: String(globalProduct.id),
@@ -216,8 +223,8 @@ describe('SEC-007 — createCustomerReview (POST /order/customer-review)', () =>
       rating: 4,
       comment: long
     })
-    expect(res.status).toBe(201)
-    expect(res.body.data.comment.length).toBe(2000)
+    expect(res.status).toBe(400)
+    expect(res.body.message).toMatch(/at most 500/i)
   })
 
   test('an order claim must reference an existing order in the same store', async () => {

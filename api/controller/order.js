@@ -9,7 +9,7 @@ const Discount = db.discount
 const { Op } = require('sequelize')
 const { fetchActiveTaxRows, pickAppliedPpn } = require('../../utils/taxResolution')
 const { createNotification } = require('../../utils/createNotification')
-const { createAudit, redactAndAudit, recordAudit, AUDIT_ACTIONS } = require('../../utils/auditLog')
+const { createAudit, redactAndAudit, recordAudit, AUDIT_ACTIONS, ACTOR_TYPES } = require('../../utils/auditLog')
 const {
   hasCapability,
   auditCapabilityDenial,
@@ -29,6 +29,7 @@ const {
   resolveBomIngredientRequirements
 } = require('../service/stockMutationService')
 const { withDeadlockRetry } = require('../../utils/deadlockRetry')
+const { getStoreOpenStatus } = require('../../utils/storeHours')
 const {
   FINANCIAL_STATES,
   TERMINAL_FULFILMENT,
@@ -4195,14 +4196,28 @@ exports.createCustomerOrder = async (req, res) => {
 
     // DR-24 C-04: a closed (archived) outlet accepts no new QR orders — the
     // physical table capability of a closed outlet is not a licence to sell.
-    const archivedStore = await db.location.findOne({
-      where: { id: store, status: 'archived' },
-      attributes: ['id']
+    const storeLocation = await db.location.findOne({
+      where: { id: store },
+      attributes: ['id', 'status', 'timezone', 'openingHours']
     })
-    if (archivedStore) {
+    if (storeLocation?.status === 'archived') {
       return res.status(409).json({
         message: 'This outlet is archived and cannot take new orders',
         code: 'STORE_ARCHIVED'
+      })
+    }
+
+    const openStatus = storeLocation
+      ? getStoreOpenStatus(
+          storeLocation.openingHours,
+          storeLocation.timezone
+        )
+      : { isOpen: true, nextOpenAt: null }
+    if (!openStatus.isOpen) {
+      return res.status(409).json({
+        message: 'This outlet is currently closed and cannot take new orders',
+        code: 'STORE_CLOSED',
+        nextOpenAt: openStatus.nextOpenAt
       })
     }
 
@@ -4216,10 +4231,9 @@ exports.createCustomerOrder = async (req, res) => {
     }
 
     // DR-16 / DR-23 §H (BA gap G-01): an anonymous diner never receives
-    // member benefits. A self-supplied customerId is guessable (sequential,
-    // and /customer-member reveals it by name), so this public route refuses
-    // it before any read or write; staff attach a verified member at
-    // settlement. customerName stays a plain order label.
+    // member benefits. A self-supplied customerId is guessable (sequential),
+    // so this public route refuses it before any read or write; staff attach a
+    // verified member at settlement. customerName stays a plain order label.
     if (customerId !== undefined && customerId !== null && customerId !== '') {
       return res.status(400).json({
         code: 'MEMBER_ATTACH_REQUIRES_STAFF',
@@ -4814,53 +4828,6 @@ exports.createCustomerOrder = async (req, res) => {
   }
 }
 
-// ——— Public customer member lookup by name ———
-// SEC-005: this is an unauthenticated endpoint, so it must never act as a
-// loyalty-balance disclosure or a member enumeration oracle.
-//   * Strict store scoping — a member is only matched when it belongs to the
-//     requested store (no `store IS NULL` global-member fallback that would let
-//     any tenant read another tenant's global members).
-//   * Minimal response — totalPoints / tier / discountPercent (redeemable
-//     loyalty data) are never exposed to an unauthenticated caller; only a
-//     membership confirmation and the member's identity are returned.
-//   * Literal name match — % / _ / \ are escaped so an unauthenticated caller
-//     cannot use the wildcard trick to enumerate member names.
-exports.getCustomerMember = async (req, res) => {
-  const { name, store } = req.query
-  try {
-    if (!name || !store) {
-      return res.status(200).json({ data: null })
-    }
-    const storeId = Number(store)
-    if (!Number.isInteger(storeId) || storeId <= 0) {
-      return res.status(400).json({ message: 'Invalid store value' })
-    }
-    // Literal-match the name: escape the PostgreSQL LIKE wildcards so a name
-    // value can never act as a pattern.
-    const escapedName = name.trim().replace(/[\\%_]/g, (ch) => `\\${ch}`)
-    const Op = require('sequelize').Op
-    const member = await db.member.findOne({
-      where: {
-        name: { [Op.iLike]: escapedName },
-        store: storeId,
-        status: 'active'
-      }
-    })
-    if (!member) return res.status(200).json({ data: null })
-
-    return res.status(200).json({
-      data: {
-        isMember: true,
-        id: member.id,
-        name: member.name
-      }
-    })
-  } catch (error) {
-    console.error('Error:', error)
-    return res.status(500).json({ error: 'Internal Server Error' })
-  }
-}
-
 // ——— Public order tracking (no auth) ———
 // Looked up by the opaque publicToken generated at order creation, not the
 // raw sequential id — the id alone is guessable/enumerable and would let
@@ -4978,7 +4945,13 @@ exports.createCustomerReview = async (req, res) => {
         message: 'Product is not available at this store'
       })
     }
-    const commentText = (comment || '').toString().trim().slice(0, 2000)
+    const commentText = (comment || '').toString().trim()
+    if (commentText.length > 500) {
+      return res.status(400).json({
+        success: false,
+        message: 'comment must be at most 500 characters'
+      })
+    }
     const device = (deviceId || '').toString().trim().slice(0, 64) || null
     // Optional same-device idempotency: one review per (productId, deviceId).
     // The unique index makes this race-safe; a repeated submission returns the
@@ -5228,6 +5201,23 @@ exports.getReceiptHTML = async (req, res) => {
     if (!order) {
       return res.status(404).send('<h1>Order not found</h1>')
     }
+
+    await recordAudit({
+      actor: { type: ACTOR_TYPES.SYSTEM },
+      req,
+      action: AUDIT_ACTIONS.RECEIPT_READ,
+      entity: 'order',
+      entityId: Number(order.id),
+      description: 'Public receipt read',
+      storeId: order.store || null,
+      metadata: {
+        tokenHash: crypto
+          .createHash('sha256')
+          .update(String(token))
+          .digest('hex')
+          .slice(0, 16)
+      }
+    })
 
     const storeData = order.store
       ? await db.location.findByPk(order.store, {

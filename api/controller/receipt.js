@@ -1,4 +1,5 @@
 const db = require('../../db/models')
+const { recordAudit, AUDIT_ACTIONS } = require('../../utils/auditLog')
 
 const receiptController = {
   async getOrderReceipt(req, res) {
@@ -26,6 +27,15 @@ const receiptController = {
           .status(404)
           .json({ success: false, message: 'Order not found' })
       }
+
+      await recordAudit({
+        req,
+        action: AUDIT_ACTIONS.RECEIPT_READ,
+        entity: 'order',
+        entityId: Number(order.id),
+        description: `Receipt read for order ${order.orderNumber || order.id}`,
+        storeId: req.storeId ?? req.user?.store ?? store
+      })
 
       const receipt = {
         storeName: order.storeData?.name || 'Toko',

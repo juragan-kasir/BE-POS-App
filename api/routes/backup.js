@@ -4,6 +4,12 @@ const backupController = require('../controller/backup')
 const authorization = require('../../utils/authorization')
 const { requireRole } = require('../../utils/authorization')
 const { validateStoreAccess } = require('../../utils/storeValidation')
+const { createUserEndpointLimiter } = require('../../utils/rateLimiters')
+
+const backupTransferLimiter = createUserEndpointLimiter({
+  windowMs: 15 * 60 * 1000,
+  max: 5
+})
 
 router.get(
   '/schedule',
@@ -36,6 +42,7 @@ router.get(
   authorization,
   validateStoreAccess,
   requireRole('super_admin'),
+  backupTransferLimiter,
   backupController.downloadBackup
 )
 router.post(
@@ -43,6 +50,7 @@ router.post(
   authorization,
   validateStoreAccess,
   requireRole('super_admin'),
+  backupTransferLimiter,
   backupController.restoreBackup
 )
 router.delete(

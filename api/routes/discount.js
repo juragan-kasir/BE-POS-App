@@ -1,10 +1,22 @@
 const express = require('express')
+const rateLimit = require('express-rate-limit')
+const { ipKeyGenerator } = rateLimit
 const { menuWriteGate } = require('../../utils/menuWriteGate')
 const router = express.Router()
 
 // Role Management checkboxes guard the writes (api/menuRouteMap.js)
 router.use(menuWriteGate('discount.js'))
 const multer = require('multer')
+
+const discountLookupLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  keyGenerator: (req) => ipKeyGenerator(req.ip),
+  message: {
+    success: false,
+    message: 'Too many requests, please try again later.'
+  }
+})
 
 const discountController = require('../controller/discount')
 const authorization = require('../../utils/authorization')
@@ -98,6 +110,10 @@ router.get(
 )
 
 // Lookup promo by code - no auth required (POS checkout)
-router.get('/lookup-by-code/:code', discountController.lookupByCode)
+router.get(
+  '/lookup-by-code/:code',
+  discountLookupLimiter,
+  discountController.lookupByCode
+)
 
 module.exports = router

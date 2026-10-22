@@ -130,24 +130,71 @@ const classifyDueDate = (daysUntilDue) => {
   return DUE_DATE_CLASSIFICATIONS.UPCOMING
 }
 
-const TIMEZONE_OFFSETS = {
-  'Asia/Jakarta': '+07:00',
-  'Asia/Pontianak': '+07:00',
-  'Asia/Makassar': '+08:00',
-  'Asia/Makassar ': '+08:00',
-  'Asia/Ujung_Pandang': '+08:00',
-  'Asia/Jayapura': '+09:00'
+const offsetFormatterCache = new Map()
+const getOffsetFormatter = (timezone) => {
+  let fmt = offsetFormatterCache.get(timezone)
+  if (!fmt) {
+    fmt = new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      hourCycle: 'h23',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    })
+    offsetFormatterCache.set(timezone, fmt)
+  }
+  return fmt
 }
 
-const getTimezoneOffset = (timezone) => {
+const getTimezoneOffsetMs = (timezone, instant = new Date()) => {
   const tz = isValidTimezone(timezone) ? timezone : DEFAULT_TIMEZONE
-  return TIMEZONE_OFFSETS[tz] || '+07:00'
+  const at = instant instanceof Date ? instant : new Date(instant)
+  const parts = getOffsetFormatter(tz).formatToParts(at)
+  const read = (type) => {
+    const part = parts.find((p) => p.type === type)
+    return part ? Number(part.value) : 0
+  }
+  const asUtc = Date.UTC(
+    read('year'),
+    read('month') - 1,
+    read('day'),
+    read('hour'),
+    read('minute'),
+    read('second')
+  )
+  return asUtc - Math.floor(at.getTime() / 1000) * 1000
+}
+
+const getTimezoneOffset = (timezone, instant = new Date()) => {
+  const ms = getTimezoneOffsetMs(timezone, instant)
+  const sign = ms < 0 ? '-' : '+'
+  const abs = Math.abs(ms)
+  const hours = String(Math.floor(abs / 3600000)).padStart(2, '0')
+  const minutes = String(Math.floor((abs % 3600000) / 60000)).padStart(2, '0')
+  return `${sign}${hours}:${minutes}`
 }
 
 const getStoreDayBounds = (dateStr, timezone) => {
-  const offset = getTimezoneOffset(timezone)
-  const start = new Date(`${dateStr}T00:00:00${offset}`)
-  const end = new Date(`${dateStr}T23:59:59.999${offset}`)
+  const tz = isValidTimezone(timezone) ? timezone : DEFAULT_TIMEZONE
+  const [year, month, day] = String(dateStr).split('-').map(Number)
+  const resolveStart = (y, m, d) => {
+    const guess = Date.UTC(y, m - 1, d, 0, 0, 0)
+    let start = new Date(guess - getTimezoneOffsetMs(tz, new Date(guess)))
+    const refined = new Date(guess - getTimezoneOffsetMs(tz, start))
+    if (refined.getTime() !== start.getTime()) start = refined
+    return start
+  }
+  const start = resolveStart(year, month, day)
+  const next = new Date(Date.UTC(year, month - 1, day + 1))
+  const nextStart = resolveStart(
+    next.getUTCFullYear(),
+    next.getUTCMonth() + 1,
+    next.getUTCDate()
+  )
+  const end = new Date(nextStart.getTime() - 1)
   return { start, end }
 }
 
@@ -166,6 +213,7 @@ module.exports = {
   getDaysOverdue,
   classifyDueDate,
   getTimezoneOffset,
+  getTimezoneOffsetMs,
   getStoreDayBounds,
   getStoreTodayBounds
 }

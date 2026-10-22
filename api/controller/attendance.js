@@ -3,6 +3,10 @@ const { Op } = require('sequelize')
 const db = require('../../db/models')
 const Attendance = db.attendance
 const { enrichAuditFields } = require('../../utils/auditFields')
+const {
+  getStoreLocalDate,
+  getStoreDayBounds
+} = require('../../utils/businessDate')
 
 const isGlobalSuperAdmin = (req) =>
   req.user?.roleType === 'super_admin' && req.user?.store == null
@@ -14,7 +18,6 @@ const ownStoreId = (req) => {
 
 const MAX_ACCURACY_M = 150
 const ORIGIN_EPSILON = 1 / 1000000
-const DAY_MS = 24 * 60 * 60 * 1000
 const DEFAULT_GEOFENCE_M = 200
 const MAX_STORE_DISTANCE_M = (() => {
   const configured = Number(process.env.ATTENDANCE_GEOFENCE_METERS)
@@ -89,14 +92,19 @@ const computeStatus = ({ latitude, longitude, accuracy }) => {
   return { status: 'valid', note: 'Lokasi terverifikasi' }
 }
 
-const dayRange = (dateStr) => {
-  const now = new Date()
-  const base =
+const dayRange = async (dateStr, storeId, now = new Date()) => {
+  const location = storeId
+    ? await db.location.findOne({
+        where: { id: storeId },
+        attributes: ['timezone']
+      })
+    : null
+  const timezone = location?.timezone
+  const day =
     dateStr && /^\d{4}-\d{2}-\d{2}$/.test(dateStr)
-      ? new Date(`${dateStr}T00:00:00`)
-      : new Date(now.getFullYear(), now.getMonth(), now.getDate())
-  const end = new Date(base.getTime() + DAY_MS)
-  return { start: base, end }
+      ? dateStr
+      : getStoreLocalDate(timezone, now)
+  return getStoreDayBounds(day, timezone)
 }
 
 const serializeAttendance = (r) => ({
@@ -174,7 +182,7 @@ exports.clock = async (req, res) => {
     }
 
     const now = new Date()
-    const { start, end } = dayRange()
+    const { start, end } = await dayRange(undefined, clockStore, now)
     const existing = await Attendance.findOne({ // nosemgrep: Sequelize SQL query — tidak rentan NoSQL injection
       where: {
         userId: req.user.id,
@@ -229,7 +237,7 @@ exports.clock = async (req, res) => {
 
 exports.getMyAttendance = async (req, res) => {
   try {
-    const { start, end } = dayRange(req.query.date)
+    const { start, end } = await dayRange(req.query.date, ownStoreId(req))
 
     const records = await Attendance.findAll({
       where: {
@@ -266,12 +274,15 @@ exports.getMyAttendance = async (req, res) => {
 
 exports.getTodayAttendance = async (req, res) => {
   try {
-    const { start, end } = dayRange(req.query.date)
+    const effectiveStore = isGlobalSuperAdmin(req) ? req.storeId : ownStoreId(req)
+    const { start, end } = await dayRange(
+      req.query.date,
+      effectiveStore ? Number(effectiveStore) : null
+    )
     const where = {
       absenAt: { [Op.gte]: start, [Op.lt]: end }
     }
 
-    const effectiveStore = isGlobalSuperAdmin(req) ? req.storeId : ownStoreId(req)
     if (effectiveStore) where.store = Number(effectiveStore)
     else if (!isGlobalSuperAdmin(req)) where.store = -1
 

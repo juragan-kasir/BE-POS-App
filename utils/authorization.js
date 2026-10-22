@@ -167,24 +167,33 @@ const requireRole = (...roles) => {
 // NOT session liveness (that needs a DB read on every request); revoked
 // credentials still hit the canonical 401 on protected routes. Any other
 // Authorization value — including forged or expired tokens — is anonymous.
-const hasVerifiedBearerCredential = (req) => {
+const getVerifiedBearerPayload = (req) => {
+  if (req && Object.prototype.hasOwnProperty.call(req, '_verifiedBearerPayload')) {
+    return req._verifiedBearerPayload
+  }
   const authHeader = req?.headers?.authorization
-  if (!authHeader || !authHeader.startsWith('Bearer ')) return false
+  if (!authHeader || !authHeader.startsWith('Bearer ')) return null
   const token = authHeader.slice('Bearer '.length)
-  if (!token) return false
+  if (!token) return null
   try {
-    jwt.verify(token, process.env.JWT_SECRET_KEY)
-    return true
+    const payload = jwt.verify(token, process.env.JWT_SECRET_KEY)
+    if (req) req._verifiedBearerPayload = payload
+    return payload
   } catch {
-    return false
+    if (req) req._verifiedBearerPayload = null
+    return null
   }
 }
+
+const hasVerifiedBearerCredential = (req) =>
+  Boolean(getVerifiedBearerPayload(req))
 
 module.exports = authorization
 module.exports.requireRole = requireRole
 module.exports.setUserContext = setUserContext
 module.exports.getToken = getToken
 module.exports.authenticateCredential = authenticateCredential
+module.exports.getVerifiedBearerPayload = getVerifiedBearerPayload
 module.exports.hasVerifiedBearerCredential = hasVerifiedBearerCredential
 
 // Canonical permission gate for migrated routes.

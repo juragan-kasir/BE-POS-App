@@ -273,21 +273,41 @@ async function createJournalEntry({
   transaction
 }) {
   if (!store || !lines || lines.length === 0) return null
-  await ensureDefaultAccounts(store, createdBy)
 
-  const clean = lines
-    .filter((l) => toNumber(l.debit) > 0 || toNumber(l.credit) > 0)
-    .map((l) => ({
-      account: l.account,
-      debit: toNumber(l.debit),
-      credit: toNumber(l.credit),
-      description: l.description || null
-    }))
+  const normalized = lines.map((l) => ({
+    account: l.account,
+    debit: toNumber(l.debit),
+    credit: toNumber(l.credit),
+    description: l.description || null
+  }))
+
+  const invalidLine = normalized.find(
+    (l) => l.debit < 0 || l.credit < 0 || (l.debit > 0 && l.credit > 0)
+  )
+  if (invalidLine) {
+    const error = new Error(
+      'A journal line must have either a debit or a credit, never both or negative amounts'
+    )
+    error.code = 'INVALID_JOURNAL_LINE'
+    error.status = 400
+    throw error
+  }
+
+  const clean = normalized.filter((l) => l.debit > 0 || l.credit > 0)
   if (clean.length === 0) return null
 
   const totalDebit = toNumber(clean.reduce((s, l) => s + l.debit, 0))
   const totalCredit = toNumber(clean.reduce((s, l) => s + l.credit, 0))
-  if (totalDebit <= 0 && totalCredit <= 0) return null
+  if (Math.abs(totalDebit - totalCredit) > 0.01) {
+    const error = new Error(
+      `Journal entry is unbalanced: debit ${totalDebit} != credit ${totalCredit}`
+    )
+    error.code = 'UNBALANCED_JOURNAL_ENTRY'
+    error.status = 400
+    throw error
+  }
+
+  await ensureDefaultAccounts(store, createdBy)
 
   const insertEntry = async (t) => {
     const seq = await nextEntrySeq(store, t)
@@ -1219,6 +1239,7 @@ module.exports = {
   findAccount,
   findOrCreateAccount,
   makeEntryNumber,
+  createJournalEntry,
   postOrderJournal,
   postOrderCogsJournal,
   computeOrderCogs,

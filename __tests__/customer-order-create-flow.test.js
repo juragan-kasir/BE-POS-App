@@ -104,6 +104,55 @@ afterAll(async () => {
 })
 
 describe('POST /order/customer-create — QR paid only via trusted cashier transition', () => {
+  test('rejects a QR order while the outlet is closed', async () => {
+    const days = [
+      'monday',
+      'tuesday',
+      'wednesday',
+      'thursday',
+      'friday',
+      'saturday',
+      'sunday'
+    ]
+    await db.location.update(
+      {
+        openingHours: days.map((day) => ({
+          day,
+          open: null,
+          close: null,
+          is24Hours: false
+        }))
+      },
+      { where: { id: location.id } }
+    )
+
+    try {
+      const res = await request(app)
+        .post('/order/customer-create')
+        .send({
+          store: location.id,
+          tableId: table.id,
+          paymentMethod: 'cash',
+          customerName: 'Closed Customer',
+          items: [
+            {
+              productId: product.id,
+              productName: product.nameProduct,
+              quantity: 1
+            }
+          ]
+        })
+
+      expect(res.status).toBe(409)
+      expect(res.body.code).toBe('STORE_CLOSED')
+    } finally {
+      await db.location.update(
+        { openingHours: null },
+        { where: { id: location.id } }
+      )
+    }
+  })
+
   test('create records UNPAID; the cashier paid transition writes the ledger and deducts stock exactly once', async () => {
     const beforeStock = await db.product.findByPk(product.id)
 
