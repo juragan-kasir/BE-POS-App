@@ -7,9 +7,14 @@
 //   GET    /tenants/:id   one tenant
 //   POST   /tenants       { code, name }            create (status 'active')
 //   PATCH  /tenants/:id   { name?, status? }        rename / suspend / resume
+//   DELETE /tenants/:id                             retire an EMPTY tenant
 //
-// Every route is gated by requireCanonicalPermission('tenant.manage'), which
-// only a platform actor holds (utils/authContext.js). `code` is the stable
+// Every route is gated by requireTenantAdministration
+// (utils/tenantAdministration.js): a platform actor (tenant.manage) sees every
+// tenant; a store-bound super_admin that is tenant_admin (a client's own super
+// admin) sees only its own tenants, becomes tenant_admin of a tenant it
+// creates, may rename and delete them, but not suspend/resume (that stays
+// platform-only, so it cannot lock itself out). `code` is the stable
 // business identifier and is immutable once created; it is never reused, so
 // the uniqueness check includes retired (soft-deleted) tenants. Suspending a
 // tenant makes it authorize nothing (resolveAuthorizationContext) — the store
@@ -107,6 +112,7 @@ exports.list = async (req, res) => {
       }
       where.status = q.status
     }
+    if (req.tenantAdministration?.all !== true) where.id = req.tenantAdministration?.tenantIds || []
     const search = typeof q.search === 'string' ? q.search.trim() : ''
     if (search) {
       const like = `%${search.replace(/[\\%_]/g, (c) => `\\${c}`)}%`
@@ -132,9 +138,16 @@ exports.list = async (req, res) => {
   }
 }
 
+// A tenant outside the caller's administration scope is indistinguishable
+// from a nonexistent one.
+const inScope = (req, id) => {
+  const scope = req.tenantAdministration
+  return scope?.all === true || (scope?.tenantIds || []).includes(id)
+}
+
 const findTenant = async (req, transaction) => {
   const id = toId(req.params.id)
-  if (id == null) return { error: fail(404, 'RESOURCE_NOT_FOUND', 'id', 'tenant not found') }
+  if (id == null || !inScope(req, id)) return { error: fail(404, 'RESOURCE_NOT_FOUND', 'id', 'tenant not found') }
   const row = await db.tenant.findByPk(id, transaction ? { transaction, lock: transaction.LOCK.UPDATE } : {})
   if (!row) return { error: fail(404, 'RESOURCE_NOT_FOUND', 'id', 'tenant not found') }
   return { row }
@@ -172,6 +185,29 @@ exports.create = async (req, res) => {
       if (taken) return null
       const row = await db.tenant.create({ code, name, status: 'active' }, { transaction: t })
       await audit(req, { action: 'create', row, before: null, after: snapshot(row), transaction: t })
+      // A client's own super admin owns what it creates: without the
+      // membership the new tenant would be invisible to it.
+      if (req.tenantAdministration?.all !== true) {
+        const membership = await db.tenantMembership.create(
+          { userId: req.user.id, tenantId: row.id, role: 'tenant_admin', status: 'ACTIVE' },
+          { transaction: t }
+        )
+        await recordAudit({
+          actor: { id: req.user?.id, type: 'USER' },
+          req,
+          action: 'create',
+          entity: 'membership',
+          entityId: membership.id,
+          description: `create: user ${req.user.id} (creator of tenant ${row.code})`,
+          tenantId: row.id,
+          storeId: null,
+          previousState: null,
+          newState: { userId: membership.userId, tenantId: row.id, role: membership.role, status: membership.status },
+          result: 'SUCCESS',
+          source: AUDIT_SOURCE,
+          transaction: t
+        })
+      }
       return row
     })
     if (!created) return send(res, fail(409, 'TENANT_CODE_TAKEN', 'code', 'this tenant code is already used'))
@@ -201,6 +237,9 @@ exports.update = async (req, res) => {
     changes.name = name
   }
   if (body.status !== undefined) {
+    if (req.tenantAdministration?.all !== true) {
+      return send(res, fail(403, 'TENANT_STATUS_PLATFORM_ONLY', 'status', 'only the platform can suspend or resume a tenant'))
+    }
     if (!STATUSES.includes(body.status)) {
       return send(res, fail(400, 'INVALID_STATUS', 'status', `status must be one of ${STATUSES.join(', ')}`))
     }
@@ -226,6 +265,49 @@ exports.update = async (req, res) => {
     return res.status(200).json({ success: true, message: 'Tenant updated', data: present(result.row, counts) })
   } catch (err) {
     console.error('[tenant] update failed:', err)
+    return res.status(500).json({ success: false, code: 'INTERNAL_ERROR', message: 'Internal Server Error' })
+  }
+}
+
+// Retire an EMPTY tenant: no stores and no ACTIVE member other than the
+// caller. A tenant in use can only be suspended (platform). The row is soft-
+// deleted (paranoid; its code stays reserved) and its remaining memberships
+// are RETIRED, so nothing resolves through it any more.
+exports.remove = async (req, res) => {
+  try {
+    const result = await db.sequelize.transaction(async (t) => {
+      const { row, error } = await findTenant(req, t)
+      if (error) return { error }
+      const stores = await db.location.count({ where: { tenantId: row.id }, transaction: t })
+      if (stores > 0) {
+        return { error: fail(409, 'TENANT_HAS_STORES', 'id', `the tenant still has ${stores} store(s); move or delete them first`) }
+      }
+      const members = await db.tenantMembership.count({
+        where: { tenantId: row.id, status: 'ACTIVE', userId: { [Op.ne]: req.user.id } },
+        transaction: t
+      })
+      if (members > 0) {
+        return { error: fail(409, 'TENANT_HAS_MEMBERS', 'id', `the tenant still has ${members} active member(s)`) }
+      }
+      const before = snapshot(row)
+      await db.tenantMembership.update(
+        { status: 'RETIRED' },
+        { where: { tenantId: row.id, status: { [Op.ne]: 'RETIRED' } }, transaction: t }
+      )
+      // A session that selected this tenant would otherwise fail every
+      // request with STALE_TENANT_CONTEXT: drop it back to no selection.
+      await db.authorizationContextSession.update(
+        { activeTenantId: null, activeStoreId: null, version: db.sequelize.literal('"version" + 1') },
+        { where: { activeTenantId: row.id }, transaction: t }
+      )
+      await row.destroy({ transaction: t })
+      await audit(req, { action: 'delete', row, before, after: null, transaction: t })
+      return { row }
+    })
+    if (result.error) return send(res, result.error)
+    return res.status(200).json({ success: true, message: 'Tenant deleted', data: snapshot(result.row) })
+  } catch (err) {
+    console.error('[tenant] delete failed:', err)
     return res.status(500).json({ success: false, code: 'INTERNAL_ERROR', message: 'Internal Server Error' })
   }
 }
