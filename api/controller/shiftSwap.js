@@ -13,47 +13,46 @@ const Shift = db.shift
 const Location = db.location
 const Attendance = db.attendance
 
-const USER_INCLUDE = [
-  {
-    model: User,
-    as: 'requesterUser',
-    attributes: [
-      'id',
-      'fullName',
-      'email',
-      'phoneNumber',
-      'store',
-      'image',
-      'roleType',
-      'status',
-    ],
-    include: [
-      { model: db.position, as: 'positionData' },
-      { model: db.department, as: 'departmentData' },
-      { model: Location, as: 'storeData' }
-    ]
-  },
-  {
-    model: User,
-    as: 'targetUser',
-    attributes: [
-      'id',
-      'fullName',
-      'email',
-      'phoneNumber',
-      'store',
-      'image',
-      'roleType',
-      'status',
-    ],
-    include: [
-      { model: db.position, as: 'positionData' },
-      { model: db.department, as: 'departmentData' },
-      { model: Location, as: 'storeData' }
-    ]
-  }
+const USER_BASE_ATTRIBUTES = [
+  'id',
+  'fullName',
+  'store',
+  'image',
+  'roleType',
+  'status'
 ]
 
+const canViewSwapContacts = (req) =>
+  ['super_admin', 'admin'].includes(req.user?.roleType)
+
+const buildUserInclude = (req) => {
+  const attributes = canViewSwapContacts(req)
+    ? [...USER_BASE_ATTRIBUTES, 'email', 'phoneNumber']
+    : USER_BASE_ATTRIBUTES
+
+  return [
+    {
+      model: User,
+      as: 'requesterUser',
+      attributes,
+      include: [
+        { model: db.position, as: 'positionData' },
+        { model: db.department, as: 'departmentData' },
+        { model: Location, as: 'storeData' }
+      ]
+    },
+    {
+      model: User,
+      as: 'targetUser',
+      attributes,
+      include: [
+        { model: db.position, as: 'positionData' },
+        { model: db.department, as: 'departmentData' },
+        { model: Location, as: 'storeData' }
+      ]
+    }
+  ]
+}
 const SHIFT_INCLUDE = [
   { model: Shift, as: 'requesterShift' },
   { model: Shift, as: 'targetShift' }
@@ -68,11 +67,26 @@ const DECIDER_INCLUDE = [
   }
 ]
 
+const isGlobalSuperAdmin = (req) =>
+  req.user?.roleType === 'super_admin' && req.user?.store == null
+
+const ownStoreId = (req) => {
+  const store = Number(req.user?.store)
+  return Number.isInteger(store) && store > 0 ? store : null
+}
+
 const resolveStore = (req) => {
-  if (req.user?.roleType === 'super_admin') {
+  if (isGlobalSuperAdmin(req)) {
     return req.storeId ? Number(req.storeId) : null
   }
-  return req.storeId ? Number(req.storeId) : null
+  return ownStoreId(req)
+}
+
+const swapScope = (req, where = {}) => {
+  if (req?.authContext) return scalarStoreScope(req, where)
+  if (isGlobalSuperAdmin(req)) return { ...where }
+  const store = ownStoreId(req)
+  return { ...where, store: store ?? -1 }
 }
 
 const getSwapWhere = (req, { includeStatus = true } = {}) => {
@@ -81,7 +95,8 @@ const getSwapWhere = (req, { includeStatus = true } = {}) => {
   if (store) where.store = store
 
   const { status, mine } = req.query
-  if (mine) {
+  const ownOnly = mine || !canViewSwapContacts(req)
+  if (ownOnly) {
     where[Op.or] = [{ requesterId: req.user.id }, { targetId: req.user.id }]
   }
   if (includeStatus && status) {
@@ -205,8 +220,8 @@ const relocateEmployeeInTx = async (t, userId, toShiftId) => {
 
 exports.getShiftSwaps = async (req, res, next) => {
   try {
-    const page = parseInt(req.query.page) || 1
-    const pageSize = parseInt(req.query.pageSize) || 10
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1)
+    const pageSize = Math.min(100, Math.max(1, parseInt(req.query.pageSize, 10) || 10))
     const offset = (page - 1) * pageSize
 
     const where = getSwapWhere(req)
@@ -214,7 +229,7 @@ exports.getShiftSwaps = async (req, res, next) => {
     const [rows, count] = await Promise.all([
       ShiftSwap.findAll({
         where,
-        include: [...USER_INCLUDE, ...SHIFT_INCLUDE, ...DECIDER_INCLUDE],
+        include: [...buildUserInclude(req), ...SHIFT_INCLUDE, ...DECIDER_INCLUDE],
         order: [
           ['status', 'ASC'],
           ['createdAt', 'DESC']
@@ -282,6 +297,16 @@ exports.createShiftSwap = async (req, res, next) => {
     }
 
     const finalRequesterId = Number(requesterId) || req.user.id
+    const isManager = ['admin', 'super_admin'].includes(req.user?.roleType)
+    const isGlobalSuperAdmin =
+      req.user?.roleType === 'super_admin' && req.user?.store == null
+
+    if (!isManager && Number(finalRequesterId) !== Number(req.user.id)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Anda hanya dapat mengajukan ubah jadwal untuk diri sendiri'
+      })
+    }
 
     if (Number(finalRequesterId) === Number(targetId)) {
       return res.status(400).json({
@@ -298,7 +323,13 @@ exports.createShiftSwap = async (req, res, next) => {
         Shift.findByPk(targetShiftId)
       ])
 
-    if (!targetUser) {
+    if (!requesterUser || requesterUser.userType !== 'user') {
+      return res.status(404).json({
+        success: false,
+        message: 'Karyawan pemohon tidak ditemukan'
+      })
+    }
+    if (!targetUser || targetUser.userType !== 'user') {
       return res.status(404).json({
         success: false,
         message: 'Karyawan target tidak ditemukan'
@@ -310,10 +341,36 @@ exports.createShiftSwap = async (req, res, next) => {
         message: 'Shift tidak ditemukan'
       })
     }
+    if (Number(requesterShiftId) === Number(targetShiftId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Shift pemohon dan shift target harus berbeda'
+      })
+    }
 
-    const targetStore = req.user?.roleType === 'super_admin' ? Number(store) || targetUser.store : Number(targetUser.store)
-    const requesterStore = requesterUser ? Number(requesterUser.store) : targetStore
+    const targetStore = Number(targetUser.store)
+    if (!Number.isInteger(targetStore) || targetStore <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Karyawan target belum ditetapkan ke toko'
+      })
+    }
 
+    if (store != null && store !== '' && Number(store) !== targetStore) {
+      return res.status(400).json({
+        success: false,
+        message: 'Toko permintaan tidak sesuai dengan toko karyawan target'
+      })
+    }
+
+    if (!isGlobalSuperAdmin && Number(req.user?.store) !== targetStore) {
+      return res.status(403).json({
+        success: false,
+        message: 'Anda hanya dapat membuat permintaan ubah jadwal di toko Anda'
+      })
+    }
+
+    const requesterStore = Number(requesterUser.store)
     if (requesterStore !== targetStore) {
       return res.status(400).json({
         success: false,
@@ -321,19 +378,26 @@ exports.createShiftSwap = async (req, res, next) => {
       })
     }
 
-    // IDOR fix: requesterStore/targetStore were only ever checked against
-    // EACH OTHER, never against the caller's own store — this route has
-    // no requireRole gate, so any authenticated user (and requesterId is
-    // itself an optional client-supplied override, not necessarily
-    // req.user.id) could create a real, persisted shift-swap request
-    // between two employees of a store they have no relationship to.
     if (
-      req.user?.roleType !== 'super_admin' &&
-      Number(req.user?.store) !== targetStore
+      Number(requesterShift.store) !== targetStore ||
+      Number(targetShift.store) !== targetStore
     ) {
       return res.status(403).json({
         success: false,
-        message: 'Anda hanya dapat membuat permintaan ubah jadwal di toko Anda'
+        message: 'Shift harus berasal dari toko karyawan yang sama'
+      })
+    }
+
+    const shiftHasMember = (shift, userId) =>
+      (shift.karyawan || []).map(Number).includes(Number(userId))
+
+    if (
+      !shiftHasMember(requesterShift, finalRequesterId) ||
+      !shiftHasMember(targetShift, targetId)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: 'Karyawan tidak terdaftar pada shift yang ditukar'
       })
     }
 
@@ -458,7 +522,7 @@ exports.updateShiftSwapStatus = async (req, res, next) => {
     // employees between shifts. scalarStoreScope adds `store` to the where
     // clause for non-super-admin.
     const swap = await ShiftSwap.findOne({
-      where: scalarStoreScope(req, { id }),
+      where: swapScope(req, { id }),
       transaction: t,
       lock: t.LOCK.UPDATE
     })
@@ -513,7 +577,7 @@ exports.updateShiftSwapStatus = async (req, res, next) => {
     // Data lengkap untuk respons di-fetch SETELAH update (dalam transaksi yang sama)
     const fullSwap = await ShiftSwap.findByPk(id, {
       transaction: t,
-      include: [...USER_INCLUDE, ...SHIFT_INCLUDE, ...DECIDER_INCLUDE]
+      include: [...buildUserInclude(req), ...SHIFT_INCLUDE, ...DECIDER_INCLUDE]
     })
 
     await createAudit(
@@ -574,7 +638,7 @@ exports.cancelShiftSwap = async (req, res, next) => {
     // — i.e. any admin of the OWNING store, not just the two employees
     // involved, can still cancel it.
     const swap = await ShiftSwap.findOne({
-      where: scalarStoreScope(req, { id }),
+      where: swapScope(req, { id }),
       transaction: t,
       lock: t.LOCK.UPDATE
     })
@@ -627,7 +691,7 @@ exports.cancelShiftSwap = async (req, res, next) => {
 
     const fullSwap = await ShiftSwap.findByPk(id, {
       transaction: t,
-      include: [...USER_INCLUDE, ...SHIFT_INCLUDE, ...DECIDER_INCLUDE]
+      include: [...buildUserInclude(req), ...SHIFT_INCLUDE, ...DECIDER_INCLUDE]
     })
 
     await createAudit(

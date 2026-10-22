@@ -362,6 +362,8 @@ beforeAll(async () => {
     userName: 'idor_swap_tgt2', email: 'idor_swap_tgt2@test.com',
     roleType: 'kasir', userType: 'user', store: store2.id, status: 'active'
   })
+  await shiftA.update({ store: store1.id, karyawan: [70004] })
+  await shiftB.update({ store: store1.id, karyawan: [userTgt1.id] })
   // AUTH-1 P2: sessions need their user rows (FK), so mint tokens after them.
   superAdminToken = await signSessionToken(
     { id: 70001, userName: 'idor_super', roleType: 'super_admin' },
@@ -2552,12 +2554,12 @@ describe('POST /shift-swap/create-swap — cross-store swap creation (P1)', () =
     expect(after).toBe(before)
   })
 
-  test('store 1 kasir can create a swap between two store 1 employees', async () => {
+  test('store 1 kasir can create a valid swap for themselves', async () => {
     const res = await request(app)
       .post('/shift-swap/create-swap')
       .set('Authorization', `Bearer ${kasirStore1Token}`)
       .send({
-        requesterId: userReq1.id,
+        requesterId: 70004,
         targetId: userTgt1.id,
         requesterShiftId: shiftA.id,
         targetShiftId: shiftB.id
@@ -2565,7 +2567,7 @@ describe('POST /shift-swap/create-swap — cross-store swap creation (P1)', () =
 
     expect(res.status).toBe(201)
     await db.shift_swap.destroy({
-      where: { requesterId: userReq1.id, targetId: userTgt1.id, status: 'pending' },
+      where: { requesterId: 70004, targetId: userTgt1.id, status: 'pending' },
       force: true
     })
   })

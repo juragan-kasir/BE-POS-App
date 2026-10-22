@@ -3,15 +3,36 @@ const { Op } = db.Sequelize
 const ShiftTemplate = db.shift_template
 const { createAudit } = require('../../utils/auditLog')
 const { enrichAuditFields } = require('../../utils/auditFields')
-const { scalarStoreScope } = require('../../utils/tenantScope')
+const { scalarStoreScope, isSuperAdmin } = require('../../utils/tenantScope')
+
+const ownStoreId = (req) => {
+  const store = Number(req.user?.store)
+  return Number.isInteger(store) && store > 0 ? store : null
+}
+
+const isGlobalSuperAdmin = (req) => isSuperAdmin(req) && ownStoreId(req) == null
+
+const templateReadScope = (req, storeQuery) => {
+  if (isGlobalSuperAdmin(req)) {
+    if (storeQuery) {
+      return { [Op.or]: [{ store: null }, { store: Number(storeQuery) }] }
+    }
+    return {}
+  }
+  const own = ownStoreId(req)
+  if (!own) return { store: null }
+  return { [Op.or]: [{ store: null }, { store: own }] }
+}
+
+const templateWriteStore = (req) => {
+  if (isGlobalSuperAdmin(req)) return null
+  return ownStoreId(req)
+}
 
 exports.getAllShiftTemplate = async (req, res) => {
   try {
     const { store } = req.query
-    const where = { status: 'active' }
-    if (store) {
-      where[Op.or] = [{ store: null }, { store }]
-    }
+    const where = { status: 'active', ...templateReadScope(req, store) }
 
     const templates = await ShiftTemplate.findAll({
       where,
@@ -42,9 +63,10 @@ exports.getAllShiftTemplateInTable = async (req, res) => {
     const { page = 1, limit = 10, status = 'all', search } = req.query
     const offset = (page - 1) * limit
 
-    let whereCondition = {}
+    const scope = templateReadScope(req, req.query.store)
+    let whereCondition = { ...scope }
     if (status && status !== 'all') {
-      whereCondition = { status }
+      whereCondition.status = status
     }
 
     if (search) {
@@ -62,10 +84,10 @@ exports.getAllShiftTemplateInTable = async (req, res) => {
 
     const totalPages = Math.ceil(totalItems / limit)
 
-    const total = await ShiftTemplate.count()
-    const totalActive = await ShiftTemplate.count({ where: { status: 'active' } })
-    const totalInactive = await ShiftTemplate.count({ where: { status: 'inactive' } })
-    const totalDraft = await ShiftTemplate.count({ where: { status: 'draft' } })
+    const total = await ShiftTemplate.count({ where: scope })
+    const totalActive = await ShiftTemplate.count({ where: { ...scope, status: 'active' } })
+    const totalInactive = await ShiftTemplate.count({ where: { ...scope, status: 'inactive' } })
+    const totalDraft = await ShiftTemplate.count({ where: { ...scope, status: 'draft' } })
 
     return res.status(200).json({
       success: true,
@@ -99,7 +121,7 @@ exports.getShiftTemplateById = async (req, res) => {
     const { id } = req.params
 
     const template = await ShiftTemplate.findOne({
-      where: { id }
+      where: { id, ...templateReadScope(req) }
     })
 
     if (!template) {
@@ -131,10 +153,32 @@ exports.addNewShiftTemplate = async (req, res) => {
   const body = req.body
 
   try {
+    const isGlobal = isGlobalSuperAdmin(req)
+    const own = ownStoreId(req)
+    const requestedStore =
+      body.store === undefined || body.store === null || body.store === ''
+        ? null
+        : Number(body.store)
+
+    if (!isGlobal && own == null) {
+      return res.status(403).json({
+        success: false,
+        message: 'Store assignment required'
+      })
+    }
+    if (!isGlobal && requestedStore != null && requestedStore !== own) {
+      return res.status(403).json({
+        success: false,
+        message: 'Tidak dapat membuat template shift untuk toko lain'
+      })
+    }
+
+    const store = isGlobal ? requestedStore : own
+
     const existing = await ShiftTemplate.findOne({
       where: {
         name: body.name,
-        store: body.store || null
+        store
       }
     })
 
@@ -146,7 +190,7 @@ exports.addNewShiftTemplate = async (req, res) => {
     }
 
     const template = await ShiftTemplate.create({
-      store: body.store || null,
+      store,
       name: body.name,
       startTime: body.startTime,
       endTime: body.endTime,
@@ -188,10 +232,15 @@ exports.editShiftTemplateById = async (req, res) => {
   const id = req.params.id || body.id
 
   try {
+    const isGlobal = isGlobalSuperAdmin(req)
+    const requestedStore =
+      body.store === undefined || body.store === null || body.store === ''
+        ? null
+        : Number(body.store)
     const getDuplicate = await ShiftTemplate.findOne({
       where: {
         name: body.name,
-        store: body.store || null,
+        store: isGlobal ? requestedStore : templateWriteStore(req),
         id: { [Op.ne]: id }
       }
     })
@@ -214,10 +263,20 @@ exports.editShiftTemplateById = async (req, res) => {
         message: 'Template shift tidak ditemukan'
       })
     }
+    if (!isGlobal && requestedStore != null && requestedStore !== ownStoreId(req)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Tidak dapat memindahkan template shift ke toko lain'
+      })
+    }
 
     const [, editRows] = await ShiftTemplate.update(
       {
-        store: body.store !== undefined ? body.store : template.store,
+        store: isGlobal
+          ? body.store !== undefined
+            ? requestedStore
+            : template.store
+          : template.store,
         name: body.name,
         startTime: body.startTime,
         endTime: body.endTime,
