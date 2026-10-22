@@ -33,6 +33,8 @@ const compression = require('compression')
 
 const { initSocket } = require('./service/socket')
 const userContext = require('../utils/userContext')
+const authorization = require('../utils/authorization')
+const { requireRole, hasVerifiedBearerCredential } = require('../utils/authorization')
 
 const productRoutes = require('./routes/product')
 const authRoutes = require('./routes/auth')
@@ -118,18 +120,16 @@ const server = http.createServer(app)
 // ponytail: kebijakan CORS bersama (Express + Socket.IO) di utils/corsOptions
 const { corsOptions } = require('./utils/corsOptions')
 
-// Rate limit only anonymous traffic; authenticated requests are never throttled
-// so a busy POS terminal (many requests per transaction) is not blocked.
-const isAuthenticated = (req) =>
-  Boolean(
-    req.headers?.authorization &&
-    req.headers.authorization.startsWith('Bearer ')
-  )
-
+// Rate limit only anonymous traffic; a request is exempt only when it carries
+// a cryptographically valid bearer credential, so a busy POS terminal is not
+// blocked but a forged/expired token cannot bypass the limiter.
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 500,
-  skip: (req) => req.method === 'OPTIONS' || isAuthenticated(req),
+  windowMs:
+    Number.parseInt(process.env.GLOBAL_RATE_LIMIT_WINDOW_MS, 10) ||
+    15 * 60 * 1000,
+  max: Number.parseInt(process.env.GLOBAL_RATE_LIMIT_MAX, 10) || 500,
+  skip: (req) =>
+    req.method === 'OPTIONS' || hasVerifiedBearerCredential(req),
   message: {
     success: false,
     message: 'Too many requests, please try again later.'
@@ -417,33 +417,38 @@ function generateESCPOS(data) {
   return enc
 }
 
-app.post('/print-thermal', (req, res) => {
-  const { data } = req.body
-  if (!data)
-    return res.status(400).json({ success: false, message: 'No receipt data' })
+app.post(
+  '/print-thermal',
+  authorization,
+  requireRole('super_admin', 'admin', 'kasir'),
+  (req, res) => {
+    const { data } = req.body
+    if (!data)
+      return res.status(400).json({ success: false, message: 'No receipt data' })
 
-  const script = `${__dirname}/thermal-bt.py`
-  if (!fs.existsSync(script)) {
-    return res
-      .status(500)
-      .json({ success: false, message: 'thermal-bt.py not found' })
-  }
+    const script = `${__dirname}/thermal-bt.py`
+    if (!fs.existsSync(script)) {
+      return res
+        .status(500)
+        .json({ success: false, message: 'thermal-bt.py not found' })
+    }
 
-  try {
-    const escpos = generateESCPOS(data)
-    const proc = execSync(`python3 "${script}"`, {
-      input: escpos,
-      maxBuffer: escpos.length + 1024,
-      timeout: 15000
-    })
-    res.json({ success: true, message: proc.toString().trim() || 'Printed' })
-  } catch (e) {
-    res.status(500).json({
-      success: false,
-      message: e.message || e.stderr?.toString().trim() || 'Print failed'
-    })
+    try {
+      const escpos = generateESCPOS(data)
+      const proc = execSync(`python3 "${script}"`, {
+        input: escpos,
+        maxBuffer: escpos.length + 1024,
+        timeout: 15000
+      })
+      res.json({ success: true, message: proc.toString().trim() || 'Printed' })
+    } catch (e) {
+      res.status(500).json({
+        success: false,
+        message: e.message || e.stderr?.toString().trim() || 'Print failed'
+      })
+    }
   }
-})
+)
 
 app.get('/', (_, res) => {
   res.status(200).json({

@@ -156,11 +156,30 @@ const requireRole = (...roles) => {
   }
 }
 
+// Rate-limiter support: a bearer credential exempts a request from anonymous
+// throttling only when its signature and expiry verify. This is deliberately
+// NOT session liveness (that needs a DB read on every request); revoked
+// credentials still hit the canonical 401 on protected routes. Any other
+// Authorization value — including forged or expired tokens — is anonymous.
+const hasVerifiedBearerCredential = (req) => {
+  const authHeader = req?.headers?.authorization
+  if (!authHeader || !authHeader.startsWith('Bearer ')) return false
+  const token = authHeader.slice('Bearer '.length)
+  if (!token) return false
+  try {
+    jwt.verify(token, process.env.JWT_SECRET_KEY)
+    return true
+  } catch {
+    return false
+  }
+}
+
 module.exports = authorization
 module.exports.requireRole = requireRole
 module.exports.setUserContext = setUserContext
 module.exports.getToken = getToken
 module.exports.authenticateCredential = authenticateCredential
+module.exports.hasVerifiedBearerCredential = hasVerifiedBearerCredential
 
 // Canonical permission gate for migrated routes.
 //
