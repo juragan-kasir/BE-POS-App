@@ -20,7 +20,6 @@ const {
 // super_admin may explicitly target an arbitrary store. Returns a numeric store
 // id or null. Its WhatsApp-session callers are gone (Fonnte removed); it stays
 // for the cashier table panel endpoints (feat/cashier-table-release).
-// eslint-disable-next-line no-unused-vars
 const getAuthorizedStoreId = (req) => {
   if (isSuperAdmin(req)) {
     const s = Number(req.query.storeId)
