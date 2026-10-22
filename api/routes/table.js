@@ -1,37 +1,37 @@
 const express = require('express')
+const { menuWriteGate } = require('../../utils/menuWriteGate')
 const router = express.Router()
+
+// Role Management checkboxes guard the writes (api/menuRouteMap.js)
+router.use(menuWriteGate('table.js'))
 const tableController = require('../controller/table')
 const authorization = require('../../utils/authorization')
 const { requireRole } = require('../../utils/authorization')
 const { validateStoreAccess } = require('../../utils/storeValidation')
-const { requireMenuAction } = require('../../utils/menuAccessMiddleware')
 const { validate } = require('../middleware/validate')
 const {
   createTableSchema,
   updateTableSchema
 } = require('../validation/schemas')
 
-// Get tables - All authenticated users (DR-24 C-02: menu-enforced — a
-// menu-scoped role without /table view is denied even for reads)
+// Get tables - All authenticated users. Reads stay open (the cashier picks
+// tables at checkout); writes follow the /table-list menu (menuWriteGate).
 router.get(
   '/get-tables',
   authorization,
   validateStoreAccess,
-  requireMenuAction('/table', 'view'),
   tableController.getTablesByStore
 )
 router.get(
   '/get-tables-with-orders',
   authorization,
   validateStoreAccess,
-  requireMenuAction('/table', 'view'),
   tableController.getTableWithActiveOrders
 )
 router.get(
   '/get-availability',
   authorization,
   validateStoreAccess,
-  requireMenuAction('/table', 'view'),
   tableController.getTableAvailability
 )
 
@@ -41,7 +41,6 @@ router.post(
   authorization,
   validateStoreAccess,
   requireRole('super_admin', 'admin'),
-  requireMenuAction('/table', 'add'),
   validate(createTableSchema),
   tableController.createTable
 )
@@ -50,7 +49,6 @@ router.put(
   authorization,
   validateStoreAccess,
   requireRole('super_admin', 'admin'),
-  requireMenuAction('/table', 'edit'),
   validate(updateTableSchema),
   tableController.updateTable
 )
@@ -59,7 +57,6 @@ router.delete(
   authorization,
   validateStoreAccess,
   requireRole('super_admin', 'admin'),
-  requireMenuAction('/table', 'delete'),
   tableController.deleteTable
 )
 
@@ -73,7 +70,6 @@ router.put(
   authorization,
   validateStoreAccess,
   requireRole('super_admin', 'admin'),
-  requireMenuAction('/table', 'edit'),
   tableController.updateTableStatus
 )
 

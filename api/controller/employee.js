@@ -297,6 +297,12 @@ exports.addEmployee = async (req, res) => {
   }
 }
 
+// Salary is payroll data: only admins see it. A kasir/staff account can still
+// list colleagues (e.g. shift pickers) but never their pay.
+const SALARY_FIELDS = ['monthlySalary', 'dailySalary']
+const hiddenEmployeeFields = (req) =>
+  ['admin', 'super_admin'].includes(req.user?.roleType) ? ['password'] : ['password', ...SALARY_FIELDS]
+
 exports.getAllEmployee = async (req, res) => {
   try {
     const {
@@ -353,7 +359,7 @@ exports.getAllEmployee = async (req, res) => {
       await Promise.all([
         User.findAll({
           where: whereCondition,
-          attributes: { exclude: ['password'] },
+          attributes: { exclude: hiddenEmployeeFields(req) },
           include: [
             { model: Location, as: 'storeData', attributes: ['id', 'name'] },
             { model: Position, as: 'positionData', attributes: ['id', 'name'] },
@@ -418,7 +424,7 @@ exports.getEmployeeById = async (req, res) => {
     // another store's employee; misses stay indistinguishable (404).
     const employee = await User.findOne({
       where: scalarStoreScope(asStoreConfined(req), { id }),
-      attributes: { exclude: ['password'] },
+      attributes: { exclude: hiddenEmployeeFields(req) },
       include: [
         { model: Location, as: 'storeData', attributes: ['id', 'name'] },
         { model: Position, as: 'positionData', attributes: ['id', 'name'] },
@@ -458,7 +464,7 @@ exports.getEmployeeByEmployeeID = async (req, res) => {
     // guessing a globally-unique employeeID.
     const employee = await User.findOne({
       where: scalarStoreScope(asStoreConfined(req), { employeeID }),
-      attributes: { exclude: ['password'] },
+      attributes: { exclude: hiddenEmployeeFields(req) },
       include: [
         { model: Location, as: 'storeData', attributes: ['id', 'name'] },
         { model: Position, as: 'positionData', attributes: ['id', 'name'] },

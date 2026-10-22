@@ -2,6 +2,7 @@ const db = require('../../db/models')
 const { Op } = require('sequelize')
 const { enrichAuditFields } = require('../../utils/auditFields')
 const { ingredientBaseUnitCost } = require('../service/itemCostService')
+const { createAudit } = require('../../utils/auditLog')
 
 // Thrown inside the authoring transaction to refuse a BOM with a 400 —
 // nothing is written.
@@ -269,6 +270,7 @@ const bomController = {
         ]
       })
 
+      createAudit(req, 'create', 'bom', created.id, `Created BOM ${created.id} for product ${productId}`)
       return res
         .status(201)
         .json({ success: true, message: 'BOM created', data: result })
@@ -338,6 +340,7 @@ const bomController = {
         ]
       })
 
+      createAudit(req, 'update', 'bom', id, `Updated BOM: ${id}`)
       return res
         .status(200)
         .json({ success: true, message: 'BOM updated', data: result })
@@ -378,6 +381,7 @@ const bomController = {
         })
       }
 
+      createAudit(req, 'delete', 'bom', bom.id, `Deleted BOM ${bom.id} (product ${bom.productId})`)
       return res.status(200).json({ success: true, message: 'BOM deleted' })
     } catch (error) {
       console.error('Error =>', error)

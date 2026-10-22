@@ -21,6 +21,14 @@ jest.mock('../db/models', () => ({
       )
     })
   },
+  // The menu write gate reads the account's menu; these fixtures carry none
+  // (no menu → their role gates decide, as before).
+  user: {
+    findByPk: jest.fn((id) =>
+      Promise.resolve({ id, roleType: id === 9999 ? 'super_admin' : 'kasir', accessMenu: [], roleId: null })
+    )
+  },
+  role: { findByPk: jest.fn(() => Promise.resolve(null)) },
   reportConfig: {
     findAll: jest.fn(() => Promise.resolve([])),
     findOne: jest.fn(() => Promise.resolve(null)),

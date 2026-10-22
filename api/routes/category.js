@@ -1,6 +1,10 @@
 const express = require('express')
 const multer = require('multer')
+const { menuWriteGate } = require('../../utils/menuWriteGate')
 const router = express.Router()
+
+// Role Management checkboxes guard the writes (api/menuRouteMap.js)
+router.use(menuWriteGate('category.js'))
 
 const upload = multer({
   storage: multer.memoryStorage(),
