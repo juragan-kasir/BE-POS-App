@@ -1076,7 +1076,9 @@ exports.createEmployeeSchema = employeeBaseSchema.superRefine((d, ctx) => {
   }
 })
 exports.updateUserSchema = userBaseSchema.partial().extend({
-  id: strToNum()
+  id: strToNum(),
+  status: statusEnumBase.optional(),
+  deletedDocuments: jsonField().optional().nullable()
 })
 
 // ===================== Discount =====================

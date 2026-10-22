@@ -9,12 +9,14 @@ router.get(
   '/get-all',
   authorization,
   validateStoreAccess,
+  requireRole('super_admin', 'admin'),
   businessTripController.getAll
 )
 router.get(
   '/get-by-id/:id',
   authorization,
   validateStoreAccess,
+  requireRole('super_admin', 'admin'),
   businessTripController.getById
 )
 

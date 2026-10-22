@@ -543,6 +543,22 @@ exports.login = async (req, res) => {
       })
     }
 
+    if (findUser.status === 'draft') {
+      await recordAudit({
+        actor: { id: findUser.id, name: findUser.userName },
+        req,
+        action: AUDIT_ACTIONS.LOGIN,
+        entity: 'AUTH',
+        entityId: findUser.id,
+        result: 'DENIED',
+        reason: 'ACCOUNT_DRAFT',
+        source: 'password'
+      })
+      return res.status(401).json({
+        message: 'User Name / Email Tidak Ditemukan'
+      })
+    }
+
     // P1-3: a disabled account can never authenticate. Presence `status`
     // alone (e.g. `inactive` from legacy logout) never disables: only the
     // separate `disabledAt` state denies. Placed before password
@@ -598,7 +614,12 @@ exports.login = async (req, res) => {
         transaction: t,
         lock: t.LOCK.UPDATE
       })
-      if (!current || current.deletedAt != null || current.disabledAt != null) {
+      if (
+        !current ||
+        current.deletedAt != null ||
+        current.disabledAt != null ||
+        current.status === 'draft'
+      ) {
         return { denied: 'User Name / Email Tidak Ditemukan' }
       }
       if (current.password !== verifiedHash) {

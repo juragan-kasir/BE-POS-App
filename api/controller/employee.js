@@ -12,7 +12,11 @@ const {
 const { createNotification } = require('../../utils/createNotification')
 const { createAudit } = require('../../utils/auditLog')
 const { enrichAuditFields } = require('../../utils/auditFields')
-const { syncEmployeeShift } = require('../../utils/shiftChain')
+const {
+  syncEmployeeShift,
+  validateShiftMembership,
+  ShiftAssignmentError
+} = require('../../utils/shiftChain')
 const { scalarStoreScope } = require('../../utils/tenantScope')
 const { authorizedWriteStore } = require('../../utils/storeValidation')
 const { revokeAllUserSessions } = require('../../utils/authorizationContextMiddleware')
@@ -119,6 +123,25 @@ exports.addEmployee = async (req, res) => {
       return res.status(403).json({ success: false, message: STORE_DENIED })
     }
 
+    if (body?.shift) {
+      if (destination.storeId == null) {
+        return res.status(403).json({
+          success: false,
+          message: 'Tetapkan toko karyawan sebelum memilih shift'
+        })
+      }
+      const check = await validateShiftMembership({
+        shiftId: body.shift,
+        storeId: destination.storeId
+      })
+      if (!check.ok) {
+        return res.status(check.status).json({
+          success: false,
+          message: check.message
+        })
+      }
+    }
+
     let role = null
     if (body?.roleId) {
       const grant = await resolveGrantableRole(req, body.roleId)
@@ -223,6 +246,7 @@ exports.addEmployee = async (req, res) => {
 
     const isDraft = (body?.status || 'active') === 'draft'
     const draftSuffix = isDraft ? `draft-${employeeId}` : null
+    const draftPassword = isDraft ? crypto.randomBytes(32).toString('hex') : null
 
     const createUser = await User.create({
       image: imageUrl,
@@ -231,7 +255,7 @@ exports.addEmployee = async (req, res) => {
       userType: 'user',
       fullName: body?.fullName || draftSuffix || '',
       userName: userName || draftSuffix || '',
-      password: password || (isDraft ? 'Draft!12345' : ''),
+      password: password || draftPassword || '',
       email: body?.email || (isDraft ? `${draftSuffix}@placeholder.local` : ''),
       address: body?.address || '',
       gender: body?.gender || '',
@@ -244,6 +268,7 @@ exports.addEmployee = async (req, res) => {
       dateOfBirth: body?.dateOfBirth || null,
       placeOfBirth: body?.placeOfBirth || '',
       status: isDraft ? 'draft' : body?.status || 'active',
+      disabledAt: isDraft ? new Date() : null,
       store: destination.storeId || null,
       shift: body?.shift ? Number(body.shift) : null,
       position: body?.position || null,
@@ -289,6 +314,12 @@ exports.addEmployee = async (req, res) => {
       data: result
     })
   } catch (error) {
+    if (error instanceof ShiftAssignmentError) {
+      return res.status(error.status).json({
+        success: false,
+        message: error.message
+      })
+    }
     console.error('Error add employee:', error)
     return res.status(500).json({
       success: false,
@@ -300,8 +331,38 @@ exports.addEmployee = async (req, res) => {
 // Salary is payroll data: only admins see it. A kasir/staff account can still
 // list colleagues (e.g. shift pickers) but never their pay.
 const SALARY_FIELDS = ['monthlySalary', 'dailySalary']
+const STAFF_VISIBLE_FIELDS = [
+  'id',
+  'image',
+  'roleType',
+  'roleId',
+  'userType',
+  'fullName',
+  'userName',
+  'employeeID',
+  'department',
+  'departmentId',
+  'employmentType',
+  'startDate',
+  'endDate',
+  'status',
+  'store',
+  'shift',
+  'position',
+  'gender',
+  'createdAt',
+  'updatedAt',
+  'createdBy',
+  'modifiedBy'
+]
 const hiddenEmployeeFields = (req) =>
-  ['admin', 'super_admin'].includes(req.user?.roleType) ? ['password'] : ['password', ...SALARY_FIELDS]
+  ['admin', 'super_admin'].includes(req.user?.roleType)
+    ? ['password']
+    : ['password', ...SALARY_FIELDS]
+const employeeReadAttributes = (req) =>
+  ['admin', 'super_admin'].includes(req.user?.roleType)
+    ? { exclude: hiddenEmployeeFields(req) }
+    : STAFF_VISIBLE_FIELDS
 
 exports.getAllEmployee = async (req, res) => {
   try {
@@ -359,7 +420,7 @@ exports.getAllEmployee = async (req, res) => {
       await Promise.all([
         User.findAll({
           where: whereCondition,
-          attributes: { exclude: hiddenEmployeeFields(req) },
+          attributes: employeeReadAttributes(req),
           include: [
             { model: Location, as: 'storeData', attributes: ['id', 'name'] },
             { model: Position, as: 'positionData', attributes: ['id', 'name'] },
@@ -424,7 +485,7 @@ exports.getEmployeeById = async (req, res) => {
     // another store's employee; misses stay indistinguishable (404).
     const employee = await User.findOne({
       where: scalarStoreScope(asStoreConfined(req), { id }),
-      attributes: { exclude: hiddenEmployeeFields(req) },
+      attributes: employeeReadAttributes(req),
       include: [
         { model: Location, as: 'storeData', attributes: ['id', 'name'] },
         { model: Position, as: 'positionData', attributes: ['id', 'name'] },
@@ -464,7 +525,7 @@ exports.getEmployeeByEmployeeID = async (req, res) => {
     // guessing a globally-unique employeeID.
     const employee = await User.findOne({
       where: scalarStoreScope(asStoreConfined(req), { employeeID }),
-      attributes: { exclude: hiddenEmployeeFields(req) },
+      attributes: employeeReadAttributes(req),
       include: [
         { model: Location, as: 'storeData', attributes: ['id', 'name'] },
         { model: Position, as: 'positionData', attributes: ['id', 'name'] },
@@ -528,6 +589,21 @@ exports.updateEmployee = async (req, res) => {
     const destination = employeeWriteStore(req)
     if (!destination.ok) {
       return res.status(403).json({ success: false, message: STORE_DENIED })
+    }
+
+    const targetStore = destination.storeId ?? employee.store
+    if (body?.shift) {
+      const check = await validateShiftMembership({
+        shiftId: body.shift,
+        storeId: targetStore,
+        employeeIds: [employee.id]
+      })
+      if (!check.ok) {
+        return res.status(check.status).json({
+          success: false,
+          message: check.message
+        })
+      }
     }
 
     let grantedRole = null
@@ -622,11 +698,15 @@ exports.updateEmployee = async (req, res) => {
       : []
 
     if (deletedDocuments.length > 0) {
-      for (const docUrl of deletedDocuments) {
+      const ownedDocuments = new Set(documentUrls)
+      const deletableDocuments = deletedDocuments.filter((url) =>
+        ownedDocuments.has(url)
+      )
+      for (const docUrl of deletableDocuments) {
         await deleteFromCloudinary(docUrl)
       }
       documentUrls = documentUrls.filter(
-        (url) => !deletedDocuments.includes(url)
+        (url) => !deletableDocuments.includes(url)
       )
     }
 
@@ -639,6 +719,16 @@ exports.updateEmployee = async (req, res) => {
         documentUrls.push(url)
       }
     }
+
+    const nextStatus =
+      body?.status ||
+      (body?.isActive !== undefined
+        ? body.isActive
+          ? 'active'
+          : 'inactive'
+        : employee.status)
+    const willBeDisabled = nextStatus !== 'active'
+    const wasDisabled = employee.disabledAt != null
 
     const updateData = {
       image: imageUrl,
@@ -655,13 +745,8 @@ exports.updateEmployee = async (req, res) => {
       startDate: dateOrNull(body?.startDate, employee.startDate),
       dateOfBirth: dateOrNull(body?.dateOfBirth, employee.dateOfBirth),
       placeOfBirth: body?.placeOfBirth ?? employee.placeOfBirth,
-      status:
-        body?.status ||
-        (body?.isActive !== undefined
-          ? body.isActive
-            ? 'active'
-            : 'inactive'
-          : employee.status),
+      status: nextStatus,
+      disabledAt: willBeDisabled ? employee.disabledAt || new Date() : null,
       store: destination.storeId ?? employee.store,
       shift: body?.shift !== undefined
         ? body?.shift
@@ -694,14 +779,17 @@ exports.updateEmployee = async (req, res) => {
 
     // AUTH-1 P3: a password change revokes every session of the target
     // employee (never the acting admin's) atomically with the new hash.
+    const revokeSessions = Boolean(
+      updateData.password || (willBeDisabled && !wasDisabled)
+    )
     await db.sequelize.transaction(async (t) => {
       await employee.update(updateData, { transaction: t })
-      if (updateData.password) {
+      if (revokeSessions) {
         await revokeAllUserSessions(db, employee.id, { transaction: t })
       }
     })
     // AUTH-1 P4: committed; drop the employee's live sockets.
-    if (updateData.password) disconnectUser(employee.id)
+    if (revokeSessions) disconnectUser(employee.id)
 
     if (body?.shift !== undefined) {
       await syncEmployeeShift({
@@ -736,6 +824,12 @@ exports.updateEmployee = async (req, res) => {
       data: result
     })
   } catch (error) {
+    if (error instanceof ShiftAssignmentError) {
+      return res.status(error.status).json({
+        success: false,
+        message: error.message
+      })
+    }
     console.error('Error update employee:', error)
     return res.status(500).json({
       success: false,
@@ -759,6 +853,19 @@ exports.deleteEmployee = async (req, res) => {
       return res.status(404).json({
         success: false,
         message: 'Karyawan tidak ditemukan'
+      })
+    }
+
+    if (Number(employee.id) === Number(req.user?.id)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Tidak dapat menghapus akun sendiri'
+      })
+    }
+    if (employee.roleType === 'super_admin' && !isGlobalSuperAdmin(req)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Tidak dapat menghapus Super Admin'
       })
     }
 

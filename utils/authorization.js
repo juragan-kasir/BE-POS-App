@@ -45,7 +45,7 @@ const getToken = (req) => {
 const SESSION_INVALID = { message: 'Session revoked or expired', code: 'SESSION_INVALID' }
 
 // Account columns legacy authorization reads; hydrated into req.user.
-const ACCOUNT_ATTRIBUTES = ['id', 'userName', 'fullName', 'roleType', 'roleId', 'store', 'disabledAt', 'deletedAt']
+const ACCOUNT_ATTRIBUTES = ['id', 'userName', 'fullName', 'roleType', 'roleId', 'store', 'status', 'disabledAt', 'deletedAt']
 
 // One query: the session row joined with its owning account. paranoid:false
 // so a soft-deleted owner is seen (and denied) rather than silently absent.
@@ -104,7 +104,12 @@ const authenticateCredential = async (token) => {
   // P1-4 contract: a missing, soft-deleted or disabled account is denied
   // with the existing authorization denial shape.
   const account = session.user
-  if (!account || account.deletedAt != null || account.disabledAt != null) {
+  if (
+    !account ||
+    account.deletedAt != null ||
+    account.disabledAt != null ||
+    account.status === 'draft'
+  ) {
     return deny(403, { message: 'Akses Ditolak - Anda tidak memiliki izin' })
   }
 
@@ -118,6 +123,7 @@ const authenticateCredential = async (token) => {
       roleType: account.roleType,
       roleId: account.roleId,
       store: account.store,
+      status: account.status,
       disabledAt: account.disabledAt,
       deletedAt: account.deletedAt,
       sessionId

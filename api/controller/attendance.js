@@ -4,20 +4,62 @@ const db = require('../../db/models')
 const Attendance = db.attendance
 const { enrichAuditFields } = require('../../utils/auditFields')
 
-const getStore = (req) =>
-  req.storeId ||
-  req.body.storeId ||
-  req.body.store ||
-  req.query.store ||
-  req.cookies.store ||
-  req.cookies.activeStore ||
-  req.user?.store
+const isGlobalSuperAdmin = (req) =>
+  req.user?.roleType === 'super_admin' && req.user?.store == null
+
+const ownStoreId = (req) => {
+  const store = Number(req.user?.store)
+  return Number.isInteger(store) && store > 0 ? store : null
+}
 
 const MAX_ACCURACY_M = 150
 const ORIGIN_EPSILON = 1 / 1000000
 const DAY_MS = 24 * 60 * 60 * 1000
+const DEFAULT_GEOFENCE_M = 200
+const MAX_STORE_DISTANCE_M = (() => {
+  const configured = Number(process.env.ATTENDANCE_GEOFENCE_METERS)
+  return Number.isFinite(configured) && configured > 0
+    ? configured
+    : DEFAULT_GEOFENCE_M
+})()
 
 const isFiniteNumber = (v) => typeof v === 'number' && Number.isFinite(v)
+
+const toRadians = (value) => (value * Math.PI) / 180
+
+const distanceMeters = (lat1, lng1, lat2, lng2) => {
+  const earthRadius = 6371000
+  const dLat = toRadians(lat2 - lat1)
+  const dLng = toRadians(lng2 - lng1)
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRadians(lat1)) *
+      Math.cos(toRadians(lat2)) *
+      Math.sin(dLng / 2) ** 2
+  return 2 * earthRadius * Math.asin(Math.sqrt(a))
+}
+
+const storeDistance = async (storeId, latitude, longitude) => {
+  if (!storeId) return null
+  const store = await db.location.findByPk(storeId, {
+    attributes: ['id', 'latitude', 'longitude']
+  })
+  if (
+    !store ||
+    store.latitude == null ||
+    store.longitude == null ||
+    !isFiniteNumber(Number(store.latitude)) ||
+    !isFiniteNumber(Number(store.longitude))
+  ) {
+    return null
+  }
+  return distanceMeters(
+    Number(store.latitude),
+    Number(store.longitude),
+    latitude,
+    longitude
+  )
+}
 
 const validateCoordinate = (latitude, longitude) => {
   if (!isFiniteNumber(latitude) || !isFiniteNumber(longitude)) {
@@ -118,6 +160,19 @@ exports.clock = async (req, res) => {
       accuracy: Number(accuracy)
     })
 
+    const clockStore = req.user?.store ? Number(req.user.store) : null
+    const distance = await storeDistance(
+      clockStore,
+      Number(latitude),
+      Number(longitude)
+    )
+    if (distance != null && distance > MAX_STORE_DISTANCE_M) {
+      return res.status(400).json({
+        success: false,
+        message: 'Anda berada di luar radius toko'
+      })
+    }
+
     const now = new Date()
     const { start, end } = dayRange()
     const existing = await Attendance.findOne({ // nosemgrep: Sequelize SQL query — tidak rentan NoSQL injection
@@ -216,8 +271,9 @@ exports.getTodayAttendance = async (req, res) => {
       absenAt: { [Op.gte]: start, [Op.lt]: end }
     }
 
-    const effectiveStore = req.storeId
+    const effectiveStore = isGlobalSuperAdmin(req) ? req.storeId : ownStoreId(req)
     if (effectiveStore) where.store = Number(effectiveStore)
+    else if (!isGlobalSuperAdmin(req)) where.store = -1
 
     const records = await Attendance.findAll({
       where,
@@ -265,10 +321,9 @@ exports.getByShift = async (req, res) => {
     }
 
     const where = { shiftId }
-    const effectiveStore = getStore(req)
-    if (effectiveStore && req.user?.roleType !== 'super_admin') {
-      where.store = Number(effectiveStore)
-    }
+    const effectiveStore = isGlobalSuperAdmin(req) ? req.storeId : ownStoreId(req)
+    if (effectiveStore) where.store = Number(effectiveStore)
+    else if (!isGlobalSuperAdmin(req)) where.store = -1
 
     const records = await Attendance.findAll({
       where,

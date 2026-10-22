@@ -8,6 +8,102 @@ const User = db.user
 
 const normId = (v) => Number(v)
 
+class ShiftAssignmentError extends Error {
+  constructor(message, status = 403) {
+    super(message)
+    this.name = 'ShiftAssignmentError'
+    this.status = status
+  }
+}
+
+const validateEmployeeStoreMembership = async ({
+  storeId,
+  employeeIds,
+  transaction
+}) => {
+  const ids = [
+    ...new Set(
+      (employeeIds || [])
+        .map(normId)
+        .filter((n) => Number.isInteger(n) && n > 0)
+    )
+  ]
+  if (ids.length === 0) return { ok: true }
+
+  const targetStore = Number(storeId)
+  if (!Number.isInteger(targetStore) || targetStore <= 0) {
+    return {
+      ok: false,
+      status: 403,
+      message: 'Shift tanpa toko tidak dapat memiliki karyawan'
+    }
+  }
+
+  const users = await User.findAll({
+    where: { id: { [Op.in]: ids } },
+    attributes: ['id', 'store', 'userType'],
+    transaction
+  })
+
+  if (users.length !== ids.length) {
+    return {
+      ok: false,
+      status: 400,
+      message: 'Salah satu karyawan tidak ditemukan'
+    }
+  }
+
+  const foreign = users.find(
+    (user) =>
+      user.userType !== 'user' || Number(user.store) !== targetStore
+  )
+  if (foreign) {
+    return {
+      ok: false,
+      status: 403,
+      message: 'Karyawan harus berasal dari toko yang sama dengan shift'
+    }
+  }
+
+  return { ok: true }
+}
+
+const validateShiftMembership = async ({
+  shiftId,
+  storeId,
+  employeeIds = [],
+  transaction
+}) => {
+  const id = normId(shiftId)
+  if (!Number.isInteger(id) || id <= 0) {
+    return { ok: false, status: 400, message: 'Shift tidak valid' }
+  }
+
+  const shift = await Shift.findByPk(id, { transaction })
+  if (!shift) {
+    return { ok: false, status: 404, message: 'Shift tidak ditemukan' }
+  }
+
+  const targetStore =
+    storeId == null || storeId === '' ? shift.store : Number(storeId)
+  if (
+    !Number.isInteger(Number(targetStore)) ||
+    Number(shift.store) !== Number(targetStore)
+  ) {
+    return {
+      ok: false,
+      status: 403,
+      message: 'Shift bukan milik toko karyawan'
+    }
+  }
+
+  return validateEmployeeStoreMembership({
+    storeId: targetStore,
+    employeeIds,
+    transaction
+  })
+}
+
 const lockShiftsOf = async (t, ids) => {
   if (!t || !ids || ids.length === 0) return
   const unique = [...new Set(ids.map(normId))].filter((n) => !isNaN(n))
@@ -68,6 +164,14 @@ const syncEmployeeShift = async ({ userId, newShiftId, transaction }) => {
   const id = normId(userId)
   if (isNaN(id)) return
 
+  if (newShiftId != null) {
+    const check = await validateShiftMembership({
+      shiftId: newShiftId,
+      employeeIds: [id]
+    })
+    if (!check.ok) throw new ShiftAssignmentError(check.message, check.status)
+  }
+
   const own = transaction || null
   const t = own || (await db.sequelize.transaction())
 
@@ -101,6 +205,13 @@ const syncShiftKaryawan = async ({ shiftId, employeeIds }) => {
   const t = await db.sequelize.transaction()
   try {
     await lockShiftsOf(t, [shiftIdNum])
+
+    const check = await validateShiftMembership({
+      shiftId: shiftIdNum,
+      employeeIds: ids,
+      transaction: t
+    })
+    if (!check.ok) throw new ShiftAssignmentError(check.message, check.status)
 
     const containing = await Shift.findAll({
       where: { karyawan: { [Op.contains]: ids } },
@@ -146,4 +257,11 @@ const clearRemovedMembers = async ({ shiftId, oldKaryawan, newKaryawan }) => {
   }
 }
 
-module.exports = { syncEmployeeShift, syncShiftKaryawan, clearRemovedMembers }
+module.exports = {
+  syncEmployeeShift,
+  syncShiftKaryawan,
+  clearRemovedMembers,
+  validateEmployeeStoreMembership,
+  validateShiftMembership,
+  ShiftAssignmentError
+}

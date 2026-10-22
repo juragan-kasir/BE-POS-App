@@ -7,10 +7,26 @@ const { createAudit } = require('../../utils/auditLog')
 const { enrichAuditFields } = require('../../utils/auditFields')
 const {
   syncShiftKaryawan,
-  clearRemovedMembers
+  clearRemovedMembers,
+  validateEmployeeStoreMembership,
+  ShiftAssignmentError
 } = require('../../utils/shiftChain')
-const { scalarStoreScope } = require('../../utils/tenantScope')
+const { scalarStoreScope, isSuperAdmin } = require('../../utils/tenantScope')
 const { authorizedStoreIds } = require('../../utils/storeValidation')
+
+const isGlobalSuperAdmin = (req) => isSuperAdmin(req) && req.user?.store == null
+
+const ownStoreId = (req) => {
+  const store = Number(req.user?.store)
+  return Number.isInteger(store) && store > 0 ? store : null
+}
+
+const shiftScope = (req, where = {}) => {
+  if (req?.authContext) return scalarStoreScope(req, where)
+  if (isGlobalSuperAdmin(req)) return { ...where }
+  const store = ownStoreId(req)
+  return { ...where, store: store ?? -1 }
+}
 
 const serializeShift = (shift) => ({
   id: shift.id,
@@ -42,6 +58,21 @@ const toStoreArray = (raw) => {
   if (Array.isArray(raw)) return raw.map(Number).filter((n) => !isNaN(n))
   if (raw !== undefined && raw !== null && raw !== '') return [Number(raw)]
   return []
+}
+
+const validateMembersForStores = async (stores, employeeIds) => {
+  const ids = employeeIds || []
+  if (ids.length === 0) return { ok: true }
+
+  const targetStores = stores && stores.length > 0 ? stores : [null]
+  for (const storeId of targetStores) {
+    const check = await validateEmployeeStoreMembership({
+      storeId,
+      employeeIds: ids
+    })
+    if (!check.ok) return check
+  }
+  return { ok: true }
 }
 
 const todayStr = () => {
@@ -76,8 +107,8 @@ exports.getAllShift = async (req, res) => {
     search,
     store: queryStore
   } = req.query
-  const page = Math.max(1, parseInt(rawPage) || 1)
-  const pageSize = Math.max(1, parseInt(rawPageSize) || 10)
+  const page = Math.max(1, parseInt(rawPage, 10) || 1)
+  const pageSize = Math.min(100, Math.max(1, parseInt(rawPageSize, 10) || 10))
 
   try {
     await autoExpireShifts()
@@ -90,8 +121,11 @@ exports.getAllShift = async (req, res) => {
     }
 
     const where = { ...statusCondition }
-    const effectiveStore = req.storeId || (queryStore ? Number(queryStore) : null)
+    const effectiveStore = isGlobalSuperAdmin(req)
+      ? req.storeId || (queryStore ? Number(queryStore) : null)
+      : ownStoreId(req)
     if (effectiveStore) where.store = effectiveStore
+    else if (!isGlobalSuperAdmin(req)) where.store = -1
     if (search) where.name = { [Op.iLike]: `%${search}%` }
 
     const shiftCategory = await Shift.findAll({
@@ -125,6 +159,12 @@ exports.getAllShift = async (req, res) => {
       stats: { total: active + draft + inactive, active, draft, inactive }
     })
   } catch (error) {
+    if (error instanceof ShiftAssignmentError) {
+      return res.status(error.status).json({
+        success: false,
+        message: error.message
+      })
+    }
     console.error('Error =>', error)
     return res.status(500).json({
       success: false,
@@ -140,7 +180,13 @@ exports.getShiftDropdown = async (req, res) => {
     await autoExpireShifts()
 
     const whereCondition = {}
-    if (req.storeId) whereCondition.store = Number(req.storeId)
+    const scopedStore = isGlobalSuperAdmin(req)
+      ? req.storeId
+        ? Number(req.storeId)
+        : null
+      : ownStoreId(req)
+    if (scopedStore) whereCondition.store = scopedStore
+    else if (!isGlobalSuperAdmin(req)) whereCondition.store = -1
     if (status === 'active') {
       whereCondition.status = 'active'
     } else if (status === 'inactive') {
@@ -178,6 +224,12 @@ exports.getShiftDropdown = async (req, res) => {
       data
     })
   } catch (error) {
+    if (error instanceof ShiftAssignmentError) {
+      return res.status(error.status).json({
+        success: false,
+        message: error.message
+      })
+    }
     console.error('Error =>', error)
     return res.status(500).json({
       success: false,
@@ -199,9 +251,25 @@ exports.postNewShift = async (req, res) => {
       status
     } = req.body
     let stores
-    if (req.user?.roleType === 'super_admin') {
+    if (isGlobalSuperAdmin(req)) {
       const rawStore = req.body.store || req.storeId || req.user?.store
       stores = toStoreArray(rawStore)
+    } else if (req.user?.roleType === 'super_admin') {
+      const own = ownStoreId(req)
+      const rawStore = req.body.store
+      if (own == null) {
+        return res.status(403).json({
+          success: false,
+          message: 'Store assignment required'
+        })
+      }
+      if (rawStore != null && rawStore !== '' && Number(rawStore) !== own) {
+        return res.status(403).json({
+          success: false,
+          message: 'Anda hanya dapat mengakses data di toko Anda'
+        })
+      }
+      stores = [own]
     } else {
       // C-3: single-store tenant — reject ambiguous/foreign/null store; pin own.
       const authz = authorizedStoreIds(req)
@@ -212,6 +280,14 @@ exports.postNewShift = async (req, res) => {
         })
       }
       stores = authz.stores
+    }
+
+    const memberCheck = await validateMembersForStores(stores, karyawan)
+    if (!memberCheck.ok) {
+      return res.status(memberCheck.status).json({
+        success: false,
+        message: memberCheck.message
+      })
     }
 
     const rangeError = validateTimeRange(jam_mulai, jam_selesai)
@@ -325,6 +401,12 @@ const postData = await Shift.create({
       data: created.length === 1 ? created[0] : created
     })
   } catch (error) {
+    if (error instanceof ShiftAssignmentError) {
+      return res.status(error.status).json({
+        success: false,
+        message: error.message
+      })
+    }
     console.error('Error =>', error)
     return res.status(500).json({
       success: false,
@@ -359,7 +441,7 @@ exports.editShiftById = async (req, res) => {
     // IDOR fix: was findByPk(id) with no store filter — any admin could
     // edit any store's shift (including reassigning karyawan/employees).
     const existingShift = await Shift.findOne({
-      where: scalarStoreScope(req, { id })
+      where: shiftScope(req, { id })
     })
     if (!existingShift) {
       return res.status(404).json({
@@ -369,8 +451,23 @@ exports.editShiftById = async (req, res) => {
     }
 
     let stores
-    if (req.user?.roleType === 'super_admin') {
+    if (isGlobalSuperAdmin(req)) {
       stores = toStoreArray(store)
+    } else if (req.user?.roleType === 'super_admin') {
+      const own = ownStoreId(req)
+      if (own == null) {
+        return res.status(403).json({
+          success: false,
+          message: 'Store assignment required'
+        })
+      }
+      if (store != null && store !== '' && Number(store) !== own) {
+        return res.status(403).json({
+          success: false,
+          message: 'Anda hanya dapat mengakses data di toko Anda'
+        })
+      }
+      stores = [own]
     } else {
       // C-3: single-store tenant edit must not expand scope nor null the store.
       const authz = authorizedStoreIds(req)
@@ -381,6 +478,18 @@ exports.editShiftById = async (req, res) => {
         })
       }
       stores = authz.stores
+    }
+
+    const effectiveStores = stores.length > 0 ? stores : [existingShift.store]
+    const memberCheck = await validateMembersForStores(
+      effectiveStores,
+      karyawan ?? existingShift.karyawan
+    )
+    if (!memberCheck.ok) {
+      return res.status(memberCheck.status).json({
+        success: false,
+        message: memberCheck.message
+      })
     }
 
     const duplicateWhere = { // nosemgrep: Sequelize SQL query, nilai divalidasi zod + koersi — bukan NoSQL injection
@@ -416,7 +525,7 @@ const editShift = await Shift?.update(
          },
          {
            returning: true,
-           where: scalarStoreScope(req, { id })
+           where: shiftScope(req, { id })
          }
        ).then(([_, data]) => data[0])
 
@@ -451,7 +560,7 @@ const editShift = await Shift?.update(
       modifiedBy: req.user?.id
     }
 
-    await Shift.destroy({ where: scalarStoreScope(req, { id }) })
+    await Shift.destroy({ where: shiftScope(req, { id }) })
 
     const created = []
     for (const storeId of stores) {
@@ -478,6 +587,12 @@ const postData = await Shift.create({ ...baseData, store: storeId, createdBy: ex
       data: created.length === 1 ? created[0] : created
     })
   } catch (error) {
+    if (error instanceof ShiftAssignmentError) {
+      return res.status(error.status).json({
+        success: false,
+        message: error.message
+      })
+    }
     console.error('Error =>', error)
     return res.status(500).json({
       success: false,
@@ -492,7 +607,7 @@ exports.deleteShiftById = async (req, res) => {
     // IDOR fix: the User.update side effect below used to run
     // unconditionally, before any ownership check — nulling out real
     // employees' shift reference for a shift id belonging to ANY store.
-    const shift = await Shift.findOne({ where: scalarStoreScope(req, { id }) })
+    const shift = await Shift.findOne({ where: shiftScope(req, { id }) })
     if (!shift) {
       return res.status(404).json({
         success: false,
@@ -503,7 +618,7 @@ exports.deleteShiftById = async (req, res) => {
     await User.update({ shift: null }, { where: { shift: id } })
 
     const getId = await Shift.destroy({
-      where: scalarStoreScope(req, { id })
+      where: shiftScope(req, { id })
     })
     if (getId) {
       createAudit(req, 'delete', 'shift', id, `Deleted shift: ${id}`)
@@ -519,6 +634,12 @@ exports.deleteShiftById = async (req, res) => {
       })
     }
   } catch (error) {
+    if (error instanceof ShiftAssignmentError) {
+      return res.status(error.status).json({
+        success: false,
+        message: error.message
+      })
+    }
     console.error('Error =>', error)
     return res.status(500).json({
       success: false,
@@ -533,7 +654,7 @@ exports.getShiftById = async (req, res) => {
     await autoExpireShifts()
 
     // IDOR fix: was findByPk(id) with no store filter.
-    const shift = await Shift.findOne({ where: scalarStoreScope(req, { id }) })
+    const shift = await Shift.findOne({ where: shiftScope(req, { id }) })
     if (!shift) {
       return res.status(404).json({
         success: false,
@@ -548,6 +669,12 @@ exports.getShiftById = async (req, res) => {
       data: serializeShift(shift)
     })
   } catch (error) {
+    if (error instanceof ShiftAssignmentError) {
+      return res.status(error.status).json({
+        success: false,
+        message: error.message
+      })
+    }
     console.error('Error =>', error)
     return res.status(500).json({
       success: false,
