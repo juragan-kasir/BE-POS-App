@@ -33,7 +33,12 @@ test('every write-gated route file mounts its menuWriteGate', () => {
   for (const [file, config] of Object.entries(MENU_WRITE_GATED_ROUTES)) {
     const source = fs.readFileSync(`api/routes/${file}`, 'utf8')
     expect([file, source.includes(`router.use(menuWriteGate('${file}'))`)]).toEqual([file, true])
-    expect(config.offered.length).toBeGreaterThan(0)
+    const sections = Array.isArray(config) ? config : [config]
+    for (const section of sections) {
+      expect(section.offered.length).toBeGreaterThan(0)
+      // a multi-section file must confine every section to its own paths
+      if (sections.length > 1) expect(section.only.length).toBeGreaterThan(0)
+    }
   }
   expect(MENU_WRITE_GATED_ROUTES['table.js'].menu).toBe('/table-list')
   expect(MENU_WRITE_GATED_ROUTES['table.js'].aliases).toContain('/table')
@@ -41,4 +46,11 @@ test('every write-gated route file mounts its menuWriteGate', () => {
 
 test('the cron surface stays allowlisted with its fail-closed gate', () => {
   expect(ALLOWLISTED_ROUTE_FILES['internal.js']).toMatch(/CRON_SECRET/)
+})
+
+test('FG-SEC-01: no route file is left in the legacy bucket', () => {
+  expect(GATED_LEGACY_ROUTE_FILES).toEqual([])
+  for (const [file, reason] of Object.entries(ALLOWLISTED_ROUTE_FILES)) {
+    expect([file, typeof reason === 'string' && reason.length > 10]).toEqual([file, true])
+  }
 })

@@ -34,18 +34,29 @@ const actionFor = (method, path) => {
 
 const pathMatches = (pattern, path) => path === pattern || path.startsWith(`${pattern}/`)
 
+// One gate section: the menu a group of paths belongs to. A file maps to one
+// section, or to several (`pos.js`: stock adjust, transfer, outlet price …),
+// each confined to its own `only` prefixes.
+const buildSection = ({ menu, aliases = [], offered, only = [], exclude = [] }) => {
+  const keys = [menu, ...aliases]
+  return {
+    menu,
+    applies: (path) =>
+      (only.length === 0 || only.some((p) => pathMatches(p, path))) &&
+      !exclude.some((p) => pathMatches(p, path)),
+    grants: (entries, action) => {
+      const wanted = offered.includes(action) ? [action] : offered
+      return keys.some((key) => wanted.some((a) => canMenuAction(entries, key, a)))
+    }
+  }
+}
+
 const menuWriteGate = (file) => {
   const config = MENU_WRITE_GATED_ROUTES[file]
   if (!config) throw new Error(`menuWriteGate: ${file} is not in MENU_WRITE_GATED_ROUTES`)
-  const { menu, aliases = [], offered, only = [], exclude = [] } = config
-  const keys = [menu, ...aliases]
+  const sections = (Array.isArray(config) ? config : [config]).map(buildSection)
 
-  const grants = (entries, action) => {
-    const wanted = offered.includes(action) ? [action] : offered
-    return keys.some((key) => wanted.some((a) => canMenuAction(entries, key, a)))
-  }
-
-  const check = async (req, res, next) => {
+  const check = async (req, res, next, section) => {
     try {
       const account = await db.user.findByPk(req.user.id, {
         attributes: ['id', 'accessMenu', 'roleId', 'roleType']
@@ -56,10 +67,10 @@ const menuWriteGate = (file) => {
       )
       if (bypass || !scoped) return next()
       const action = actionFor(req.method, req.path)
-      if (grants(entries, action)) return next()
+      if (section.grants(entries, action)) return next()
       return res.status(403).json({
         code: 'MENU_ACTION_DENIED',
-        message: `Your role does not include "${action}" access on ${menu}`
+        message: `Your role does not include "${action}" access on ${section.menu}`
       })
     } catch (error) {
       console.error('Menu write gate failed:', error)
@@ -69,12 +80,12 @@ const menuWriteGate = (file) => {
 
   return (req, res, next) => {
     if (!WRITE_METHODS.has(req.method)) return next()
-    if (only.length > 0 && !only.some((p) => pathMatches(p, req.path))) return next()
-    if (exclude.some((p) => pathMatches(p, req.path))) return next()
+    const section = sections.find((s) => s.applies(req.path))
+    if (!section) return next()
     // Mounted before the route's own `authorization`, which then re-reads
     // the same session (read-only) — identity comes first either way.
-    if (!req.user) return authorization(req, res, () => check(req, res, next))
-    return check(req, res, next)
+    if (!req.user) return authorization(req, res, () => check(req, res, next, section))
+    return check(req, res, next, section)
   }
 }
 
