@@ -1,6 +1,6 @@
 # Kontrak Response API — ERP & Akuntansi (BE → FE)
 
-**Status:** berlaku untuk `BE-POS-App` master (`f3b5169`, 2026-10-18).
+**Status:** berlaku untuk `BE-POS-App` master (`c9fe118`, 2026-10-23).
 **Cakupan:** konvensi envelope & error global, modul akuntansi (COA, jurnal, laporan), expense, purchase (PO → goods receipt → purchase payment), sales return, dan order/tender kasir.
 **Dokumen terkait:**
 - `docs/order-create-client-contract.md` — siklus hidup idempotency key `POST /order/create` + jalur recovery (BE).
@@ -66,7 +66,7 @@ Endpoint tulis yang menerima `idempotencyKey` (order, sales return, goods receip
 ```json
 { "success": false, "message": "Store is required" }
 ```
-Status yang dipakai: `400` (validasi/bisnis), `403` (role/akses store), `404` (tidak ditemukan), `409` (konflik status), `500` (tak terduga — pesan selalu diganti `"Internal server error"`).
+Status yang dipakai: `400` (validasi/bisnis), `403` (role/akses store), `404` (tidak ditemukan), `409` (konflik status), `500` (tak terduga — controller yang menangkap error sendiri mengganti pesan menjadi `"Internal server error"`; fallback global memakai `err.message` atau `"Internal Server Error"`).
 
 ### 2.3 Error validasi Zod (umum di endpoint POST/PUT)
 ```json

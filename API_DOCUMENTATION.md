@@ -2,8 +2,9 @@
 
 **Base URL:** `https://api-bisa-nota.vercel.app`
 **Auth:** `Authorization: Bearer <JWT_TOKEN>` header
-**Roles:** `super_admin`, `admin`, `user`
+**Roles:** `super_admin`, `admin`, `kasir`, `user`
 **Content-Type:** `application/json` (unless stated otherwise)
+**Checkpoint:** reconciled against `master` `c9fe118` on 2026-10-23.
 
 ---
 
@@ -1369,11 +1370,11 @@ Auth required.
 ### GET `/order/customer-menu`
 No auth. **Query:** `store` (number).
 
-### GET `/order/customer-member`
-No auth. **Query:** `phone` (string).
+#### ~~GET `/order/customer-member`~~ (removed)
+**Removed 2026-10-23.** The endpoint is no longer mounted; use staff-verified member lookup at settlement. QR `customer-create` rejects a client-supplied `customerId` with `MEMBER_ATTACH_REQUIRES_STAFF`.
 
 ### POST `/order/customer-create`
-No auth. Same structure as `/order/create`.
+No auth. Same structure as `/order/create`, except `customerId` is rejected with `MEMBER_ATTACH_REQUIRES_STAFF`; staff attach a verified member at settlement. Closed/archived outlets return `STORE_CLOSED`/`STORE_ARCHIVED`.
 
 ---
 
@@ -2232,6 +2233,32 @@ Auth required (super_admin/admin).
 ```json
 { "stock": "number (required)", "notes": "string (optional)" }
 ```
+
+### GET `/ingredient/stock-summary`
+Auth required (super_admin/admin, store-scoped). Per-ingredient stock movement summary for a period, bucketed from `stock_history`. Dates are business days in the store's timezone.
+
+**Query:** `startDate`, `endDate` (optional, `YYYY-MM-DD`; omit for all time), `store` (super_admin selector).
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Success get ingredient stock summary",
+  "data": {
+    "store": 1, "startDate": "2026-10-01T00:00:00.000Z", "endDate": "2026-10-23T16:59:59.999Z",
+    "items": [{
+      "id": 7, "name": "Daging sapi", "unit": "gram", "status": "active", "minStock": 500,
+      "openingStockRecorded": true, "stockState": "recorded | unrecorded | uninitialized", "lastRecordedAt": "…", "lastCountedAt": "…",
+      "openingBalance": 10000, "consumed": 2500, "restored": 0, "adjusted": 0, "counted": 0,
+      "received": 5000, "other": 0, "closingBalance": 12500, "currentStock": 12500
+    }],
+    "menuSold": [{ "productId": 3, "productName": "Bakso urat", "quantity": 40 }]
+  }
+}
+```
+`consumed` is shown positive; `menuSold` counts paid/refunded, non-cancelled orders (gross, returns not subtracted).
+
+Key errors: 400 `store is required`; 400 `startDate/endDate must be YYYY-MM-DD`.
 
 ### DELETE `/ingredient/delete/:id`
 Auth required (super_admin/admin).
@@ -4041,6 +4068,26 @@ Export one report definition as a downloadable file. Non-super_admin must have a
 
 Key errors: 404 `Report tidak ditemukan` (unknown key); 400 `Format tidak didukung`; 403 `Store assignment required`.
 
+### GET `/report/data/:key`
+Auth required (store-scoped, 20 requests / 15 min per user, shared with export). Returns the same report definition as `/report/export/:key` as JSON, with the saved `report_config` layout applied, so the on-screen table, the export and the settings page show the same columns. Audited as `REPORT_EXPORT`.
+
+**Query:** same as export, without `format`.
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "key": "sales", "title": "Laporan Penjualan", "subtitle": "…", "accentColor": "#…",
+    "columns": [{ "key": "orderNumber", "label": "No. Order", "type": "text", "align": "left" }],
+    "rows": [],
+    "totals": {}
+  }
+}
+```
+
+Key errors: 404 `Report tidak ditemukan`; 403 `Store assignment required`.
+
 ---
 
 ---
@@ -4839,6 +4886,40 @@ Auth required (store-scoped; another store's order → 404). Returns the receipt
 ```json
 { "success": true, "data": { "orderId": 42, "text": "*WARUNG A*\n…\n*TOTAL: Rp20.000*" } }
 ```
+
+### GET `/pos/tables/status`
+Auth required (super_admin/admin/kasir, store-scoped). Cashier "Meja" panel: every table of the store with its unpaid open orders and whether the caller may release it (BA C-16, BR-TBL-008).
+
+**Response:**
+```json
+{
+  "success": true, "message": "Success",
+  "data": [{
+    "id": 4, "name": "Meja 4", "status": "occupied", "capacity": 4,
+    "unpaidOrders": [{ "id": 120, "orderNumber": "ORD-…", "source": "qr", "status": "pending", "paymentStatus": "unpaid", "totalPrice": 45000 }],
+    "canRelease": false, "blockedReason": "TABLE_HAS_UNPAID_ORDER"
+  }]
+}
+```
+`blockedReason`: `ALREADY_AVAILABLE` · `TABLE_IN_MAINTENANCE` (kasir only) · `TABLE_HAS_UNPAID_ORDER` (kasir only) · `null`.
+
+Key errors: 400 `STORE_REQUIRED`.
+
+### PUT `/pos/tables/:id/release`
+Auth required (super_admin/admin/kasir, store-scoped). Puts a table back to `available` and completes its pending/confirmed reservations. Idempotent; every release is audited with the reason.
+
+**Request:**
+```json
+{ "reason": "string (required)" }
+```
+
+**Response:**
+```json
+{ "success": true, "message": "Meja tersedia kembali", "data": { "id": 4, "name": "Meja 4", "status": "available", "changed": true } }
+```
+`changed: false` with message `Meja sudah tersedia` when the table was already available.
+
+Key errors: 400 `VALIDATION_ERROR` (bad id); 400 `RELEASE_REASON_REQUIRED`; 404 `TABLE_NOT_FOUND`; 409 `TABLE_IN_MAINTENANCE` (kasir); 409 `TABLE_HAS_UNPAID_ORDER` with `data.unpaidOrders` (kasir — admin may release).
 
 ### POST `/pos/invoice/send-email`
 Auth required.
@@ -6533,6 +6614,16 @@ Renames or suspends/resumes a tenant. Suspending makes the tenant authorize noth
 
 Key errors: 400 `CODE_IMMUTABLE`; 400 `INVALID_NAME`; 400 `INVALID_STATUS`; 400 `INVALID_OPERATION` (neither name nor status given); 404 `RESOURCE_NOT_FOUND`.
 
+### DELETE `/tenants/:id`
+Same gate as the other tenant routes. Deletes an empty tenant: retires its memberships and clears any session that had it selected (avoids `STALE_TENANT_CONTEXT`). Audited.
+
+**Response:**
+```json
+{ "success": true, "message": "Tenant deleted", "data": { "id": 1, "code": "toko-utama", "name": "Toko Utama", "status": "active" } }
+```
+
+Key errors: 404 `RESOURCE_NOT_FOUND`; 409 `TENANT_HAS_STORES` (move or delete its stores first); 409 `TENANT_HAS_MEMBERS` (other active members remain).
+
 ---
 
 ---
@@ -6724,6 +6815,35 @@ Runs the stored backup schedule if it matches the current minute; catches up (ru
 ```
 
 Key errors: 500 `{ "code": "INTERNAL_ERROR", "message": "Backup failed" }`.
+
+---
+
+### GET `/internal/expense-recurrence/run`
+Generates due recurring expenses (the in-process scheduler does not run on Vercel — FG-PLAT-04). Guarded by the shared `expense` lease.
+
+**Response** (200): `{ "skipped": false, "generated": 2 }` · `{ "skipped": true, "reason": "LEASE_HELD" }`.
+
+Key errors: 500 `{ "code": "INTERNAL_ERROR", "message": "Run failed" }`.
+
+---
+
+### GET `/internal/shift-swaps/expire`
+Expires pending shift-swap requests whose swap dates (`tanggal_mulai`/`tanggal_selesai`) are in the past or whose `expires_at` has passed. Guarded by the shared `shift-swap` lease.
+
+**Response** (200): `{ "skipped": false, "expired": 1 }` · `{ "skipped": true, "reason": "LEASE_HELD" }`.
+
+Key errors: 500 `{ "code": "INTERNAL_ERROR", "message": "Run failed" }`.
+
+---
+
+### GET `/internal/ap-reminders/run`
+Creates accounts-payable due-date reminders (up to 200 per run, duplicates skipped). Guarded by the shared `ap-reminder` lease.
+
+**Response** (200): `{ "skipped": false, "evaluated": 10, "eligible": 3, "created": 2, "skippedDuplicate": 1 }` · `{ "skipped": true, "reason": "LEASE_HELD" }`.
+
+Key errors: 500 `{ "code": "INTERNAL_ERROR", "message": "Run failed" }`.
+
+**Schedule:** all six `/internal/*` jobs are declared in `vercel.json` as daily crons (`0 0 * * *`, 00:00 UTC).
 
 ---
 
@@ -8363,6 +8483,48 @@ No auth. Ask Gemini AI assistant.
 
 ---
 
+## Assistant
+
+Two groups of routes under `/assistant`.
+
+**Service-to-service (AI assistant):** `Authorization: Bearer $ASSISTANT_SERVICE_SECRET` — NOT JWT. Fails closed: without a configured secret (min 32 chars) every call returns 503 `ASSISTANT_NOT_CONFIGURED`; a wrong secret returns 401 `UNAUTHORIZED`. `:storeId` must be a positive integer; unknown store → 404 `STORE_NOT_FOUND`. Money is IDR; "paid" means `paymentStatus = 'paid'` and status not cancelled/void.
+
+### GET `/assistant/stores/:storeId/summary`
+Today vs yesterday sales (store timezone) and low-stock product count.
+
+**Response:**
+```json
+{ "success": true, "data": { "store": { "id": 1, "name": "…", "city": "…", "status": "active", "timezone": "Asia/Jakarta" }, "currency": "IDR", "localDate": "2026-10-24", "today": { }, "yesterday": { }, "lowStockProducts": 3 } }
+```
+
+### GET `/assistant/stores/:storeId/stock`
+**Query:** `q` (≤100 chars), `lowOnly` (`true`/`false`), `limit` (1–50, default 20).
+
+**Response:** `{ "success": true, "data": { "store": "…", "total": 12, "products": [{ "id", "name", "sku", "unit", "stock", "minStock", … }] } }`
+
+### GET `/assistant/stores/:storeId/sales`
+**Query:** `from`, `to` (`YYYY-MM-DD`, `from ≤ to`, range < 92 days), `limit` (1–50, default 10).
+
+**Response:** `{ "success": true, "data": { "store", "currency": "IDR", "from", "to", "totals", "byDay": [{ "date", "revenue", "orders" }], "byPaymentMethod": [{ "method", "revenue", "orders" }] } }`
+
+### GET `/assistant/stores/:storeId/best-sellers`
+Same query as `/sales`.
+
+**Response:** `{ "success": true, "data": { "store", "currency": "IDR", "from", "to", "products": [{ "rank", "name", "quantity", "revenue" }] } }`
+
+**Owner Telegram link (session JWT):** `authorization` + server-side authorization context + canonical permission `store.manage` on the owner's store (the session's active store, or the tenant's only store). No store resolved → 400 `STORE_REQUIRED`.
+
+### POST `/assistant/telegram-link`
+Creates a Telegram connect link for the store's assistant chat. **Response** (201): `{ "success": true, "data": <link> }`.
+
+### GET `/assistant/telegram-link`
+Link/connection status. **Response:** `{ "success": true, "data": <status> }`.
+
+### DELETE `/assistant/telegram-link`
+Disconnects the store's Telegram assistant. **Response:** `{ "success": true, "message": "Telegram disconnected" }`.
+
+---
+
 ## Misc
 
 ### GET `/health`
@@ -8385,8 +8547,8 @@ POS API is running
 ```
 
 ### POST `/print-thermal`
-No auth. ESC/POS thermal print via Bluetooth.
+Auth required (`super_admin`, `admin`, `kasir`) + private-network guard + rate limit. ESC/POS thermal print via Bluetooth.
 
 ---
 
-**Total: 536 endpoints across 73 modules**
+**Total: 544 route handlers across 77 route modules, plus 3 inline routes in `api/index.js` (547 HTTP routes total).**
