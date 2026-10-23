@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { normalizePaymentMethod } = require('../api/service/canonicalPayment')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -31,7 +32,7 @@ const buildPaidOrder = async ({
   discountAmount = 0,
   taxAmount = 0,
   serviceChargeAmount = 0,
-  paymentMethod = 'cash',
+  paymentMethod = 'CASH',
   targetStore = store
 }) => {
   orderCounter += 1
@@ -67,7 +68,7 @@ const buildPaidOrder = async ({
 
   await db.transaction.create({
     order: order.id,
-    typePayment: paymentMethod,
+    typePayment: normalizePaymentMethod(paymentMethod),
     amount: totalPrice,
     createdBy: adminUser?.id || null
   })
@@ -757,7 +758,7 @@ describe('Cash ledger integration', () => {
     })
     await db.transaction.create({
       order: order.id,
-      typePayment: 'cash',
+      typePayment: 'CASH',
       cashReceived: 100000,
       changeGiven: 0,
       amount: 100000,
@@ -813,7 +814,7 @@ describe('Cash ledger integration', () => {
     })
     await db.transaction.create({
       order: order.id,
-      typePayment: 'cash',
+      typePayment: 'CASH',
       cashReceived: 50000,
       changeGiven: 0,
       amount: 50000,

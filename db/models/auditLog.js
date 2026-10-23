@@ -72,8 +72,8 @@ module.exports = (sequelize, DataTypes) => {
       },
       // AUD-1 (DR-20 foundation). All nullable/defaulted: historical rows
       // stay valid; unknowable context stays NULL rather than fabricated.
-      // NOTE: no tenant FK yet — the tenant entity itself is NOT IMPLEMENTED
-      // (DR-01). tenantId is a forward-compatible context slot.
+      // The tenant FK is added by the audit DB backstop migration; historical
+      // rows are backfilled from their store where possible.
       actorType: {
         type: DataTypes.STRING(20),
         allowNull: false,
@@ -82,7 +82,8 @@ module.exports = (sequelize, DataTypes) => {
       tenantId: {
         type: DataTypes.INTEGER,
         allowNull: true,
-        defaultValue: null
+        defaultValue: null,
+        references: { model: 'tenant', key: 'id' }
       },
       result: {
         type: DataTypes.STRING(20),
@@ -148,6 +149,12 @@ module.exports = (sequelize, DataTypes) => {
       foreignKey: 'store',
       as: 'storeData'
     })
+    if (models.tenant) {
+      AuditLog.belongsTo(models.tenant, {
+        foreignKey: 'tenantId',
+        as: 'tenant'
+      })
+    }
   }
 
   return AuditLog

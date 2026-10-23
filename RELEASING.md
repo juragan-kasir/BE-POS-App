@@ -223,6 +223,17 @@ used as rollback. Teardown (`DROP DATABASE`) is the final boundary.
 - Only merge to `master` after CI is green; rollback is available from the
   Vercel dashboard.
 
+## Scheduled jobs (Vercel cron)
+
+`vercel.json` registers six daily jobs, including the three operational
+schedulers: expense recurrence, shift-swap expiry, and AP reminders. The
+Hobby plan allows only one run per day per job, so every entry uses
+`0 0 * * *`; do not add a more frequent schedule until the plan is upgraded.
+Each `/internal/*` cron requires `CRON_SECRET` (at least 32 characters), and
+the jobs are idempotent through `utils/schedulerLock.js`, so overlapping
+invocations skip rather than double-post. A deployment without `CRON_SECRET`
+returns `503 CRON_NOT_CONFIGURED` and the jobs do not run.
+
 ## Fix workflow (routine fixes)
 
 1. Start in the main repository checkout with a verified, up-to-date `master`

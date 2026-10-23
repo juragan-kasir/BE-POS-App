@@ -24,6 +24,7 @@ const MAX_TEMPLATES_PER_TICK = 20
 
 async function generateDueRecurringExpenses() {
   const now = new Date()
+  let totalGenerated = 0
 
   const templates = await db.expense.findAll({
     where: {
@@ -117,12 +118,15 @@ async function generateDueRecurringExpenses() {
       generated += 1
     }
 
+    totalGenerated += generated
     if (generated > 0) {
       console.log(
         `Recurring expense ${tpl.expenseNumber}: generated ${generated} expense(s)`
       )
     }
   }
+
+  return totalGenerated
 }
 
 const startExpenseScheduler = (intervalMs = 60000) => {

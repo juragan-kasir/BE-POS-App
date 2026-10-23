@@ -92,12 +92,17 @@ const E2_BATCHES = Object.freeze({
   }),
   B4: deepFreeze({
     id: 'B4',
-    title: 'P1-5 goods_receipt.stockPosted posting flag',
-    expectedCount: 1,
-    migrations: ['20261016210748-add-stock-posted-to-goods-receipt.js'],
-    // Guarded add-if-missing BOOLEAN column (default TRUE preserves the
-    // pre-existing post-at-create accounting); replay is a SAFE_NOOP on
-    // migrated databases. No governance gate: schema-only, no data rewrite.
+    title: 'post-P1 additive schema hardening',
+    expectedCount: 2,
+    migrations: [
+      '20261016210748-add-stock-posted-to-goods-receipt.js',
+      '20261023000001-harden-audit-log.js'
+    ],
+    // Two schema-only additive migrations: the stockPosted flag (guarded
+    // add-if-missing BOOLEAN, default TRUE preserves post-at-create
+    // accounting) and the auditLog DB backstop (tenantId backfill + FK +
+    // append-only triggers). Both replay safely. No governance gate: no
+    // business-data decision and no destructive rewrite.
     openGates: []
   })
 })

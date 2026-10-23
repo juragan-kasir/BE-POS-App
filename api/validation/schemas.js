@@ -2403,3 +2403,78 @@ exports.createParkedCartSchema = z.object({
   }),
   idempotencyKey: z.string().max(255).optional().nullable()
 })
+
+// ===================== Thermal print (FG-SEC-09) =====================
+// The payload allowlist mirrors exactly the fields `generateESCPOS`
+// (api/index.js) reads. Anything else is dropped before it can reach the
+// Python subprocess, so the surface stays as small as the printer needs.
+//
+// `data` deliberately strips unknown keys instead of rejecting them: the
+// cashier FE posts the whole receipt model (labels, tender detail, paper
+// settings, ...), and the FE is not changed by this fix, so rejecting those
+// keys would break in-store Bluetooth printing. The request envelope itself
+// stays strict: an unknown top-level key is a 400.
+//
+// Money may arrive as a numeric string because the order tables keep money
+// in BIGINT/DECIMAL columns and the Postgres driver can return those as
+// strings; it is normalised to a finite, non-negative number.
+const stripThermalControlBytes = (value) =>
+  value.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+
+const thermalText = (max) =>
+  z.string().max(max).transform(stripThermalControlBytes)
+
+const printThermalAmount = z
+  .union([
+    z.number(),
+    z.string().regex(/^\d+(?:\.\d+)?$/, 'Angka tidak valid')
+  ])
+  .transform((value) => Number(value))
+  .refine((value) => Number.isFinite(value) && value >= 0, {
+    message: 'Nilai tidak boleh negatif'
+  })
+
+const optionalThermalAmount = printThermalAmount
+  .nullish()
+  .transform((value) => value ?? 0)
+
+const printThermalItemSchema = z.object({
+  name: thermalText(120).optional(),
+  productName: thermalText(120).optional(),
+  qty: optionalThermalAmount.optional(),
+  quantity: optionalThermalAmount.optional(),
+  price: optionalThermalAmount.optional(),
+  total: optionalThermalAmount.optional(),
+  subtotal: optionalThermalAmount.optional()
+})
+
+const printThermalSocialSchema = z.object({
+  platform: thermalText(40).nullish(),
+  account: thermalText(120).nullish()
+})
+
+exports.printThermalSchema = z.strictObject({
+  data: z
+    .object({
+      storeName: thermalText(120).optional(),
+      storeAddress: thermalText(300).optional(),
+      storePhone: thermalText(60).optional(),
+      storeEmail: thermalText(120).optional(),
+      memberName: thermalText(120).optional(),
+      memberTier: thermalText(60).optional(),
+      memberPoints: optionalThermalAmount.optional(),
+      orderNumber: thermalText(60).optional(),
+      cashier: thermalText(120).optional(),
+      date: thermalText(60).optional(),
+      items: z.array(printThermalItemSchema).max(200).optional(),
+      subtotal: optionalThermalAmount.optional(),
+      discount: optionalThermalAmount.optional(),
+      serviceCharge: optionalThermalAmount.optional(),
+      tax: optionalThermalAmount.optional(),
+      total: optionalThermalAmount.optional(),
+      socialMedia: z.array(printThermalSocialSchema).max(20).optional(),
+      socialMediaVisible: z.record(z.string(), z.boolean()).optional(),
+      footer: thermalText(300).optional()
+    })
+    .optional()
+})

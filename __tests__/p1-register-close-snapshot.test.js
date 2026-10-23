@@ -280,26 +280,25 @@ describe('SNAPSHOT — close persists the frozen contract', () => {
     expect(Number(row.expectedCash)).toBe(100000)
   })
 
-  test('SNAPSHOT-09: payment breakdown uses canonical methods with UNRECONCILED bucket', async () => {
+  test('SNAPSHOT-09: payment breakdown uses canonical methods', async () => {
     await rotateRegister(17)
     await makeCounterOrder()
     await makeCounterOrder({ paymentMethod: 'qris', extra: { referenceNumber: 'QR-SNAP-2' } })
-    // Legacy unmappable row, written directly on a register-attributed
-    // order: must surface as UNRECONCILED, never silently mapped. (Known
-    // aliases like 'tunai' normalize to CASH by the locked alias map, so
-    // the probe uses a genuinely unmappable tender.)
-    const legacyOrder = await makeCounterOrder()
-    await db.transaction.create({ order: legacyOrder.id, typePayment: 'bitcoin', amount: G, createdBy: adminUser.id })
+    // The DB CHECK now refuses unmappable tenders on new writes, so the
+    // write boundary is exercised with canonical OTHER. UNRECONCILED only
+    // applies to historical rows and is covered by the reporting unit tests.
+    const otherOrder = await makeCounterOrder()
+    await db.transaction.create({ order: otherOrder.id, typePayment: 'OTHER', amount: G, createdBy: adminUser.id })
     const register = await db.cashRegister.findOne({ where: { store: store.id, status: 'open' } })
     const closed = await closeRegister(register.id, 0)
     expect(closed.status).toBe(200)
     const zdata = (await zReport(register.id)).body.data
     const byType = Object.fromEntries(zdata.payments.map((p) => [p.type, p.amount]))
-    // Two counter CASH settlements (o1 + legacy order) plus the legacy alias row.
+    // Two counter CASH settlements (o1 + other order).
     expect(byType.CASH).toBe(2 * G)
     expect(byType.QRIS).toBe(G)
-    expect(byType.UNRECONCILED).toBe(G)
-    expect(zdata.payments.find((p) => p.type === 'UNRECONCILED').count).toBe(1)
+    expect(byType.OTHER).toBe(G)
+    expect(zdata.payments.find((p) => p.type === 'UNRECONCILED')).toBeUndefined()
   })
 
   test('SNAPSHOT-10/11/12: refund totals/counts, transaction count, and gross are frozen', async () => {

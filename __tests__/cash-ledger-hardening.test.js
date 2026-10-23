@@ -513,6 +513,7 @@ describe('Register-close serialization (P1-01 / P1-04)', () => {
       })
     ])
 
+    expect([200, 409]).toContain(closeRes.status)
     if (moveRes.status === 201) {
       // The movement won the register lock first — close must then see the
       // register still open at that moment; whichever of close's two
@@ -1013,7 +1014,7 @@ describe('Backward compatibility', () => {
     })
     await db.transaction.create({
       order: historicalOrder.id,
-      typePayment: 'cash',
+      typePayment: 'CASH',
       amount: 999999,
       cashReceived: 999999,
       changeGiven: 0,

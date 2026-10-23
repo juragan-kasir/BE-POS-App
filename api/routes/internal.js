@@ -10,6 +10,9 @@ const {
   drainAccountingOutbox,
   getAccountingOutboxHealth
 } = require('../service/accountingOutboxService')
+const expenseScheduler = require('../service/expenseScheduler')
+const shiftSwapScheduler = require('../service/shiftSwapScheduler')
+const apReminderService = require('../service/apReminderService')
 
 const router = express.Router()
 
@@ -148,6 +151,52 @@ router.get('/backup/run', requireCronSecret, async (req, res) => {
   } catch (error) {
     console.error('Scheduled backup run failed:', error)
     return res.status(500).json({ code: 'INTERNAL_ERROR', message: 'Backup failed' })
+  }
+})
+
+// FG-PLAT-04: the remaining three in-process schedulers never start on
+// Vercel. These endpoints drive the same functions behind the shared
+// CRON_SECRET gate and scheduler leases, so a cron call and a long-running
+// API instance can never process the same tick concurrently.
+router.get('/expense-recurrence/run', requireCronSecret, async (req, res) => {
+  try {
+    const gotLease = await tryAcquireSchedulerLock(db, 'expense', LEASE_MS)
+    if (!gotLease) {
+      return res.status(200).json({ skipped: true, reason: 'LEASE_HELD' })
+    }
+    const generated = await expenseScheduler.generateDueRecurringExpenses()
+    return res.status(200).json({ skipped: false, generated })
+  } catch (error) {
+    console.error('Recurring expense run failed:', error)
+    return res.status(500).json({ code: 'INTERNAL_ERROR', message: 'Run failed' })
+  }
+})
+
+router.get('/shift-swaps/expire', requireCronSecret, async (req, res) => {
+  try {
+    const gotLease = await tryAcquireSchedulerLock(db, 'shift-swap', LEASE_MS)
+    if (!gotLease) {
+      return res.status(200).json({ skipped: true, reason: 'LEASE_HELD' })
+    }
+    const expired = await shiftSwapScheduler.expirePendingSwaps()
+    return res.status(200).json({ skipped: false, expired })
+  } catch (error) {
+    console.error('Shift swap expiry run failed:', error)
+    return res.status(500).json({ code: 'INTERNAL_ERROR', message: 'Run failed' })
+  }
+})
+
+router.get('/ap-reminders/run', requireCronSecret, async (req, res) => {
+  try {
+    const gotLease = await tryAcquireSchedulerLock(db, 'ap-reminder', LEASE_MS)
+    if (!gotLease) {
+      return res.status(200).json({ skipped: true, reason: 'LEASE_HELD' })
+    }
+    const result = await apReminderService.generateApReminders({ limit: 200 })
+    return res.status(200).json({ skipped: false, ...result })
+  } catch (error) {
+    console.error('AP reminder run failed:', error)
+    return res.status(500).json({ code: 'INTERNAL_ERROR', message: 'Run failed' })
   }
 })
 

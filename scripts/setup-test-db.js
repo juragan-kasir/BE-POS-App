@@ -76,6 +76,16 @@ module.exports = async () => {
     run('createdb', ['-h', DB_HOST, '-p', DB_PORT, '-U', DB_USER, TEST_DB])
   }
 
+  // FG-SEC-05: the auditLog trigger is a production guard. Test fixtures
+  // still need to clean audit rows from the isolated database, so the test
+  // database — and only the test database — opts into the maintenance GUC.
+  // The trigger test overrides it with SET LOCAL ... = 'off' inside a
+  // transaction to prove the production path still denies raw mutations.
+  run('psql', [
+    '-h', DB_HOST, '-p', DB_PORT, '-U', DB_USER, '-d', 'postgres',
+    '-c', `ALTER DATABASE "${TEST_DB}" SET app.audit_maintenance = 'on'`
+  ])
+
   // 2. Clone the schema from the dev DB on first use.
   const tableCount = run('psql', [
     '-h',
@@ -428,6 +438,70 @@ module.exports = async () => {
     try {
       psqlTest(ddl)
     } catch {}
+  }
+
+  // FG-SEC-05: mirror the audit DB backstop migration for fresh CI clones
+  // whose dev-schema snapshot predates it. The trigger is idempotent; the
+  // UPDATE is a no-op on an empty test DB and repairs stale pre-run data.
+  try {
+    psqlTest(`
+      UPDATE "auditLog" AS a
+         SET "tenantId" = NULL
+       WHERE a."tenantId" IS NOT NULL
+         AND NOT EXISTS (SELECT 1 FROM "tenant" AS t WHERE t.id = a."tenantId");
+    `)
+    psqlTest(`
+      DO $$ BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint
+          WHERE conname = 'auditLog_tenantId_fkey'
+            AND conrelid = 'public."auditLog"'::regclass
+        ) THEN
+          ALTER TABLE "auditLog"
+            ADD CONSTRAINT "auditLog_tenantId_fkey"
+            FOREIGN KEY ("tenantId") REFERENCES "tenant"(id)
+            ON UPDATE CASCADE ON DELETE SET NULL;
+        END IF;
+      END $$;
+    `)
+    psqlTest(`
+      CREATE OR REPLACE FUNCTION audit_log_immutable_guard()
+      RETURNS trigger AS $$
+      BEGIN
+        IF current_setting('app.audit_maintenance', true) = 'on' THEN
+          RETURN COALESCE(NEW, OLD);
+        END IF;
+        RAISE EXCEPTION 'auditLog is append-only: % is not allowed', TG_OP;
+      END;
+      $$ LANGUAGE plpgsql;
+    `)
+    psqlTest(`
+      DROP TRIGGER IF EXISTS auditlog_no_mutation ON "auditLog";
+      CREATE TRIGGER auditlog_no_mutation
+        BEFORE UPDATE OR DELETE ON "auditLog"
+        FOR EACH ROW EXECUTE FUNCTION audit_log_immutable_guard();
+    `)
+    psqlTest(`
+      CREATE OR REPLACE FUNCTION audit_log_truncate_guard()
+      RETURNS trigger AS $$
+      BEGIN
+        IF current_setting('app.audit_maintenance', true) = 'on' THEN
+          RETURN NULL;
+        END IF;
+        RAISE EXCEPTION 'auditLog is append-only: TRUNCATE is not allowed';
+      END;
+      $$ LANGUAGE plpgsql;
+    `)
+    psqlTest(`
+      DROP TRIGGER IF EXISTS auditlog_no_truncate ON "auditLog";
+      CREATE TRIGGER auditlog_no_truncate
+        BEFORE TRUNCATE ON "auditLog"
+        FOR EACH STATEMENT EXECUTE FUNCTION audit_log_truncate_guard();
+    `)
+  } catch (error) {
+    throw new Error(
+      `[setup-test-db] failed to provision the auditLog DB backstop: ${error.message}`
+    )
   }
 
   // F5 session FK convergence: test DBs whose session table was created via

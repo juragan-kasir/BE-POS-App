@@ -1,6 +1,12 @@
 const db = require('../db/models')
 const crypto = require('crypto')
 
+const toTenantId = (value) => {
+  if (value === null || value === undefined || value === '') return null
+  const id = Number(value)
+  return Number.isInteger(id) && id > 0 ? id : null
+}
+
 const AUDIT_ACTIONS = Object.freeze({
   CREATE: 'create',
   UPDATE: 'update',
@@ -91,6 +97,7 @@ const auditLog = async ({
   newValues,
   ipAddress,
   userAgent,
+  tenantId,
   transaction
 }) => {
   try {
@@ -108,7 +115,8 @@ const auditLog = async ({
         newValues:
           redactValue(toPlain(newValues), new WeakSet()) || null,
         ipAddress: ipAddress || null,
-        userAgent: userAgent || null
+        userAgent: userAgent || null,
+        tenantId: toTenantId(tenantId)
       },
       { transaction: transaction || undefined }
     )
@@ -148,6 +156,7 @@ const createAudit = (
     newValues,
     ipAddress: req.ip,
     userAgent: req.get('User-Agent'),
+    tenantId: req.authContext?.activeTenantId ?? req.user?.tenantId ?? null,
     transaction
   })
 }
@@ -300,7 +309,9 @@ const recordAudit = async ({
     userAgent:
       typeof req?.get === 'function' ? req.get('User-Agent') : null,
     actorType,
-    tenantId: tenantId != null ? tenantId : null,
+    tenantId: toTenantId(
+      tenantId != null ? tenantId : req?.authContext?.activeTenantId
+    ),
     result: normalizedResult,
     requestId:
       requestId != null && String(requestId) !== ''

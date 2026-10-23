@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { normalizePaymentMethod } = require('../api/service/canonicalPayment')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -63,7 +64,7 @@ async function mkOrder(name, overrides) {
 async function mkTx(orderId, typePayment, amount) {
   const row = await db.transaction.create({
     order: orderId,
-    typePayment,
+    typePayment: normalizePaymentMethod(typePayment),
     amount
   })
   constTxIds.push(row.id)
@@ -329,9 +330,9 @@ describe('Batch B RED — register reconciliation contract', () => {
     const res = await zReport(register.id)
     const byMethod = res.body.data.reconciliation.sales.eligible.byPaymentMethod
     const byType = Object.fromEntries(byMethod.map((r) => [r.type, r]))
-    expect(byType.cash.amount).toBe(AMT_CASH + AMT_BIG + 1000)
-    expect(byType.qris.amount).toBe(AMT_QRIS)
-    expect(byType['e-wallet'].amount).toBe(AMT_EWALLET)
+    expect(byType.CASH.amount).toBe(AMT_CASH + AMT_BIG + 1000)
+    expect(byType.QRIS.amount).toBe(AMT_QRIS)
+    expect(byType.E_WALLET.amount).toBe(AMT_EWALLET)
   })
 
   test('R4 — excluded sales carry explicit reason codes', async () => {

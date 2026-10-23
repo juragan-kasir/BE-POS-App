@@ -108,10 +108,12 @@ beforeAll(async () => {
 afterAll(async () => {
   const orderIds = (await db.order.findAll({ where: { store: store.id }, attributes: ['id'] })).map((o) => o.id)
   const returnIds = (await db.sales_return.findAll({ where: { store: store.id }, attributes: ['id'] })).map((r) => r.id)
-  await db.sales_return_item.destroy({ where: { salesReturn: returnIds }, force: true })
-  await db.sales_return.destroy({ where: { id: returnIds }, force: true })
+  // transaction.salesreturn references sales_return, so payments must go
+  // before the return rows they point at.
   await db.split_bill.destroy({ where: { order: orderIds }, force: true })
   await db.transaction.destroy({ where: { order: orderIds }, force: true })
+  await db.sales_return_item.destroy({ where: { salesReturn: returnIds }, force: true })
+  await db.sales_return.destroy({ where: { id: returnIds }, force: true })
   await db.order_item.destroy({ where: { order: orderIds }, force: true })
   await db.order_status.destroy({ where: { order: orderIds }, force: true })
   await db.stock_history.destroy({ where: { store: store.id }, force: true })

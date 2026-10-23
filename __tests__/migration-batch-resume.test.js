@@ -26,8 +26,17 @@ const B3 = batches.E2_BATCHES.B3.migrations
 const ALL_E2 = [...B1, ...B2, ...B3, ...batches.E2_BATCHES.B4.migrations]
 const B1_FIRST_12 = B1.slice(0, 12)
 
+// Migrations added after the 2026-10-08 incident are not part of the
+// verified production ledger snapshot; keep the historical fixture frozen.
+const POST_INCIDENT_MIGRATIONS = ['20261023000001-harden-audit-log.js']
+
 // Production-like ledger: every non-E2 file recorded, plus the given E2 names.
-const ledgerWith = (...ran) => FILES.filter((f) => !ALL_E2.includes(f) || ran.flat().includes(f))
+const ledgerWith = (...ran) =>
+  FILES.filter(
+    (f) =>
+      !POST_INCIDENT_MIGRATIONS.includes(f) &&
+      (!ALL_E2.includes(f) || ran.flat().includes(f))
+  )
 // The verified incident state: 223 stamped/legacy rows + B1 #1–#12 = 235.
 const INCIDENT = ledgerWith(B1_FIRST_12)
 

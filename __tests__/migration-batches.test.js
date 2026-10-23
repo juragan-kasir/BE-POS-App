@@ -85,9 +85,12 @@ describe('D-08 E2 batch contract (Option C)', () => {
     expect(batches.E2_BATCHES.B3.expectedCount).toBe(1)
   })
 
-  test('B4 is exactly the stockPosted posting flag', () => {
-    expect(B4).toEqual(['20261016210748-add-stock-posted-to-goods-receipt.js'])
-    expect(batches.E2_BATCHES.B4.expectedCount).toBe(1)
+  test('B4 is the post-P1 additive schema batch', () => {
+    expect(B4).toEqual([
+      '20261016210748-add-stock-posted-to-goods-receipt.js',
+      '20261023000001-harden-audit-log.js'
+    ])
+    expect(batches.E2_BATCHES.B4.expectedCount).toBe(2)
   })
 
   test('ordering: M1 < M2 < M5 < M3 < B4 in filename (runner) order', () => {
@@ -106,7 +109,7 @@ describe('D-08 E2 batch contract (Option C)', () => {
       fixtureLedgerNames: harness.fixtureLedgerNames(FILES)
     })
     expect(e2).toEqual(ALL_E2)
-    expect(e2).toHaveLength(18)
+    expect(e2).toHaveLength(19)
   })
 
   test('M3 rename changed ordering only: old name gone, CHECK semantics intact', () => {
@@ -257,7 +260,7 @@ describe('D-08 E2 batch evaluation (runner safety)', () => {
   test('pendingBatchMembers lists every pending E2 member by batch', () => {
     const pending = batches.pendingBatchMembers({ files: FILES, metaNames: ledgerWith(B1) })
     expect(pending.map((p) => p.migration)).toEqual([M1, M2, M5, M3, ...B4])
-    expect(pending.map((p) => p.batch)).toEqual(['B2', 'B2', 'B2', 'B3', 'B4'])
+    expect(pending.map((p) => p.batch)).toEqual(['B2', 'B2', 'B2', 'B3', 'B4', 'B4'])
     expect(batches.pendingBatchMembers({ files: FILES, metaNames: ledgerWith(B1, B2, B3, B4) })).toEqual([])
   })
 

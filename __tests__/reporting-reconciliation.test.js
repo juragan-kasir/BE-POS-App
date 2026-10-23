@@ -135,7 +135,7 @@ describe('Reconciliation: sales revenue vs accounting journal', () => {
       openedAt: new Date(Date.now() - 1000)
     })
     const order = await makeOrder({ subTotal: 50000, discountAmount: 0, totalPrice: 50000, status: 'paid', paymentStatus: 'paid' })
-    await db.transaction.create({ order: order.id, typePayment: 'cash', amount: 50000, cashReceived: 50000, changeGiven: 0, createdBy: 98020 })
+    await db.transaction.create({ order: order.id, typePayment: 'CASH', amount: 50000, cashReceived: 50000, changeGiven: 0, createdBy: 98020 })
     // Post original journals
     await postOrderJournal({
       store: store.id,
