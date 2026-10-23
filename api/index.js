@@ -34,6 +34,9 @@ const compression = require('compression')
 
 const { initSocket } = require('./service/socket')
 const userContext = require('../utils/userContext')
+const { isPrivateAddress } = require('../utils/privateNetwork')
+const { validate: validateBody } = require('./middleware/validate')
+const { printThermalSchema } = require('./validation/schemas')
 const authorization = require('../utils/authorization')
 const {
   requireRole,
@@ -442,10 +445,76 @@ function generateESCPOS(data) {
   return enc
 }
 
+// FG-SEC-09: LAN-only Bluetooth print endpoint.
+//
+// The route pipes a receipt into a Python subprocess that writes to a
+// Bluetooth printer attached to the machine running the API. It must never be
+// reachable from the public internet. The client address is taken from the
+// socket unless the deployment explicitly declares how many proxies sit in
+// front of the API via TRUST_PROXY_HOPS. `req.ip` is deliberately not used:
+// api/index.js sets `trust proxy`, so Express derives `req.ip` from the
+// client-controlled X-Forwarded-For header.
+const resolveClientIp = (req) => {
+  const hops = Number.parseInt(process.env.TRUST_PROXY_HOPS, 10)
+  const forwarded = req.get('x-forwarded-for')
+
+  if (Number.isInteger(hops) && hops > 0) {
+    if (!forwarded) return req.socket?.remoteAddress || ''
+    const parts = forwarded
+      .split(',')
+      .map((part) => part.trim())
+      .filter(Boolean)
+    if (parts.length < hops) return ''
+    return parts[parts.length - hops]
+  }
+
+  // An undeclared forwarded chain means the real client address is unknown,
+  // and the header is client-controlled — refuse rather than believe it.
+  if (forwarded) return ''
+  return req.socket?.remoteAddress || ''
+}
+
+const PRINT_MAX_BODY_BYTES = 64 * 1024
+
+const printBodyLimit = (req, res, next) => {
+  const size = Buffer.byteLength(JSON.stringify(req.body || {}), 'utf8')
+  if (size > PRINT_MAX_BODY_BYTES) {
+    return res.status(413).json({
+      success: false,
+      message: 'Receipt payload is too large'
+    })
+  }
+  return next()
+}
+
+const printThermalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  // Keyed by the same address the guard trusts, so the limit cannot be
+  // dodged by rotating a forged X-Forwarded-For header.
+  keyGenerator: (req) => resolveClientIp(req) || 'unresolved',
+  message: {
+    success: false,
+    message: 'Too many print requests, try again later.'
+  }
+})
+
 app.post(
   '/print-thermal',
+  printThermalLimiter,
+  printBodyLimit,
   authorization,
   requireRole('super_admin', 'admin', 'kasir'),
+  (req, res, next) => {
+    if (!isPrivateAddress(resolveClientIp(req))) {
+      return res.status(403).json({
+        success: false,
+        message: 'Print endpoint is only reachable from the local network'
+      })
+    }
+    return next()
+  },
+  validateBody(printThermalSchema),
   (req, res) => {
     const { data } = req.body
     if (!data)

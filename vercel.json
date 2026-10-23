@@ -4,7 +4,10 @@
   "crons": [
     { "path": "/internal/accounting-outbox/drain", "schedule": "0 0 * * *" },
     { "path": "/internal/qr-orders/expire", "schedule": "0 0 * * *" },
-    { "path": "/internal/backup/run", "schedule": "0 0 * * *" }
+    { "path": "/internal/backup/run", "schedule": "0 0 * * *" },
+    { "path": "/internal/expense-recurrence/run", "schedule": "0 0 * * *" },
+    { "path": "/internal/shift-swaps/expire", "schedule": "0 0 * * *" },
+    { "path": "/internal/ap-reminders/run", "schedule": "0 0 * * *" }
   ],
   "builds": [
     {

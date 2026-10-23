@@ -50,13 +50,14 @@ describe('MED-1 scheduler resource isolation (bounded, fair batches)', () => {
       })
     })
 
-    test('one tick processes a bounded batch, not the entire cross-tenant backlog', async () => {
-      await generateDueRecurringExpenses()
+    test('one tick processes a bounded batch and reports how many it generated', async () => {
+      const generatedByTick = await generateDueRecurringExpenses()
 
       const generatedCount = await db.expense.count({
         where: { parentId: templateIds }
       })
 
+      expect(generatedByTick).toBe(generatedCount)
       expect(generatedCount).toBeGreaterThan(0)
       expect(generatedCount).toBeLessThan(TOTAL_TEMPLATES)
     })

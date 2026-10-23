@@ -15,9 +15,13 @@ const {
 
 const P = 'AUD_FND_'
 let store = null
+let tenantA = null
+let tenantB = null
 
 beforeAll(async () => {
   store = await db.location.create({ name: `${P}STORE`, status: 'active' })
+  tenantA = await db.tenant.create({ code: `${P}TA`, name: `${P}TENANT-A` })
+  tenantB = await db.tenant.create({ code: `${P}TB`, name: `${P}TENANT-B` })
 })
 
 afterAll(async () => {
@@ -27,6 +31,10 @@ afterAll(async () => {
     __auditMaintenance: true
   })
   await db.location.destroy({ where: { id: store?.id }, force: true })
+  const tenantIds = [tenantA?.id, tenantB?.id].filter(Boolean)
+  if (tenantIds.length) {
+    await db.tenant.destroy({ where: { id: tenantIds }, force: true })
+  }
   await db.sequelize.close()
 })
 
@@ -98,11 +106,11 @@ describe('AUD-1 contract', () => {
       actor: { type: 'USER', id: 2 },
       action: 'UPDATE',
       entity: 'STORE',
-      tenantId: 11,
+      tenantId: tenantA.id,
       storeId: store.id,
       description: `${P}tenant`
     })
-    expect(tenantScoped.tenantId).toBe(11)
+    expect(tenantScoped.tenantId).toBe(tenantA.id)
     expect(tenantScoped.store).toBe(store.id)
     const platform = await recordAudit({
       actor: { type: 'SYSTEM' },
@@ -212,11 +220,11 @@ describe('AUD-1 safety', () => {
       req: baseReq(),
       action: 'UPDATE',
       entity: 'USER',
-      tenantId: 22,
+      tenantId: tenantB.id,
       storeId: null,
       description: `${P}explicit`
     })
-    expect(row.tenantId).toBe(22)
+    expect(row.tenantId).toBe(tenantB.id)
     expect(row.store).toBeNull()
   })
 })

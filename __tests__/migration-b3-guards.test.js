@@ -22,6 +22,9 @@ const B1 = batches.E2_BATCHES.B1.migrations
 const B2 = batches.E2_BATCHES.B2.migrations
 const ALL_E2 = [...B1, ...B2, ...batches.E2_BATCHES.B3.migrations, ...batches.E2_BATCHES.B4.migrations]
 const ledgerWith = (...ran) => FILES.filter((f) => !ALL_E2.includes(f) || ran.flat().includes(f))
+const POST_INCIDENT_MIGRATIONS = ['20261023000001-harden-audit-log.js']
+const incidentLedgerWith = (...ran) =>
+  ledgerWith(...ran).filter((f) => !POST_INCIDENT_MIGRATIONS.includes(f))
 const BEFORE_B3 = ledgerWith(B1, B2)
 const AFTER_B3 = [...BEFORE_B3, M3]
 const GUARD = batches.BATCH_SESSION_GUARDS.B3
@@ -388,7 +391,7 @@ describe('D-08 B3 guarded runner (injected, no database)', () => {
 
   test('--resume B1-D05 runs its own path: exact { to } spawn, never the B3 guards', async () => {
     const D05 = '20261012000001-d05-member-identity-uniqueness.js'
-    const incident = ledgerWith(B1.slice(0, 12))
+    const incident = incidentLedgerWith(B1.slice(0, 12))
     const deps = {
       argv: ['--env', 'production', '--resume', 'B1-D05'],
       preflight: okPreflight(incident),

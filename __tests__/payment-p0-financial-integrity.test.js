@@ -562,7 +562,7 @@ describe('P0-3 equivalent path — store deletion never cancels orders that hold
       totalQuantity: 1,
       source: 'pos'
     })
-    await db.transaction.create({ order: paid.id, typePayment: 'cash', amount: G })
+    await db.transaction.create({ order: paid.id, typePayment: 'CASH', amount: G })
     try {
       const res = await request(app)
         .delete('/location/delete-location')

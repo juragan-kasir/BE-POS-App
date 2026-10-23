@@ -69,12 +69,12 @@ beforeAll(async () => {
     costPrice: 2500
   })
 
-  // One paid order per canonical tender (distinct amounts), plus one
-  // genuinely unmappable legacy tender.
+  // One paid order per canonical tender (distinct amounts). The DB CHECK
+  // refuses unmappable tenders on new writes; legacy UNRECONCILED reporting
+  // is covered by the canonical-payment unit tests.
   for (const [i, method] of CANONICAL.entries()) {
     await createPaidOrder(method, 1000 * (i + 1))
   }
-  await createPaidOrder('bitcoin', 9000)
 
   await db.user.create({
     id: SUPER_ID,
@@ -117,16 +117,16 @@ describe('GET /pos/dashboard/super-admin response contract', () => {
   describe('camelCase SQL aliases reach the API contract', () => {
     test('summary.itemsSold and summary.serviceCharge are summed from paid orders', () => {
       const { summary } = res.body.data
-      expect(summary.orders).toBe(8)
-      expect(summary.itemsSold).toBe(16)
-      expect(summary.serviceCharge).toBe(800)
+      expect(summary.orders).toBe(7)
+      expect(summary.itemsSold).toBe(14)
+      expect(summary.serviceCharge).toBe(700)
     })
 
     test('per-store and daily-trend itemsSold are populated', () => {
       const { storePerformance, kpiTrend } = res.body.data
       const row = storePerformance.find((s) => s.storeId === store.id)
-      expect(row.itemsSold).toBe(16)
-      expect(kpiTrend.reduce((s, d) => s + d.itemsSold, 0)).toBe(16)
+      expect(row.itemsSold).toBe(14)
+      expect(kpiTrend.reduce((s, d) => s + d.itemsSold, 0)).toBe(14)
     })
 
     test('operations stock value includes product and ingredient value', async () => {
@@ -153,24 +153,17 @@ describe('GET /pos/dashboard/super-admin response contract', () => {
       }
     )
 
-    test('an unmappable tender is reported as UNRECONCILED, never merged into another bucket', () => {
-      const { byType } = res.body.data.paymentBreakdown
-      expect(byType.find((b) => b.type === 'UNRECONCILED')).toEqual(
-        expect.objectContaining({ count: 1, amount: 9000 })
-      )
-    })
-
     test('only canonical bucket keys are emitted (no legacy cash/ewallet/bank/card/other)', () => {
       const { byType } = res.body.data.paymentBreakdown
       const types = byType.map((b) => b.type).sort()
-      expect(types).toEqual([...CANONICAL, 'UNRECONCILED'].sort())
+      expect(types).toEqual([...CANONICAL].sort())
+      expect(types).not.toContain('UNRECONCILED')
     })
 
     test('byMethod keeps the stored value and carries its canonical bucket', () => {
       const { byMethod } = res.body.data.paymentBreakdown
       const eWallet = byMethod.find((m) => m.method === 'E_WALLET')
       expect(eWallet.bucket).toBe('E_WALLET')
-      expect(byMethod.find((m) => m.method === 'bitcoin').bucket).toBe('UNRECONCILED')
     })
 
     test('buckets are ordered by amount desc, canonical order on ties', () => {

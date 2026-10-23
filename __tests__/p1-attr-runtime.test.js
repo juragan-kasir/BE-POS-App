@@ -436,12 +436,12 @@ describe('ATTR — creator vs collector separation', () => {
 
   test('ATTR-02: legacy null-register rows are never rewritten by new flows', async () => {
     const quarantined = await makeQrOrder()
-    const legacy = await db.transaction.create({ order: quarantined.id, typePayment: 'cash', amount: 10000, createdBy: null })
+    const legacy = await db.transaction.create({ order: quarantined.id, typePayment: 'CASH', amount: 10000, createdBy: null })
     try {
       const order = await makeQrOrder()
       expect((await updateStatus(adminToken, { id: order.id, store: store.id, status: 'paid', paymentMethod: 'cash' })).status).toBe(200)
       const row = await db.transaction.findByPk(legacy.id)
-      expect(row.typePayment).toBe('cash')
+      expect(row.typePayment).toBe('CASH')
       expect(row.cashRegisterId).toBeNull()
     } finally {
       await db.transaction.destroy({ where: { id: legacy.id }, force: true })
