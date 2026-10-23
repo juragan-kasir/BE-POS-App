@@ -46,6 +46,19 @@ const customerCreateLimiter = rateLimit({
   }
 })
 
+const customerReviewLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  keyGenerator: (req) => {
+    const device = String(req.body?.deviceId || '').slice(0, 64) || 'no-device'
+    return `${device}:${ipKeyGenerator(req.ip)}`
+  },
+  message: {
+    success: false,
+    message: 'Too many reviews, please try again later.'
+  }
+})
+
 // Order CRUD - All authenticated users (POS operations)
 router.post(
   '/create',
@@ -98,7 +111,6 @@ router.put(
 )
 // Customer-facing (no auth)
 router.get('/customer-menu', orderController.getCustomerMenu)
-router.get('/customer-member', orderController.getCustomerMember)
 router.get('/customer-orders', orderController.getCustomerOrders)
 // :token is the order's opaque publicToken (not its database id) —
 // required so this unauthenticated route can't be used to enumerate
@@ -108,6 +120,10 @@ router.post('/customer-create', customerCreateLimiter, orderController.createCus
 router.get('/receipt-html/:token', orderController.getReceiptHTML)
 router.get('/customer-tax-rate', orderController.getCustomerTaxRate)
 router.get('/customer-reviews', orderController.getProductReviews)
-router.post('/customer-review', orderController.createCustomerReview)
+router.post(
+  '/customer-review',
+  customerReviewLimiter,
+  orderController.createCustomerReview
+)
 
 module.exports = router

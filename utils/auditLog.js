@@ -13,7 +13,9 @@ const AUDIT_ACTIONS = Object.freeze({
   REFUND: 'refund',
   LOGIN: 'login',
   LOGOUT: 'logout',
-  STATUS_CHANGE: 'status_change'
+  STATUS_CHANGE: 'status_change',
+  REPORT_EXPORT: 'report_export',
+  RECEIPT_READ: 'receipt_read'
 })
 
 // Recursively strips fields that must never reach the auditLog JSONB

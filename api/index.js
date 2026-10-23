@@ -28,13 +28,18 @@ const http = require('http')
 const cors = require('cors')
 const cookieParser = require('cookie-parser')
 const rateLimit = require('express-rate-limit')
+const { ipKeyGenerator } = rateLimit
 const helmet = require('helmet')
 const compression = require('compression')
 
 const { initSocket } = require('./service/socket')
 const userContext = require('../utils/userContext')
 const authorization = require('../utils/authorization')
-const { requireRole, hasVerifiedBearerCredential } = require('../utils/authorization')
+const {
+  requireRole,
+  getVerifiedBearerPayload,
+  hasVerifiedBearerCredential
+} = require('../utils/authorization')
 
 const productRoutes = require('./routes/product')
 const authRoutes = require('./routes/auth')
@@ -136,6 +141,25 @@ const limiter = rateLimit({
   }
 })
 
+const authenticatedLimiter = rateLimit({
+  windowMs:
+    Number.parseInt(process.env.AUTH_RATE_LIMIT_WINDOW_MS, 10) || 60 * 1000,
+  max: Number.parseInt(process.env.AUTH_RATE_LIMIT_MAX, 10) || 600,
+  skip: (req) =>
+    req.method === 'OPTIONS' || !getVerifiedBearerPayload(req),
+  keyGenerator: (req) => {
+    const payload = getVerifiedBearerPayload(req)
+    if (payload && (payload.id || payload.sub)) {
+      return `user:${payload.id || payload.sub}`
+    }
+    return ipKeyGenerator(req.ip)
+  },
+  message: {
+    success: false,
+    message: 'Too many requests, please try again later.'
+  }
+})
+
 app.set('trust proxy', 1)
 app.use(helmet())
 app.use(compression())
@@ -166,6 +190,7 @@ app.get('/health', async (_, res) => {
 })
 
 app.use(limiter)
+app.use(authenticatedLimiter)
 app.use(express.urlencoded({ extended: true }))
 app.use(express.json())
 app.use(cookieParser())

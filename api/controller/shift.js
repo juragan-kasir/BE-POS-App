@@ -13,6 +13,7 @@ const {
 } = require('../../utils/shiftChain')
 const { scalarStoreScope, isSuperAdmin } = require('../../utils/tenantScope')
 const { authorizedStoreIds } = require('../../utils/storeValidation')
+const { getStoreLocalDate } = require('../../utils/businessDate')
 
 const isGlobalSuperAdmin = (req) => isSuperAdmin(req) && req.user?.store == null
 
@@ -75,28 +76,47 @@ const validateMembersForStores = async (stores, employeeIds) => {
   return { ok: true }
 }
 
-const todayStr = () => {
-  const d = new Date()
-  const mm = String(d.getMonth() + 1).padStart(2, '0')
-  const dd = String(d.getDate()).padStart(2, '0')
-  return `${d.getFullYear()}-${mm}-${dd}`
+const storeLocalToday = async (storeId, now = new Date()) => {
+  const location = storeId
+    ? await db.location.findOne({
+        where: { id: storeId },
+        attributes: ['timezone']
+      })
+    : null
+  return getStoreLocalDate(location?.timezone, now)
 }
 
-const autoExpireShifts = async () => {
-  const today = todayStr()
-  const [count] = await Shift.update(
-    { status: 'inactive' },
-    {
-      where: {
-        status: 'active',
-        tanggal_selesai: { [Op.ne]: null, [Op.lt]: today }
+const autoExpireShifts = async (storeId = null, now = new Date()) => {
+  const stores = storeId
+    ? [storeId]
+    : (
+        await Shift.findAll({
+          where: { status: 'active' },
+          attributes: ['store'],
+          group: ['store'],
+          raw: true
+        })
+      ).map((row) => row.store)
+
+  let total = 0
+  for (const id of stores) {
+    const today = await storeLocalToday(id, now)
+    const [count] = await Shift.update(
+      { status: 'inactive' },
+      {
+        where: {
+          store: id,
+          status: 'active',
+          tanggal_selesai: { [Op.ne]: null, [Op.lt]: today }
+        }
       }
-    }
-  )
-  if (count > 0) {
-    console.log(`[shift] ${count} shift expired -> status inactive (${today})`)
+    )
+    total += count
   }
-  return count
+  if (total > 0) {
+    console.log(`[shift] ${total} shift expired -> status inactive`)
+  }
+  return total
 }
 
 exports.getAllShift = async (req, res) => {
@@ -111,8 +131,6 @@ exports.getAllShift = async (req, res) => {
   const pageSize = Math.min(100, Math.max(1, parseInt(rawPageSize, 10) || 10))
 
   try {
-    await autoExpireShifts()
-
     const offset = (page - 1) * pageSize
 
     let statusCondition = {}
@@ -126,6 +144,8 @@ exports.getAllShift = async (req, res) => {
       : ownStoreId(req)
     if (effectiveStore) where.store = effectiveStore
     else if (!isGlobalSuperAdmin(req)) where.store = -1
+
+    await autoExpireShifts(effectiveStore)
     if (search) where.name = { [Op.iLike]: `%${search}%` }
 
     const shiftCategory = await Shift.findAll({
@@ -177,8 +197,6 @@ exports.getShiftDropdown = async (req, res) => {
   const { status } = req.query
 
   try {
-    await autoExpireShifts()
-
     const whereCondition = {}
     const scopedStore = isGlobalSuperAdmin(req)
       ? req.storeId
@@ -187,6 +205,8 @@ exports.getShiftDropdown = async (req, res) => {
       : ownStoreId(req)
     if (scopedStore) whereCondition.store = scopedStore
     else if (!isGlobalSuperAdmin(req)) whereCondition.store = -1
+
+    await autoExpireShifts(scopedStore)
     if (status === 'active') {
       whereCondition.status = 'active'
     } else if (status === 'inactive') {
@@ -651,7 +671,9 @@ exports.deleteShiftById = async (req, res) => {
 exports.getShiftById = async (req, res) => {
   const { id } = req.params
   try {
-    await autoExpireShifts()
+    await autoExpireShifts(
+      isGlobalSuperAdmin(req) ? null : ownStoreId(req)
+    )
 
     // IDOR fix: was findByPk(id) with no store filter.
     const shift = await Shift.findOne({ where: shiftScope(req, { id }) })
@@ -682,3 +704,5 @@ exports.getShiftById = async (req, res) => {
     })
   }
 }
+
+exports.autoExpireShifts = autoExpireShifts

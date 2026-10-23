@@ -40,6 +40,7 @@ const { enrichAuditFields } = require('../../utils/auditFields')
 const { resolveAuthorizationContext } = require('../../utils/authContext')
 const { okPage } = require('../../utils/canonicalHttp')
 const { superAdminStoreIds } = require('../../utils/tenantScope')
+const { getStoreOpenStatus } = require('../../utils/storeHours')
 const { page: pageOf, paginated } = require('../service/scopeVisibilityService')
 const { assertOperationalStoreTenant, resolveRequestedLifecycleStatus } = require('../validation/schemas')
 
@@ -96,12 +97,19 @@ exports.getAllLocationPublic = async (req, res) => {
         'detailLocation',
         'latitude',
         'longitude',
-        'status'
+        'status',
+        'timezone',
+        'openingHours'
       ]
     })
-    return res
-      .status(200)
-      .json({ success: true, message: 'Success', data: locations })
+    const data = locations.map((location) => {
+      const { timezone, openingHours, ...publicFields } = location.toJSON()
+      return {
+        ...publicFields,
+        ...getStoreOpenStatus(openingHours, timezone)
+      }
+    })
+    return res.status(200).json({ success: true, message: 'Success', data })
   } catch (error) {
     console.error('Error:', error)
     return res

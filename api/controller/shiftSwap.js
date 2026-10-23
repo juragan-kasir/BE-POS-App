@@ -6,6 +6,7 @@ const { createAudit } = require('../../utils/auditLog')
 const { createNotification } = require('../../utils/createNotification')
 const { shiftEvents } = require('../../utils/shiftEvents')
 const { scalarStoreScope } = require('../../utils/tenantScope')
+const { getStoreDayBounds } = require('../../utils/businessDate')
 
 const ShiftSwap = db.shift_swap
 const User = db.user
@@ -119,11 +120,8 @@ const normId = (v) => Number(v)
 
 const toDateStr = (d) => {
   if (!d) return null
-  const dt = new Date(`${String(d).slice(0, 10)}T00:00:00`)
-  if (isNaN(dt.getTime())) return null
-  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(
-    dt.getDate()
-  ).padStart(2, '0')}`
+  const raw = String(d).slice(0, 10)
+  return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : null
 }
 
 const isOverlap = (aStart, aEnd, bStart, bEnd) => {
@@ -138,7 +136,13 @@ const isOverlap = (aStart, aEnd, bStart, bEnd) => {
 // Cek apakah seorang karyawan sudah punya shift LAGI (atau absensi) pada
 // rentang tanggal yang diminta. excludeShiftIds = shift yang justru sedang
 // ditukar (jangan dianggap bentrok).
-const findDoubleShift = async ({ userId, tanggal_mulai, tanggal_selesai, excludeShiftIds = [] }) => {
+const findDoubleShift = async ({
+  userId,
+  store,
+  tanggal_mulai,
+  tanggal_selesai,
+  excludeShiftIds = []
+}) => {
   const id = normId(userId)
   if (isNaN(id)) return null
 
@@ -162,14 +166,19 @@ const findDoubleShift = async ({ userId, tanggal_mulai, tanggal_selesai, exclude
     }
   }
 
-  const dayStart = new Date(`${b1}T00:00:00`)
-  const dayEnd = new Date(`${b2}T00:00:00`)
-  dayEnd.setDate(dayEnd.getDate() + 1)
+  const location = store
+    ? await Location.findOne({
+        where: { id: store },
+        attributes: ['timezone']
+      })
+    : null
+  const rangeStart = getStoreDayBounds(b1, location?.timezone).start
+  const rangeEnd = getStoreDayBounds(b2, location?.timezone).end
 
   const attendance = await Attendance.findOne({
     where: {
       userId: id,
-      absenAt: { [Op.gte]: dayStart, [Op.lt]: dayEnd },
+      absenAt: { [Op.gte]: rangeStart, [Op.lte]: rangeEnd },
       status: { [Op.ne]: 'cancelled' }
     }
   })
@@ -422,6 +431,7 @@ exports.createShiftSwap = async (req, res, next) => {
     if (swapDates) {
       const targetConflict = await findDoubleShift({
         userId: targetId,
+        store: targetStore,
         tanggal_mulai: tanggal_mulai || swapDates,
         tanggal_selesai: tanggal_selesai || swapDates,
         excludeShiftIds: [requesterShiftId, targetShiftId]
@@ -442,6 +452,7 @@ exports.createShiftSwap = async (req, res, next) => {
 
       const requesterConflict = await findDoubleShift({
         userId: finalRequesterId,
+        store: targetStore,
         tanggal_mulai: tanggal_mulai || swapDates,
         tanggal_selesai: tanggal_selesai || swapDates,
         excludeShiftIds: [requesterShiftId, targetShiftId]
