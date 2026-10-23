@@ -13,11 +13,12 @@
 //   ALLOWLISTED_ROUTE_FILES   — not a user-menu surface; each entry states
 //                               the gate that owns admission instead.
 //   MENU_WRITE_GATED_ROUTES   — writes carry router.use(menuWriteGate(file))
-//                               (wave 2, utils/menuWriteGate.js).
-//   GATED_LEGACY_ROUTE_FILES  — staged rollout (DR-24 C-02): the file keeps
-//                               its existing role/capability/store gates and
-//                               is scheduled for menu enforcement in a later
-//                               wave; listed explicitly so drift is visible.
+//                               (waves 2–3, utils/menuWriteGate.js). An entry
+//                               is one gate, or an array of gates each
+//                               confined to its own `only` path prefixes.
+//   GATED_LEGACY_ROUTE_FILES  — staged rollout (DR-24 C-02). Empty since wave
+//                               3 (FG-SEC-01): every file is either
+//                               write-gated or allowlisted with its owner gate.
 
 const MENU_ENFORCED_ROUTES = Object.freeze({})
 
@@ -62,63 +63,77 @@ const MENU_WRITE_GATED_ROUTES = Object.freeze({
   'supplierContact.js': gate('/supplier', ALL6),
   'table.js': gate('/table-list', [...CRUD, 'update-status'], { aliases: ['/table'] }),
   'taxConfig.js': gate('/tax-list', CRUD),
-  'type-payment.js': gate('/type-payment-list', CRUD)
+  'type-payment.js': gate('/type-payment-list', CRUD),
+
+  // Wave 3 (FG-SEC-01): the remaining back-office writes. Cashier, floor and
+  // self-service paths stay out (they are allowlisted below or not listed in
+  // `only`) — a cashier role's menu does not carry these back-office keys.
+  'accountsReceivable.js': gate('/accounts-receivable', ['view']),
+  'backup.js': gate('/backup', ['view']),
+  'businessTrip.js': gate('/business-trip', CRUD),
+  'cashRegister.js': gate('/cash-register/current', ['view', 'add']),
+  'department.js': gate('/department-list', CRUD),
+  'employee.js': gate('/employee-list', CRUD),
+  'inventory.js': gate('/stock-adjustment', ['add'], { only: ['/batch', '/reconcile'] }),
+  'invoice.js': gate('/invoice-page', ['add', 'edit', 'view']),
+  'member.js': gate('/member-list', CRUD),
+  'memberTier.js': gate('/member-tier', CRUD),
+  'pos.js': Object.freeze([
+    gate('/stock-adjustment', ['add'], { only: ['/adjust'] }),
+    gate('/stock-transfer', ['view', 'add', 'delete'], { only: ['/transfer'] }),
+    gate('/price-list-template', ['view', 'edit'], { only: ['/product/update-price-by-store'] }),
+    gate('/purchase-return', ['view'], { only: ['/purchase-order'] }),
+    gate('/goods-receipt', ['add', 'view', 'delete'], { only: ['/product/add-batch'] })
+  ]),
+  'position.js': gate('/position-list', CRUD),
+  'salesReturn.js': gate('/sales-return', ['view']),
+  'shift.js': gate('/shift-list', CRUD),
+  'shiftTemplate.js': gate('/shift-template-list', CRUD),
+  'social-media.js': gate('/invoice-page', ['add', 'edit', 'view']),
+  'stockHistory.js': gate('/low-stock', ['view']),
+  'supplierPerformance.js': gate('/supplier-score-list', ['view', 'add'])
 })
 
 const ALLOWLISTED_ROUTE_FILES = Object.freeze({
   'internal.js':
     'External scheduler surface, not a user menu; fail-closed CRON_SECRET (Bearer) gate.',
   'auth.js':
-    'Public authentication + account self-service; the authorization/session layer owns admission.'
+    'Public authentication + account self-service; the authorization/session layer owns admission.',
+  // Canonical-permission surfaces (authorizationContextMiddleware + scope).
+  'assignment.js': 'Store assignments; every mutation is re-authorized from the canonical context in the T-03A service.',
+  'authorizationContext.js': 'Session context selection for the caller itself; authorization owns admission.',
+  'effectiveScope.js': 'Read-only effective scope of the caller.',
+  'membership.js': 'Tenant memberships; every mutation is re-authorized from the canonical context in the T-03A service.',
+  'tenant.js': 'Tenant administration; requireTenantAdministration (platform or own tenant_admin).',
+  'assistant.js': 'Service secret (ASSISTANT_SERVICE_SECRET) or canonical store.manage for the owner link.',
+  'auditLog.js': 'Read-only; canonical audit.read scope (requireAuditRead).',
+  // Cashier / floor flows: money actions use DR-23 capabilities; the cashier
+  // role menu does not carry back-office keys, so a menu gate would break them.
+  'order.js': 'Counter/QR orders; payment.collect / order.cancel / order.void capabilities; public QR create is rate-limited.',
+  'splitBill.js': 'Split bills; split.manage / payment.collect capabilities.',
+  'parkedCart.js': 'Cashier parked carts; store-scoped, any authenticated cashier.',
+  'receipt.js': 'Read-only receipt for a store-scoped order.',
+  'queue.js': 'Floor queue; requireRole(super_admin, admin, kasir) — cashier menus carry no /queue-list.',
+  'waiter-request.js': 'Diner waiter call (public, rate-limited) + floor status by requireRole(super_admin, admin, kasir).',
+  'thermalPrinter.js': 'Receipt print for the cashier; configure is super_admin only; router-level authorization + store access.',
+  'notification.js': "The caller's own notifications (mark read).",
+  // Self-service HR with role-gated approvals.
+  'attendance.js': "The caller's own clock-in/out.",
+  'overtime.js': 'Own overtime requests; approval/payroll by requireRole(super_admin, admin).',
+  'shiftSwap.js': 'Own swap requests; approval by requireRole(super_admin, admin).',
+  // Read-only / reporting surfaces (no writes).
+  'best-selling.js': 'Read-only reporting.',
+  'exportMaster.js': 'Read-only Excel export.',
+  'overview.js': 'Read-only dashboard.',
+  'region.js': 'Read-only Indonesian region reference data.',
+  'report.js': 'Read-only reporting.',
+  'reportExport.js': 'Read-only report data/export; audited (REPORT_EXPORT).',
+  'reporting.js': 'Read-only platform rollup.',
+  'faq.js': 'Public FAQ + rate-limited AI ask; no business data written.',
+  'currency.js': 'No UI caller; requireRole(super_admin, admin); scheduled for removal by DR-27.'
 })
 
-const GATED_LEGACY_ROUTE_FILES = Object.freeze([
-  'accountsReceivable.js',
-  'assignment.js',
-  'assistant.js',
-  'attendance.js',
-  'auditLog.js',
-  'authorizationContext.js',
-  'backup.js',
-  'best-selling.js',
-  'businessTrip.js',
-  'cashRegister.js',
-  'currency.js',
-  'department.js',
-  'effectiveScope.js',
-  'employee.js',
-  'exportMaster.js',
-  'faq.js',
-  'inventory.js',
-  'invoice.js',
-  'member.js',
-  'memberTier.js',
-  'membership.js',
-  'notification.js',
-  'order.js',
-  'overtime.js',
-  'overview.js',
-  'parkedCart.js',
-  'pos.js',
-  'position.js',
-  'queue.js',
-  'receipt.js',
-  'region.js',
-  'report.js',
-  'reportExport.js',
-  'reporting.js',
-  'salesReturn.js',
-  'shift.js',
-  'shiftSwap.js',
-  'shiftTemplate.js',
-  'social-media.js',
-  'splitBill.js',
-  'stockHistory.js',
-  'supplierPerformance.js',
-  'tenant.js',
-  'thermalPrinter.js',
-  'waiter-request.js'
-])
+const GATED_LEGACY_ROUTE_FILES = Object.freeze([])
 
 module.exports = {
   MENU_ENFORCED_ROUTES,

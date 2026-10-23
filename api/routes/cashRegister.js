@@ -1,5 +1,9 @@
 const express = require('express')
+const { menuWriteGate } = require('../../utils/menuWriteGate')
 const router = express.Router()
+
+// Role Management checkboxes guard the writes (api/menuRouteMap.js)
+router.use(menuWriteGate('cashRegister.js'))
 const cashRegisterController = require('../controller/cashRegister')
 const authorization = require('../../utils/authorization')
 const { requireRole } = require('../../utils/authorization')
