@@ -6,6 +6,9 @@ const { arrayStoreScope } = require('../../utils/tenantScope')
 const { incrementPromoUsage } = require('../service/promoUsageService')
 const { createAudit } = require('../../utils/auditLog')
 
+// Campaigns shown to diners in the QR app (BISA lists them on the payment page).
+const CUSTOMER_ACTIVE_PROMO_LIMIT = 10
+
 const promoController = {
   async getCampaigns(req, res) {
     try {
@@ -729,7 +732,10 @@ const promoController = {
     try {
       const { store } = req.query
       const now = new Date()
-      const currentDay = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'][now.getDay()]
+      // daysOfWeek is stored as 0–6 (validation schema), the same numbers
+      // evaluatePromoCampaign compares — a day name never matched, so every
+      // day-restricted campaign was hidden from diners.
+      const currentDay = now.getDay()
       const currentTime = now.toTimeString().slice(0, 8)
 
       const where = {
@@ -754,7 +760,6 @@ const promoController = {
           ['priority', 'DESC'],
           ['createdAt', 'DESC']
         ],
-        limit: 3,
         attributes: [
           'id', 'name', 'description', 'code', 'type',
           'discountType', 'discountValue', 'maxDiscount', 'minPurchase',
@@ -763,6 +768,8 @@ const promoController = {
         ]
       })
 
+      // FG-PROMO-01: filter first, then cap — a cap applied before the
+      // time/day filter could hide campaigns that are running right now.
       const filtered = campaigns.filter((c) => {
         if (c.startTime && c.endTime) {
           if (currentTime < c.startTime || currentTime > c.endTime) return false
@@ -776,7 +783,7 @@ const promoController = {
       return res.status(200).json({
         success: true,
         message: 'Success get customer active promos',
-        data: filtered
+        data: filtered.slice(0, CUSTOMER_ACTIVE_PROMO_LIMIT)
       })
     } catch (error) {
       console.log(error)

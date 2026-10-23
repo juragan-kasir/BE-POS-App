@@ -46,6 +46,23 @@ const customerCreateLimiter = rateLimit({
   }
 })
 
+// FG-PRICE-02: the diner's summary re-quotes as the cart changes, so this
+// read-only route allows more calls than order creation; same per-(store, IP)
+// keying.
+const customerQuoteLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 200,
+  keyGenerator: (req) => {
+    const store = Number(req.body && req.body.store)
+    const storeKey = Number.isInteger(store) && store > 0 ? store : 'invalid'
+    return `quote:${storeKey}:${ipKeyGenerator(req.ip)}`
+  },
+  message: {
+    success: false,
+    message: 'Too many requests, please try again later.'
+  }
+})
+
 const customerReviewLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 5,
@@ -117,6 +134,7 @@ router.get('/customer-orders', orderController.getCustomerOrders)
 // other stores' orders. See api/controller/order.js: getCustomerOrder.
 router.get('/customer-order/:token', orderController.getCustomerOrder)
 router.post('/customer-create', customerCreateLimiter, orderController.createCustomerOrder)
+router.post('/customer-quote', customerQuoteLimiter, orderController.quoteCustomerOrder)
 router.get('/receipt-html/:token', orderController.getReceiptHTML)
 router.get('/customer-tax-rate', orderController.getCustomerTaxRate)
 router.get('/customer-reviews', orderController.getProductReviews)
