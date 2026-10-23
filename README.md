@@ -1,10 +1,11 @@
 # Bisa Nota - Backend API
 
-[![CI/CD](https://github.com/teddferdy/BE-POS-App/actions/workflows/ci.yml/badge.svg)](https://github.com/teddferdy/BE-POS-App/actions/workflows/ci.yml)
 [![Node.js](https://img.shields.io/badge/Node.js-v18+-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![License](https://img.shields.io/badge/License-ISC-blue.svg)](LICENSE)
 
 Point of Sale (POS) backend API built with Node.js, Express, and PostgreSQL.
+
+> **Checkpoint:** reconciled against `master` `c9fe118` on 2026-10-23. Current scale: 544 route handlers + 3 inline routes, 111 models, 242 migrations, 331 Jest test files, 6 Vercel daily crons.
 
 ## Tech Stack
 
@@ -14,13 +15,14 @@ Point of Sale (POS) backend API built with Node.js, Express, and PostgreSQL.
 | **Framework** | Express.js |
 | **Database** | PostgreSQL with Sequelize ORM |
 | **Real-time** | Socket.IO |
-| **Auth** | JWT + bcrypt |
+| **Auth** | JWT + bcrypt + DB-backed authorization session (`disabledAt`, revocation) |
 | **Validation** | Zod |
-| **File Storage** | AWS S3, Cloudinary |
-| **PDF Generation** | Puppeteer, PDFKit |
+| **File Storage** | Cloudinary (`@aws-sdk/client-s3` is a dependency but no code imports it) |
+| **PDF Generation** | PDFKit |
 | **Excel** | ExcelJS |
 | **Security** | Helmet, CORS, express-rate-limit |
-| **Deployment** | Vercel |
+| **Monitoring** | Sentry (`SENTRY_DSN`) |
+| **Deployment** | Vercel (serverless, 6 daily crons) |
 
 ---
 
@@ -42,46 +44,20 @@ npm install
 
 ### Environment Variables
 
-Create `.env` file:
+Copy `.env.example` to `.env` and fill it in. Variables read by the code (`process.env.*` in `api/`, `utils/`, `config/`):
 
-```env
-# Server
-PORT=5001
-NODE_ENV=development
+| Group | Variables |
+|-------|-----------|
+| Server | `PORT` (default 5001), `NODE_ENV`, `TRUST_PROXY_HOPS`, `VERCEL` (set by Vercel; disables Socket.IO + in-process schedulers) |
+| Database | dev `DB_DEV_HOST/PORT/USERNAME/PASSWORD/DATABASE`; test `DB_TEST_DATABASE`; staging `STAGING_DB_*`; production `POSTGRES_HOST/PORT/USER/PASSWORD/DATABASE` |
+| Auth | `JWT_SECRET_KEY`, `JWT_EXPIRED_IN`, `PUBLIC_REGISTRATION_ENABLED` (sign-up closed unless set) |
+| CORS | `CORS_ORIGIN`, `FRONTEND_URL` |
+| Rate limits | `GLOBAL_RATE_LIMIT_WINDOW_MS`, `GLOBAL_RATE_LIMIT_MAX`, `AUTH_RATE_LIMIT_WINDOW_MS`, `AUTH_RATE_LIMIT_MAX`, `CUSTOMER_ORDER_RATE_LIMIT` |
+| Schedulers | `CRON_SECRET` (min 32 chars; `/internal/*` fail closed without it), `QR_PENDING_EXPIRY_MINUTES` (QR expiry off when unset), `BACKUP_DIR` |
+| Integrations | `CLOUDINARY_CLOUD_NAME/API_KEY/API_SECRET`, `SMTP_HOST/PORT/USER/PASS/FROM`, `SENTRY_DSN`, `GEMINI_API_KEY` (FAQ), `ASSISTANT_SERVICE_SECRET` + `AI_CORE_URL` + `AI_CORE_API_KEY` (AI assistant), `BT_PRINTER_MAC` |
+| Misc | `APP_NAME`, `ATTENDANCE_GEOFENCE_METERS`, `REVIEW_AUTO_PUBLISH` |
 
-# Database (Development)
-DB_DEV_HOST=127.0.0.1
-DB_DEV_PORT=5432
-DB_DEV_DATABASE=cashier_app
-DB_DEV_USERNAME=postgres
-DB_DEV_PASSWORD=your_password
-
-# Database (Production)
-POSTGRES_USER=your_user
-POSTGRES_PASSWORD=your_password
-POSTGRES_DATABASE=your_database
-POSTGRES_HOST=your_host
-
-# Auth
-JWT_SECRET=your_jwt_secret
-
-# CORS
-FRONTEND_URL=http://localhost:3000
-
-# AWS S3
-AWS_ACCESS_KEY_ID=your_key
-AWS_SECRET_ACCESS_KEY=your_secret
-AWS_REGION=your_region
-AWS_BUCKET_NAME=your_bucket
-
-# Cloudinary
-CLOUDINARY_CLOUD_NAME=your_cloud
-CLOUDINARY_API_KEY=your_key
-CLOUDINARY_API_SECRET=your_secret
-
-# AI (Optional - for FAQ assistant)
-GEMINI_API_KEY=your_gemini_key
-```
+> `.env.example` does not yet list `QR_PENDING_EXPIRY_MINUTES`, `SMTP_*`, `GEMINI_API_KEY` or the rate-limit overrides. The AWS S3 variables in older docs are not read by any code.
 
 ### Database Setup
 
@@ -105,7 +81,7 @@ npm run db:bootstrap -- --env test # same for the test database
 npx sequelize-cli db:seed:all      # optional: default roles, admin users, payment methods, tax configs
 
 # Sequelize migration workflow (incremental, ledger-tracked):
-npm run migrate                    # npx sequelize-cli db:migrate (never run against production in this phase)
+npm run migrate                    # scripts/run-migrations.js: preflight checks, then pinned sequelize-cli db:migrate (never run against production in this phase)
 # NOTE: the migration chain is snapshot-first — core tables (user, product,
 # order, location, category) have no createTable migration, so `migrate` on
 # an EMPTY database fails at the second file. Use db:bootstrap for that.
@@ -134,20 +110,20 @@ npm start                 # Start server
 ```
 BE-POS-APP/
 ├── api/
-│   ├── index.js              # Express app entry + thermal print endpoint
-│   ├── controller/           # Route controllers (46 files)
-│   ├── routes/               # API routes (47 modules)
+│   ├── index.js              # Express app entry + 3 inline HTTP routes + thermal print endpoint
+│   ├── controller/           # Route controllers (76 files)
+│   ├── routes/               # API routes (77 modules)
 │   ├── middleware/
 │   │   └── validate.js       # Zod validation middleware
 │   ├── service/
 │   │   └── socket.js         # Socket.IO service
 │   └── validation/
-│       └── schemas.js        # Zod schemas (875 lines)
+│       └── schemas.js        # Zod schemas
 ├── config/
 │   ├── config.js             # Sequelize DB config
 │   └── database.js           # Database connection
 ├── db/
-│   ├── models/               # Sequelize models (60 files)
+│   ├── models/               # Sequelize models (111 files)
 │   ├── migrations/           # Database migrations
 │   └── seeders/              # Database seeders
 ├── utils/
@@ -164,7 +140,7 @@ BE-POS-APP/
 │   ├── userContext.js        # AsyncLocalStorage user context
 ├── scripts/                  # Migration & utility scripts
 ├── docs/                     # Documentation
-├── API_DOCUMENTATION.md      # Full API reference (~210 endpoints)
+├── API_DOCUMENTATION.md      # Full API reference (547 routes)
 └── vercel.json               # Vercel deployment config
 ```
 
@@ -208,379 +184,89 @@ BE-POS-APP/
 
 ## API Endpoints
 
-### Authentication
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/auth/login` | Login |
-| POST | `/auth/register` | Register |
-| GET | `/auth/get-user` | Get current user |
-| PUT | `/auth/edit-user` | Update user |
+The endpoint reference is [`API_DOCUMENTATION.md`](./API_DOCUMENTATION.md) (every route, with auth, request and response). This README only lists the route modules, so it cannot drift from the code: 77 modules, 544 handlers, mounted in `api/index.js`, plus 3 inline routes (`GET /health`, `POST /print-thermal`, `GET /`).
 
-### Roles & Permissions
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/role/get-role` | Get all roles (dropdown) |
-| GET | `/role/get-role-all` | Get roles (paginated) |
-| POST | `/role/add-new-role` | Create role |
-| PUT | `/role/edit-role/:id` | Update role |
-| DELETE | `/role/delete-role/:id` | Delete role |
-| PUT | `/role/update-user-role` | Change user role |
-| GET | `/role/get-users-by-role` | Get users by role |
-| PUT | `/role/update-access-menu` | Update role permissions |
+| Mount | Route file (`api/routes/`) | Handlers |
+|-------|----------------------------|----------|
+| `/accounting` | `accounting.js` | 11 |
+| `/accounts-receivable` | `accountsReceivable.js` | 7 |
+| `/assignments` | `assignment.js` | 3 |
+| `/assistant` | `assistant.js` | 7 |
+| `/attendance` | `attendance.js` | 4 |
+| `/audit-log` | `auditLog.js` | 2 |
+| `/auth` | `auth.js` | 11 |
+| `/auth` | `authorizationContext.js` | 4 |
+| `/backup` | `backup.js` | 7 |
+| `/best-selling` | `best-selling.js` | 5 |
+| `/bom` | `bom.js` | 6 |
+| `/business-trip` | `businessTrip.js` | 6 |
+| `/cash-register` | `cashRegister.js` | 13 |
+| `/category` | `category.js` | 8 |
+| `/currency` | `currency.js` | 6 |
+| `/delivery` | `delivery.js` | 17 |
+| `/department` | `department.js` | 9 |
+| `/discount` | `discount.js` | 10 |
+| `/effective-scope` | `effectiveScope.js` | 1 |
+| `/employee` | `employee.js` | 9 |
+| `/expense` | `expense.js` | 14 |
+| `/expense-category` | `expenseCategory.js` | 4 |
+| `/export` | `exportMaster.js` | 1 |
+| `/faq` | `faq.js` | 2 |
+| `/goods-receipt` | `goodsReceipt.js` | 8 |
+| `/goods-request` | `goodsRequest.js` | 6 |
+| `/ingredient` | `ingredient.js` | 11 |
+| `/ingredient-category` | `ingredientCategory.js` | 8 |
+| `/internal` | `internal.js` | 7 |
+| `/inventory` | `inventory.js` | 11 |
+| `/invoice` | `invoice.js` | 3 |
+| `/location` | `location.js` | 12 |
+| `/member` | `member.js` | 6 |
+| `/member-tier` | `memberTier.js` | 7 |
+| `/memberships` | `membership.js` | 5 |
+| `/notification` | `notification.js` | 4 |
+| `/order` | `order.js` | 15 |
+| `/overtime` | `overtime.js` | 5 |
+| `/overview` | `overview.js` | 10 |
+| `/parked-cart` | `parkedCart.js` | 5 |
+| `/pos` | `pos.js` | 20 |
+| `/position` | `position.js` | 10 |
+| `/product` | `product.js` | 10 |
+| `/product-bundle` | `productBundle.js` | 7 |
+| `/production-order` | `productionOrder.js` | 8 |
+| `/promo` | `promo.js` | 11 |
+| `/purchase-order` | `purchaseOrder.js` | 11 |
+| `/purchase-payment` | `purchasePayment.js` | 7 |
+| `/purchase-return` | `purchaseReturn.js` | 6 |
+| `/queue` | `queue.js` | 7 |
+| `/receipt` | `receipt.js` | 1 |
+| `/regions` | `region.js` | 6 |
+| `/report` | `report.js` | 5 |
+| `/report` | `reportExport.js` | 2 |
+| `/report-config` | `reportConfig.js` | 4 |
+| `/reports` | `reporting.js` | 4 |
+| `/reservation` | `reservation.js` | 6 |
+| `/role` | `role.js` | 9 |
+| `/sales-return` | `salesReturn.js` | 4 |
+| `/shift` | `shift.js` | 6 |
+| `/shift-swap` | `shiftSwap.js` | 4 |
+| `/shift-template` | `shiftTemplate.js` | 6 |
+| `/social-media` | `social-media.js` | 4 |
+| `/split-bill` | `splitBill.js` | 5 |
+| `/stock-history` | `stockHistory.js` | 5 |
+| `/stock-opname` | `stockOpname.js` | 11 |
+| `/supplier` | `supplier.js` | 12 |
+| `/supplier-bank-account` | `supplierBankAccount.js` | 5 |
+| `/supplier-category` | `supplierCategory.js` | 5 |
+| `/supplier-contact` | `supplierContact.js` | 5 |
+| `/supplier-performance` | `supplierPerformance.js` | 6 |
+| `/table` | `table.js` | 7 |
+| `/tax-config` | `taxConfig.js` | 12 |
+| `/tenants` | `tenant.js` | 5 |
+| `/thermal-printer` | `thermalPrinter.js` | 4 |
+| `/type-payment` | `type-payment.js` | 9 |
+| `/waiter-request` | `waiter-request.js` | 5 |
 
-### Store / Location
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/location/get-location` | Get all stores (dropdown) |
-| GET | `/location/get-location-all` | Get stores (paginated) |
-| POST | `/location/add-new-location` | Create store |
-| PUT | `/location/edit-location` | Update store |
-| DELETE | `/location/delete-location/:id` | Delete store |
-| GET | `/location/template/:storeId` | Download Excel template |
-| POST | `/location/import` | Import from Excel |
-
-### Products
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/product/get-product` | Get products for cashier |
-| GET | `/product/get-product-by-super-admin` | Get by store (superadmin) |
-| GET | `/product/get-product-all` | Get products (paginated) |
-| POST | `/product/add-product` | Create product |
-| PUT | `/product/edit-product` | Update product |
-| DELETE | `/product/delete-product/:id` | Delete product |
-| GET | `/product/template/:storeId` | Download template |
-| POST | `/product/import` | Import from Excel |
-
-### Categories
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/category/get-category` | Get categories (dropdown) |
-| GET | `/category/get-category-all` | Get categories (paginated) |
-| POST | `/category/add-new-category` | Create category |
-| PUT | `/category/edit-category/:id` | Update category |
-| DELETE | `/category/delete-category/:id` | Delete category |
-| GET | `/category/download-excel` | Export to Excel |
-
-### Sub-Categories
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/sub-category/get-all-sub-category` | Get all sub-categories |
-| GET | `/sub-category/by-category/:id` | Get by category |
-| POST | `/sub-category/add-new-sub-category` | Create sub-category |
-| PUT | `/sub-category/edit-sub-category/:id` | Update sub-category |
-| DELETE | `/sub-category/delete-sub-category/:id` | Delete sub-category |
-
-### Employees
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/employee/get-employee` | Get employees (paginated) |
-| POST | `/employee/add-new-employee` | Create employee |
-| PUT | `/employee/edit-employee/:id` | Update employee |
-| DELETE | `/employee/delete-employee/:id` | Delete employee |
-
-### Departments
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/department/get-department` | Get departments (dropdown) |
-| GET | `/department/get-department-all` | Get departments (paginated) |
-| POST | `/department/add-new-department` | Create department |
-| PUT | `/department/edit-department/:id` | Update department |
-| DELETE | `/department/delete-department/:id` | Delete department |
-
-### Positions
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/position/get-position` | Get positions (dropdown) |
-| GET | `/position/get-position-all` | Get positions (paginated) |
-| POST | `/position/add-new-position` | Create position |
-| PUT | `/position/edit-position/:id` | Update position |
-| DELETE | `/position/delete-position/:id` | Delete position |
-
-### Members & Loyalty
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/member/get-member` | Get members |
-| POST | `/member/add-new-member` | Create member |
-| PUT | `/member/edit-member/:id` | Update member |
-| DELETE | `/member/delete-member/:id` | Delete member |
-
-### Member Tiers
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/member-tier/get-member-tier` | Get all tiers |
-| POST | `/member-tier/add-new-member-tier` | Create tier |
-| PUT | `/member-tier/edit-member-tier/:id` | Update tier |
-| DELETE | `/member-tier/delete-member-tier/:id` | Delete tier |
-
-### Orders
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/order/create-order` | Create order |
-| GET | `/order/get-order-by-store` | Get orders by store |
-| GET | `/order/get-order-by-id/:id` | Get order by ID |
-| PUT | `/order/edit-order/:id` | Update order |
-| PUT | `/order/update-status/:id` | Update order status |
-| PUT | `/order/edit-item/:id` | Update order item |
-| DELETE | `/order/delete-order/:id` | Delete order |
-| POST | `/order/apply-discount/:id` | Apply discount |
-
-### Checkout & Transactions
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/checkout/checkout-item` | Process checkout |
-| PUT | `/checkout/edit-checkout/:id` | Update checkout |
-| DELETE | `/checkout/delete-checkout/:id` | Delete checkout |
-
-### Payment Types
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/type-payment/get-type-payment-by-location` | Get active payment types |
-| GET | `/type-payment/get-type-payment` | Get all payment types |
-| POST | `/type-payment/add-new-type-payment` | Create payment type |
-| PUT | `/type-payment/edit-type-payment/:id` | Update payment type |
-| DELETE | `/type-payment/delete-type-payment/:id` | Delete payment type |
-
-### Discounts
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/discount/get-discount-by-location` | Get active discounts |
-| GET | `/discount/get-discount` | Get all discounts |
-| POST | `/discount/add-new-discount` | Create discount |
-| PUT | `/discount/edit-discount/:id` | Update discount |
-| DELETE | `/discount/delete-discount/:id` | Delete discount |
-
-### Tables
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/table/get-table` | Get tables by store |
-| GET | `/table/availability` | Get table availability |
-| GET | `/table/active-orders` | Get tables with active orders |
-| POST | `/table/add-new-table` | Create table |
-| PUT | `/table/edit-table/:id` | Update table |
-| PUT | `/table/edit-status/:id` | Update status |
-| DELETE | `/table/delete-table/:id` | Delete table |
-
-### Shifts
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/shift/get-shift` | Get all shifts |
-| POST | `/shift/add-new-shift` | Create shift |
-| PUT | `/shift/edit-shift/:id` | Update shift |
-| DELETE | `/shift/delete-shift/:id` | Delete shift |
-
-### Cash Register
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/cash-register/open` | Open cash register |
-| POST | `/cash-register/:id/close` | Close cash register |
-| GET | `/cash-register/current` | Get current register |
-| GET | `/cash-register/history` | Get register history |
-
-### Suppliers
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/supplier` | Get all suppliers |
-| POST | `/supplier` | Create supplier |
-| PUT | `/supplier/:id` | Update supplier |
-| DELETE | `/supplier/:id` | Delete supplier |
-
-### Purchase Orders
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/purchase-order` | Get all purchase orders |
-| POST | `/purchase-order` | Create purchase order |
-| PUT | `/purchase-order/:id` | Update purchase order |
-| POST | `/purchase-order/:id/receive` | Receive order |
-
-### Purchase Payments
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/purchase-payment` | Get purchase payments |
-| POST | `/purchase-payment` | Create purchase payment |
-| GET | `/purchase-payment/dashboard` | AP dashboard |
-
-### Goods Receipt
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/goods-receipt` | Get all goods receipts |
-| POST | `/goods-receipt` | Create goods receipt |
-| PUT | `/goods-receipt/:id` | Update goods receipt |
-
-### Ingredients
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/ingredient` | Get all ingredients |
-| POST | `/ingredient` | Create ingredient |
-| PUT | `/ingredient/:id` | Update ingredient |
-| DELETE | `/ingredient/:id` | Delete ingredient |
-
-### Ingredient Categories
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/ingredient-category` | Get all categories |
-| POST | `/ingredient-category` | Create category |
-| PUT | `/ingredient-category/:id` | Update category |
-| DELETE | `/ingredient-category/:id` | Delete category |
-
-### BOM (Bill of Materials)
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/bom` | Get all BOMs |
-| POST | `/bom` | Create BOM |
-| PUT | `/bom/:id` | Update BOM |
-| DELETE | `/bom/:id` | Delete BOM |
-
-### Production Orders
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/production-order` | Get all production orders |
-| POST | `/production-order` | Create production order |
-| PUT | `/production-order/:id/start` | Start production |
-| PUT | `/production-order/:id/complete` | Complete production |
-| PUT | `/production-order/:id/cancel` | Cancel production |
-
-### Stock Management
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/stock-history` | Get stock history |
-| GET | `/stock-opname` | Get stock opname |
-| POST | `/stock-opname` | Create stock opname |
-| POST | `/pos/adjust` | Stock adjustment |
-| POST | `/pos/transfer` | Inter-store stock transfer |
-| GET | `/pos/transfer-history` | Transfer history |
-| GET | `/pos/transfer/:id` | Transfer detail |
-| PUT | `/pos/transfer/:id/receive` | Confirm receipt |
-| PUT | `/pos/transfer/:id/cancel` | Cancel transfer |
-
-### Returns
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/sales-return` | Get sales returns |
-| POST | `/sales-return` | Create sales return |
-| GET | `/purchase-return` | Get purchase returns |
-| POST | `/purchase-return` | Create purchase return |
-
-### Expense Management
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/expense-category` | Get expense categories |
-| POST | `/expense-category` | Create category |
-| GET | `/expense` | Get all expenses |
-| POST | `/expense` | Create expense |
-| PUT | `/expense/:id` | Update expense |
-| POST | `/expense/:id/approve` | Approve expense |
-
-### Tax Configuration
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/tax-config` | Get tax configs |
-| POST | `/tax-config` | Create tax config |
-| PUT | `/tax-config/:id` | Update tax config |
-
-### Accounts Receivable
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/accounts-receivable` | Get AR list |
-| GET | `/accounts-receivable/aging` | AR aging report |
-| POST | `/accounts-receivable/:id/payment` | Record AR payment |
-
-### Reservations
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/reservation` | Get all reservations |
-| POST | `/reservation` | Create reservation |
-| PUT | `/reservation/:id` | Update reservation |
-| DELETE | `/reservation/:id` | Cancel reservation |
-
-### Split Bill
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/split-bill` | Create split bill |
-| POST | `/split-bill/:id/pay` | Pay split bill |
-| POST | `/split-bill/:id/cancel` | Cancel split bill |
-| POST | `/split-bill/merge` | Merge split bills |
-
-### Notifications
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/notification` | Get notifications |
-| GET | `/notification/unread-count` | Get unread count |
-| PUT | `/notification/:id/read` | Mark as read |
-| PUT | `/notification/read-all` | Mark all as read |
-
-### Reports
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/report/sales` | Sales report |
-| GET | `/report/daily-summary` | Daily summary |
-| GET | `/report/profit-loss` | Profit & loss |
-| GET | `/best-selling/get-best-selling` | Best selling products |
-| GET | `/best-selling/get-chart-by-month` | Monthly chart |
-| GET | `/best-selling/get-chart-current-and-seven-days-before` | 7-day chart |
-
-### Dashboard & Analytics
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/overview/dashboard-summary` | Dashboard summary |
-| GET | `/pos/dashboard/summary` | POS dashboard data |
-| GET | `/best-selling/get-earning-today` | Today's earnings |
-
-### POS Operations
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/pos/lookup-barcode` | Barcode scan lookup |
-| GET | `/pos/product/price-by-store` | Multi-store pricing |
-| PUT | `/pos/product/update-price-by-store` | Update store prices |
-| POST | `/pos/product/add-batch` | Add product batch |
-| GET | `/pos/product/batches` | Get product batches |
-| GET | `/pos/member/:id/point-history` | Member point history |
-
-### Invoice & Receipt
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/invoice/logo` | Get logos |
-| POST | `/invoice/logo` | Upload logo |
-| PUT | `/invoice/logo/:id` | Update logo |
-| GET | `/invoice/footer` | Get footers |
-| POST | `/invoice/footer` | Create footer |
-| GET | `/receipt/:orderId` | Get order receipt |
-| GET | `/pos/invoice/wa-text/:orderId` | Receipt as WhatsApp text (opened via wa.me; nothing is sent) |
-| POST | `/pos/invoice/send-email` | Send receipt via email |
-
-### Social Media
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/social-media` | Get social media links |
-| POST | `/social-media` | Create social media link |
-| PUT | `/social-media/:id` | Update social media link |
-
-### Currency
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/currency` | Get currencies |
-| POST | `/currency` | Create currency |
-| PUT | `/currency/default/:id` | Set default currency |
-
-### Audit Log
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/audit-log` | Get audit logs (super_admin only) |
-
-### FAQ
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/faq` | Search static FAQ |
-| POST | `/faq/ask` | Ask AI-powered FAQ assistant |
-
-### Export
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/export/master` | Export all master data to Excel |
-
-### Thermal Printing
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/print-thermal` | ESC/POS thermal Bluetooth print |
+Sub-category endpoints are **not mounted**; use categories.
 
 ---
 
@@ -590,17 +276,16 @@ BE-POS-APP/
 |------|-------------|--------|
 | **super_admin** | Owner | All stores, all features |
 | **admin** | Store Manager | Store-level access |
+| **kasir** | POS Staff | POS + Membership |
 | **user** | General Staff | Limited access |
-| **cashier** | POS Staff | POS + Membership |
-| **kitchen** | Kitchen Staff | KDS only |
 
-RBAC is enforced via `requireRole` middleware in `utils/authorization.js`. Granular per-menu permissions are stored in the `role` model.
+RBAC is enforced via `requireRole` middleware in `utils/authorization.js`. Granular per-menu permissions are stored in the `role` model; menu-level enforcement is currently partial (30/77 route files write-gated, `MENU_ENFORCED_ROUTES` empty) — see `FG-SEC-01`.
 
 ---
 
 ## Database Models
 
-60 Sequelize models covering:
+111 Sequelize models covering:
 
 | Domain | Models |
 |--------|--------|
@@ -623,13 +308,12 @@ RBAC is enforced via `requireRole` middleware in `utils/authorization.js`. Granu
 
 ## Socket.IO Events
 
-Real-time events at `/socket.io`:
+Socket.IO starts only on a long-running server (`if (!process.env.VERCEL)` in `api/index.js`). **On Vercel there is no socket server**; FE KDS/queue screens fall back to polling. Clients join `store-<id>` / `kitchen-<id>` rooms (numeric store ids only; a rejected join gets `join-rejected`).
 
-| Event | Description |
-|-------|-------------|
-| `order:created` | New order created |
-| `order:updated` | Order status changed |
-| `table:updated` | Table status changed |
+| Room | Events |
+|------|--------|
+| `kitchen-<id>` (mirrored to `kitchen-all`) | `new-order`, `order-updated`, `item-status-updated` |
+| `store-<id>` | `new-notification`, `new-notification-global`, `queue:created/updated/statusChanged/deleted`, `waiter-request:new/statusChanged`, `promo:created/updated/activated/expired/statusChanged/used/deleted`, `new-delivery-order`, `delivery-assigned`, `delivery-status-updated`, `delivery-cancelled`, `shift:membersChanged`, `shift:membersRemoved`, `shift:swapped`, `employee:shiftChanged` |
 
 ---
 
@@ -639,11 +323,13 @@ Deployed on **Vercel** with serverless functions.
 
 - **API Base URL**: https://api-bisa-nota.vercel.app
 - **Frontend**: https://bisa-nota-demo.vercel.app
+- **Crons**: 6 daily jobs in `vercel.json` (`0 0 * * *` UTC) call `/internal/*` with `CRON_SECRET`: accounting outbox drain, QR order expiry, backup, recurring expenses, shift-swap expiry, AP reminders.
+- **CI**: GitHub Actions is currently disabled at the organisation level; run `npm test` (sharded Jest, `scripts/run-tests-sharded.js`) locally before pushing. There is no `lint` script in this repo.
 
 ---
 
 ## Related
 
 - [Frontend App](../FE-POS-App/README.md)
-- [API Documentation](./API_DOCUMENTATION.md) (~210 endpoints with request/response examples)
+- [API Documentation](./API_DOCUMENTATION.md) (all 547 routes with request/response examples)
 - [API Response Contracts — ERP/Akuntansi](./docs/api-response-contracts.md) (envelope, error codes, response shapes untuk FE)
