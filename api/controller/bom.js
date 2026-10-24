@@ -3,6 +3,7 @@ const { Op } = require('sequelize')
 const { enrichAuditFields } = require('../../utils/auditFields')
 const { ingredientBaseUnitCost } = require('../service/itemCostService')
 const { createAudit } = require('../../utils/auditLog')
+const { adoptRecipeMode } = require('../service/recipeModeService')
 
 // Thrown inside the authoring transaction to refuse a BOM with a 400 —
 // nothing is written.
@@ -84,45 +85,8 @@ const refreshProductCosting = async (productId, bomLines, ingredients, transacti
   await prod.update({ hppPerPorsi: hpp, foodCostPersen, marginPersen, composition }, { transaction })
 }
 
-// Client note 2026-10-24 (Waroeng Bakso): a menu with an active recipe is
-// expected to use up its ingredients when sold, yet a product keeps the
-// default 'stocked' mode unless someone changes it, so every sale deducted
-// the finished-good stock and History Stock never showed the ingredients.
-// Saving an active BOM therefore moves a 'stocked' product to
-// 'make_to_order', unless
-//   - it has a production order that was not cancelled (a produced item
-//     really is sold from its own stock), or
-//   - a store that sells it has no active BOM yet: the mode is global, and
-//     make_to_order without a BOM refuses the sale (stockMutationService).
-// A product with no product_store rows is sold by every active store.
-// 'hybrid' and 'make_to_order' are explicit choices and stay as they are.
-// Returns true when the mode was switched.
-const adoptRecipeMode = async (productId, transaction) => {
-  const product = await db.product.findByPk(productId, { transaction, lock: transaction.LOCK.UPDATE })
-  if (!product || (product.inventoryMode || 'stocked') !== 'stocked') return false
-
-  const produced = await db.productionOrder.count({
-    where: { productItemId: productId, status: { [Op.ne]: 'cancelled' } },
-    transaction
-  })
-  if (produced > 0) return false
-
-  const assigned = await db.product_store.findAll({ where: { product: productId }, attributes: ['store'], transaction })
-  const sellingStores = assigned.length
-    ? assigned.map((r) => Number(r.store))
-    : (await db.location.findAll({ where: { status: 'active' }, attributes: ['id'], transaction })).map((l) => l.id)
-  const activeBoms = await db.bom_header.findAll({
-    where: { productId, status: 'active' },
-    attributes: ['store'],
-    transaction
-  })
-  const storesWithRecipe = new Set(activeBoms.map((b) => Number(b.store)))
-  if (sellingStores.length === 0 || !sellingStores.every((s) => storesWithRecipe.has(s))) return false
-
-  await product.update({ inventoryMode: 'make_to_order' }, { transaction })
-  return true
-}
-
+// Saving an active BOM moves a 'stocked' product to make_to_order; the
+// rules are in recipeModeService.
 const auditRecipeMode = (req, productId) =>
   createAudit(
     req,
