@@ -24,7 +24,7 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.TEXT
       },
       image: {
-        type: DataTypes.STRING
+        type: DataTypes.STRING(2048)
       },
       bundlePrice: {
         allowNull: false,

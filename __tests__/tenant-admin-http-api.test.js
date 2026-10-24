@@ -117,7 +117,8 @@ describe('POST /tenants', () => {
     [{ code: '-leading', name: 'X' }, 'INVALID_CODE'],
     [{ code: 'a'.repeat(51), name: 'X' }, 'INVALID_CODE'],
     [{ code: `${P}-ok`, name: '   ' }, 'INVALID_NAME'],
-    [{ code: `${P}-ok`, name: 'n'.repeat(101) }, 'INVALID_NAME']
+    // BA DR-28 decision 2: a tenant name holds 150
+    [{ code: `${P}-ok`, name: 'n'.repeat(151) }, 'INVALID_NAME']
   ])('rejects %j with %s and writes nothing', async (body, code) => {
     const before = await db.tenant.count()
     const res = await createTenant(body)

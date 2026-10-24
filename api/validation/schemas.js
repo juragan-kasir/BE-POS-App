@@ -204,7 +204,7 @@ exports.createProductSchema = z.object({
   redeemPoints: strToNum().optional().default(0),
   estimationTime: strToNum().optional().default(0),
   createdBy: z.union([z.number(), strToNum()]).optional().nullable(),
-  image: z.string().max(FIELD_MAX.URL_COLUMN, tooLong(FIELD_MAX.URL_COLUMN)).optional().nullable(),
+  image: z.string().max(FIELD_MAX.URL, tooLong(FIELD_MAX.URL)).optional().nullable(),
   imageOrder: z.string().optional().nullable()
 })
 
@@ -221,7 +221,7 @@ exports.createCategorySchema = z.object({
   color: z.string().max(FIELD_MAX.HEX_COLOR, tooLong(FIELD_MAX.HEX_COLOR)).optional().nullable(),
   sortOrder: z.coerce.number().optional().default(0),
   value: z.string().max(FIELD_MAX.SHORT_LABEL, tooLong(FIELD_MAX.SHORT_LABEL)).optional(),
-  image: z.string().max(FIELD_MAX.URL_COLUMN, tooLong(FIELD_MAX.URL_COLUMN)).optional().nullable(),
+  image: z.string().max(FIELD_MAX.URL, tooLong(FIELD_MAX.URL)).optional().nullable(),
   icon: z.string().max(FIELD_MAX.SHORT_LABEL, tooLong(FIELD_MAX.SHORT_LABEL)).optional().nullable(),
   status: statusEnum,
   store: storeArray().optional().nullable(),
@@ -791,7 +791,7 @@ exports.createLocationSchema = z.object({
   timezone: ianaTimezone().optional(),
   socialMedia: jsonField().optional().nullable(),
   dailyTarget: strToNum().optional().default(0),
-  image: z.string().max(FIELD_MAX.URL_COLUMN, tooLong(FIELD_MAX.URL_COLUMN)).optional().nullable()
+  image: z.string().max(FIELD_MAX.URL, tooLong(FIELD_MAX.URL)).optional().nullable()
 })
 
 // ponytail: passthrough preserves locationId, id, storeId, coordinates, etc.
@@ -853,7 +853,7 @@ exports.storeConfigurationSchema = z
     managerName: z.string().max(FIELD_MAX.PERSON_NAME, tooLong(FIELD_MAX.PERSON_NAME)).optional().nullable(),
     latitude: z.string().optional().nullable(),
     longitude: z.string().optional().nullable(),
-    image: z.string().max(FIELD_MAX.URL_COLUMN, tooLong(FIELD_MAX.URL_COLUMN)).optional().nullable(),
+    image: z.string().max(FIELD_MAX.URL, tooLong(FIELD_MAX.URL)).optional().nullable(),
     openingHours: w3JsonField().optional().nullable(),
     socialMedia: w3JsonField().optional().nullable(),
     timezone: ianaTimezone().optional(),
@@ -888,7 +888,7 @@ exports.createSupplierSchema = z.object({
   mobile: z.string().max(FIELD_MAX.PHONE, tooLong(FIELD_MAX.PHONE)).optional().nullable(),
   whatsapp: z.string().max(FIELD_MAX.PHONE, tooLong(FIELD_MAX.PHONE)).optional().nullable(),
   fax: z.string().max(FIELD_MAX.PHONE, tooLong(FIELD_MAX.PHONE)).optional().nullable(),
-  website: z.string().max(FIELD_MAX.URL_COLUMN, tooLong(FIELD_MAX.URL_COLUMN)).optional().nullable(),
+  website: z.string().max(FIELD_MAX.URL, tooLong(FIELD_MAX.URL)).optional().nullable(),
   taxInclude: z.boolean().optional().default(true),
   taxType: z.string().optional().nullable(),
   taxNumber: z.string().max(FIELD_MAX.NPWP, tooLong(FIELD_MAX.NPWP)).optional().nullable(),
@@ -1868,7 +1868,7 @@ exports.updateCurrencySchema = exports.createCurrencySchema.partial()
 // ===================== Social Media =====================
 exports.createSocialMediaSchema = z.object({
   name: z.string().max(FIELD_MAX.SHORT_LABEL, tooLong(FIELD_MAX.SHORT_LABEL)).min(1, 'name is required'),
-  url: z.string().max(FIELD_MAX.URL_COLUMN, tooLong(FIELD_MAX.URL_COLUMN)).min(1, 'url is required'),
+  url: z.string().max(FIELD_MAX.URL, tooLong(FIELD_MAX.URL)).min(1, 'url is required'),
   icon: z.string().max(FIELD_MAX.SHORT_LABEL, tooLong(FIELD_MAX.SHORT_LABEL)).optional().default(''),
   isActive: z
     .union([

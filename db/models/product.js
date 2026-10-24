@@ -18,7 +18,7 @@ module.exports = (sequelize, DataTypes) => {
         unique: true
       },
       image: {
-        type: DataTypes.STRING
+        type: DataTypes.STRING(2048)
       },
       images: {
         type: DataTypes.JSONB,
