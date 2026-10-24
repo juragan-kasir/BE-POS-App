@@ -76,6 +76,13 @@ const stockHistoryController = {
             as: 'productData',
             attributes: ['id', 'nameProduct'],
             required: false
+          },
+          // History Stok shows the store of every row (client note 2026-10-24)
+          {
+            model: db.location,
+            as: 'storeData',
+            attributes: ['id', 'name'],
+            required: false
           }
         ],
         order: [['updatedAt', 'DESC']],
