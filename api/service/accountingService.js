@@ -1239,6 +1239,7 @@ module.exports = {
   findAccount,
   findOrCreateAccount,
   makeEntryNumber,
+  nextEntrySeq,
   createJournalEntry,
   postOrderJournal,
   postOrderCogsJournal,

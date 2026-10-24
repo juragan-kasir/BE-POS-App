@@ -2,9 +2,12 @@
 const db = require('../../db/models')
 const { Op } = require('sequelize')
 const { createAudit } = require('../../utils/auditLog')
+const { getStoreLocalDate } = require('../../utils/businessDate')
 const {
   ensureDefaultAccounts,
-  makeEntryNumber
+  makeEntryNumber,
+  nextEntrySeq,
+  createJournalEntry
 } = require('../service/accountingService')
 
 const getStore = (req) => {
@@ -29,12 +32,16 @@ const accountIncludes = () => ({
 
 const isSuperAdmin = (req) => req.user?.roleType === 'super_admin'
 
+// FG-ACC-03: a reversed entry stays in the books next to its reversal, so
+// every balance reads both — the pair nets to zero across the two dates.
+const BOOKED_STATUSES = ['posted', 'reversed']
+
 // Aggregates journal entry balances across one store (or all stores for super_admin),
 // keyed by account code so duplicate charts of accounts consolidate correctly.
 const buildBalanceMap = async ({ store, dateWhere }) => {
   const storeWhere = store ? { store } : {}
   const entries = await db.journal_entry.findAll({
-    where: { ...storeWhere, ...(dateWhere || {}), status: 'posted' },
+    where: { ...storeWhere, ...(dateWhere || {}), status: BOOKED_STATUSES },
     include: [{ model: db.journal_entry_line, as: 'lines' }]
   })
   const accounts = await db.account.findAll({ where: storeWhere })
@@ -427,12 +434,10 @@ module.exports = {
       // whose header claims balanced debit/credit totals but whose lines
       // don't actually sum to them.
       const entry = await db.sequelize.transaction(async (t) => {
-        const lastEntry = await db.journal_entry.findOne({
-          where: { store },
-          order: [['id', 'DESC']],
-          transaction: t
-        })
-        const seq = (lastEntry?.id || 0) + 1
+        // Same per-store counter as the automatic postings: the old
+        // `MAX(id) + 1` could hand out a number the counter had already
+        // used (or would use next), and (store, entryNumber) is unique.
+        const seq = await nextEntrySeq(store, t)
         const created = await db.journal_entry.create(
           {
             store,
@@ -477,6 +482,11 @@ module.exports = {
     }
   },
 
+  // FG-ACC-03: a posted manual journal is never removed from the books.
+  // "Delete" posts its mirror (debit <-> credit) on the store's today and
+  // marks the original 'reversed'; both stay readable and the trial balance
+  // nets the pair to zero. Automatic entries are corrected through their
+  // source document (order, expense, purchase), not here.
   async deleteJournal(req, res) {
     try {
       const store = getStore(req)
@@ -485,29 +495,92 @@ module.exports = {
           .status(400)
           .json({ success: false, message: 'Store is required' })
       const { id } = req.params
-      const entry = await db.journal_entry.findOne({ where: { id, store } })
-      if (!entry)
-        return res
-          .status(404)
-          .json({ success: false, message: 'Journal entry not found' })
-      if (entry.sourceType !== 'manual') {
-        return res.status(400).json({
-          success: false,
-          message: 'Only manual journal entries can be deleted'
+      const reason =
+        String(req.body?.reason || req.query.reason || '')
+          .trim()
+          .slice(0, 500) || null
+      const location = await db.location.findByPk(store, {
+        attributes: ['timezone']
+      })
+      const today = getStoreLocalDate(location?.timezone)
+
+      const result = await db.sequelize.transaction(async (t) => {
+        const entry = await db.journal_entry.findOne({
+          where: { id, store },
+          transaction: t,
+          lock: t.LOCK.UPDATE
         })
-      }
-      await db.journal_entry_line.destroy({ where: { journalEntry: id } })
-      await entry.destroy()
+        if (!entry) {
+          return {
+            status: 404,
+            body: { success: false, message: 'Journal entry not found' }
+          }
+        }
+        if (entry.sourceType !== 'manual') {
+          return {
+            status: 400,
+            body: {
+              success: false,
+              code: 'JOURNAL_NOT_MANUAL',
+              message: 'Only manual journal entries can be reversed'
+            }
+          }
+        }
+        if (entry.status !== 'posted') {
+          return {
+            status: 409,
+            body: {
+              success: false,
+              code: 'JOURNAL_ALREADY_REVERSED',
+              message: `Journal entry ${entry.entryNumber} is already reversed`
+            }
+          }
+        }
+        const lines = await db.journal_entry_line.findAll({
+          where: { journalEntry: entry.id },
+          transaction: t
+        })
+        const reversal = await createJournalEntry({
+          store,
+          // Never before the entry it reverses (manual entries may be
+          // future-dated).
+          date: entry.date > today ? entry.date : today,
+          description: `Reversal of ${entry.entryNumber}${
+            reason ? `: ${reason}` : ''
+          }`,
+          sourceType: 'manual_reversal',
+          referenceId: entry.id,
+          lines: lines.map((l) => ({
+            account: l.account,
+            debit: l.credit,
+            credit: l.debit,
+            description: l.description ? `Reversal: ${l.description}` : null
+          })),
+          createdBy: req.user?.id,
+          transaction: t
+        })
+        await entry.update(
+          { status: 'reversed', modifiedBy: req.user?.id },
+          { transaction: t }
+        )
+        return { entry, reversal }
+      })
+      if (result.status) return res.status(result.status).json(result.body)
+
       createAudit(
         req,
         'delete',
         'journal_entry',
         id,
-        `Deleted journal entry: ${entry.entryNumber}`
+        `Reversed journal entry ${result.entry.entryNumber} with ${
+          result.reversal.entryNumber
+        }${reason ? ` — ${reason}` : ''}`
       )
-      return res
-        .status(200)
-        .json({ success: true, message: 'Journal entry deleted' })
+      return res.status(200).json({
+        success: true,
+        message: 'Journal entry reversed',
+        data: { original: result.entry, reversal: result.reversal }
+      })
     } catch (error) {
       console.error('deleteJournal error:', error)
       return res
@@ -731,7 +804,7 @@ module.exports = {
         where: {
           ...(store ? { store } : {}),
           ...(Object.keys(dateWhere).length ? dateWhere : {}),
-          status: 'posted'
+          status: BOOKED_STATUSES
         }
       })
 

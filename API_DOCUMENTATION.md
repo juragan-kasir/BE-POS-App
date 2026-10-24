@@ -5745,7 +5745,7 @@ Key errors: 400 `Store is required` (non-super_admin without store).
 ---
 
 ### POST `/accounting/journals`
-Create a manual journal entry (header + lines committed atomically).
+Create a manual journal entry (header + lines committed atomically). `entryNumber` comes from the same per-store counter (`journal_entry_sequence`) as automatic postings.
 
 **Body:**
 | Field | Type | Description |
@@ -5764,19 +5764,28 @@ Key errors: 400 `Store is required`; 400 `Date and at least two lines are requir
 ---
 
 ### DELETE `/accounting/journals/:id`
-Delete a journal entry. Only entries with `sourceType: "manual"` can be deleted.
+Reverse a manual journal entry (FG-ACC-03). Nothing is removed: the original stays with `status: "reversed"`, and a mirror entry (each line's debit and credit swapped) is posted with `sourceType: "manual_reversal"`, `referenceId` = the original id, dated the store's local today (or the original date if that is later). Trial balance, income statement, balance sheet and overview read both `posted` and `reversed` entries, so the pair nets to zero while each period keeps its own history. The reversal is audited (`action: "delete"`, entity `journal_entry`, with the reversal number and reason). Only entries with `sourceType: "manual"` can be reversed; automatic entries are corrected through their source document.
+
+**Body (optional):** `{ "reason": "salah input" }` (string, max 500 chars; also accepted as `?reason=`). Appended to the reversal's description: `Reversal of JV-0003-000012: salah input`.
 
 **Response:**
 ```json
-{ "success": true, "message": "Journal entry deleted" }
+{
+  "success": true,
+  "message": "Journal entry reversed",
+  "data": {
+    "original": { "id": 12, "entryNumber": "JV-0003-000012", "sourceType": "manual", "status": "reversed" },
+    "reversal": { "id": 14, "entryNumber": "JV-0003-000014", "sourceType": "manual_reversal", "referenceId": 12, "status": "posted", "totalDebit": 100000, "totalCredit": 100000 }
+  }
+}
 ```
 
-Key errors: 404 `Journal entry not found`; 400 `Only manual journal entries can be deleted`; 400 `Store is required`.
+Key errors: 404 `Journal entry not found`; 400 `JOURNAL_NOT_MANUAL` (`Only manual journal entries can be reversed` — also returned for a `manual_reversal` entry); 409 `JOURNAL_ALREADY_REVERSED`; 400 `Store is required`.
 
 ---
 
 ### GET `/accounting/overview`
-Financial summary for the period (revenue/expense/net income, balance-sheet totals, cash+bank balance, posted journal count).
+Financial summary for the period (revenue/expense/net income, balance-sheet totals, cash+bank balance, journal count — `posted` and `reversed` entries).
 
 **Query:** `store` (number, super_admin selector), `startDate` (ISO date), `endDate` (ISO date).
 
