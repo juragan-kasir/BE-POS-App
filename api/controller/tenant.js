@@ -27,9 +27,11 @@ const db = require('../../db/models')
 const { Op } = require('sequelize')
 const { recordAudit } = require('../../utils/auditLog')
 const { page: pageOf, paginated } = require('../service/scopeVisibilityService')
+const { FIELD_MAX } = require('../validation/fieldLimits')
 
 const CODE_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,48}[a-z0-9])?$/
-const NAME_MAX = 100
+// BA DR-28: a business name holds 150 (tenant.name widened by batch B5)
+const NAME_MAX = FIELD_MAX.BUSINESS_NAME
 const STATUSES = ['active', 'suspended']
 const AUDIT_SOURCE = 'tenant-admin'
 

@@ -55,7 +55,7 @@
 ```
 
 ### Text length (BA DR-28)
-Typed text is limited per field kind (`api/validation/fieldLimits.js`): person name 100, business/entity name 150, short label 50, unit 20, region 50, postal code 10, address 255, phone 20, email 254, document number / code / barcode 50, payment reference 255, NPWP 20, NITKU 22, bank account 34, vehicle plate 15, hex color 9, notes and descriptions 255. Columns not yet widened keep their current length (URL/image 255, account code 20, currency code 10). Text copied from master data (an order line's product name, the cashier name, a PO line's ingredient name) is not limited by field kind.
+Typed text is limited per field kind (`api/validation/fieldLimits.js`): person name 100, business/entity name 150, short label 50, unit 20, region 50, postal code 10, address 255, phone 20, email 254, document number / code / barcode 50, payment reference 255, NPWP 20, NITKU 22, bank account 34, vehicle plate 15, hex color 9, URL / image / file path 2048, tenant name 150, notes and descriptions 255 (widened by batch B5, 2026-10-24). Columns that stay narrower keep their own length (account code 20, currency code 10). Text copied from master data (an order line's product name, the cashier name, a PO line's ingredient name) is not limited by field kind.
 
 A longer value is refused with **400**, never cut. From a schema (`validate()`):
 ```json

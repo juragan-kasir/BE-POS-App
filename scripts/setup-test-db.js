@@ -440,6 +440,21 @@ module.exports = async () => {
     } catch {}
   }
 
+  // BA DR-28 step 4 (migration 20261024000001, batch B5): widen the columns
+  // narrower than the field-length standard, for snapshot-built test DBs.
+  // Widen only — a no-op once a column is as wide.
+  for (const [table, column, length] of require('../db/migrations/20261024000001-dr28-widen-text-columns').TARGETS) {
+    try {
+      psqlTest(`DO $$ BEGIN
+        IF (SELECT character_maximum_length FROM information_schema.columns
+             WHERE table_schema = 'public' AND table_name = '${table}' AND column_name = '${column}'
+               AND data_type = 'character varying') < ${length} THEN
+          ALTER TABLE "${table}" ALTER COLUMN "${column}" TYPE VARCHAR(${length});
+        END IF;
+      END $$`)
+    } catch {}
+  }
+
   // BA DR-28 decision 4 (migration 20261025000001): supplier_product.minOrderQty
   // is INTEGER. Mirror it for snapshot-built test DBs; a no-op once INTEGER.
   try {

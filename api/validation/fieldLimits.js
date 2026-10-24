@@ -4,9 +4,9 @@
 // only stops typing earlier. Notes and descriptions accept 255 here; the FE
 // stops a one-line note at 140.
 //
-// A column still narrower than the standard keeps its current length until
-// it is widened (DR-28 step 4): URL_COLUMN, ACCOUNT_CODE, CURRENCY_CODE,
-// LEAD_TIME_UNIT.
+// Columns widened by DR-28 step 4 (batch B5, recorded in production
+// 2026-10-24) now take the standard. A column that stays narrower keeps its
+// own length: ACCOUNT_CODE, CURRENCY_CODE, LEAD_TIME_UNIT.
 const FIELD_MAX = Object.freeze({
   PERSON_NAME: 100,
   BUSINESS_NAME: 150,
@@ -26,9 +26,9 @@ const FIELD_MAX = Object.freeze({
   BANK_ACCOUNT: 34,
   VEHICLE_PLATE: 15,
   HEX_COLOR: 9,
+  URL: 2048,
   TEXT: 255,
   // narrower columns (current DB length)
-  URL_COLUMN: 255,
   ACCOUNT_CODE: 20,
   CURRENCY_CODE: 10,
   LEAD_TIME_UNIT: 10

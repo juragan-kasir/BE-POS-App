@@ -70,7 +70,7 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.INTEGER
       },
       receipt: {
-        type: DataTypes.STRING
+        type: DataTypes.STRING(2048)
       },
       createdBy: {
         type: DataTypes.INTEGER

@@ -18,7 +18,7 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.INTEGER
       },
       image: {
-        type: DataTypes.STRING
+        type: DataTypes.STRING(2048)
       },
       roleType: {
         type: DataTypes.ENUM('super_admin', 'admin', 'kasir', 'user'),

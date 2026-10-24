@@ -20,7 +20,7 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.STRING
       },
       link: {
-        type: DataTypes.STRING
+        type: DataTypes.STRING(2048)
       },
       status: {
         type: DataTypes.STRING(20),

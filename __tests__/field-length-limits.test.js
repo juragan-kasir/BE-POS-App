@@ -185,3 +185,29 @@ describe('handlers outside validate()', () => {
     await account.destroy({ force: true })
   })
 })
+
+describe('columns widened by DR-28 batch B5 take the standard', () => {
+  const url = (n) => `https://res.cloudinary.com/demo/${'u'.repeat(n - 32)}`
+
+  test('an image URL holds 2048: 1500 is saved, 2049 is refused', async () => {
+    expect(url(1500)).toHaveLength(1500)
+    const ok = await http('post', '/category/add-new-category', adminToken).send({ name: tag('img'), image: url(1500), store: [storeA.id] })
+    expect(ok.status).toBe(200)
+    const row = await db.category.findOne({ where: { image: url(1500) } })
+    created.categories.push(row.id)
+
+    const tooLong = await http('post', '/category/add-new-category', adminToken).send({ name: tag('img2'), image: url(2049), store: [storeA.id] })
+    expect(tooLong.status).toBe(400)
+    expect(tooLong.body.errors[0]).toMatchObject({ field: 'image', message: 'maksimal 2048 karakter' })
+  })
+
+  test('the column net follows the widened models (table.area 50, stock_transfer.reason 255)', async () => {
+    const { findTooLong } = require('../utils/valueTooLong')
+    expect(findTooLong(db.table, { area: 'a'.repeat(50) })).toBeNull()
+    expect(findTooLong(db.table, { area: 'a'.repeat(51) })).toMatchObject({ field: 'area', max: 50 })
+    expect(findTooLong(db.stock_transfer, { reason: 'r'.repeat(255) })).toBeNull()
+    expect(findTooLong(db.tenant, { name: 'n'.repeat(150) })).toBeNull()
+    expect(findTooLong(db.tenant, { name: 'n'.repeat(151) })).toMatchObject({ field: 'name', max: 150 })
+    expect(findTooLong(db.product, { image: 'i'.repeat(2048) })).toBeNull()
+  })
+})
