@@ -22,7 +22,10 @@ const B1 = batches.E2_BATCHES.B1.migrations
 const B2 = batches.E2_BATCHES.B2.migrations
 const ALL_E2 = [...B1, ...B2, ...batches.E2_BATCHES.B3.migrations, ...batches.E2_BATCHES.B4.migrations]
 const ledgerWith = (...ran) => FILES.filter((f) => !ALL_E2.includes(f) || ran.flat().includes(f))
-const POST_INCIDENT_MIGRATIONS = ['20261023000001-harden-audit-log.js']
+const POST_INCIDENT_MIGRATIONS = [
+  '20261023000001-harden-audit-log.js',
+  '20261024000001-dr28-widen-text-columns.js'
+]
 const incidentLedgerWith = (...ran) =>
   ledgerWith(...ran).filter((f) => !POST_INCIDENT_MIGRATIONS.includes(f))
 const BEFORE_B3 = ledgerWith(B1, B2)
