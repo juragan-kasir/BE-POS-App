@@ -34,6 +34,11 @@ const compression = require('compression')
 
 const { initSocket } = require('./service/socket')
 const userContext = require('../utils/userContext')
+const {
+  valueTooLongResponder,
+  valueTooLongFromError,
+  bodyFor
+} = require('../utils/valueTooLong')
 const { isPrivateAddress } = require('../utils/privateNetwork')
 const { validate: validateBody } = require('./middleware/validate')
 const { printThermalSchema } = require('./validation/schemas')
@@ -202,6 +207,7 @@ app.use(express.static('public'))
 app.use((req, res, next) => {
   userContext.run({ userId: undefined }, () => next())
 })
+app.use(valueTooLongResponder)
 
 // ponytail: structured request log JSON — sumber p95/p99 & error rate,
 // tanpa body/PII; skip OPTIONS (preflight noise)
@@ -557,6 +563,8 @@ app.get('/', (_, res) => {
 // come after every route (it previously sat above app.get('/'), which meant
 // that route's errors bypassed it entirely).
 app.use((err, req, res, _next) => {
+  const tooLong = valueTooLongFromError(err)
+  if (tooLong) return res.status(400).json(bodyFor(tooLong))
   console.error(err.stack)
   Sentry.captureException(err)
   res.status(err.status || 500).json({

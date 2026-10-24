@@ -69,6 +69,10 @@ sequelize.addHook('beforeBulkUpdate', (options) => {
   }
 })
 
+// A string longer than its VARCHAR column is refused before the write
+// (400 VALUE_TOO_LONG instead of a database error → 500).
+require('../../utils/valueTooLong').installValueTooLongHooks(sequelize)
+
 fs.readdirSync(__dirname)
   .filter((file) => {
     return (
