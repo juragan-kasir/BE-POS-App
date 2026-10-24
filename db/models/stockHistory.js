@@ -80,6 +80,10 @@ module.exports = (sequelize, DataTypes) => {
       foreignKey: 'ingredient',
       as: 'ingredientData'
     })
+    stock_history.belongsTo(models.location, {
+      foreignKey: 'store',
+      as: 'storeData'
+    })
   }
 
   return stock_history

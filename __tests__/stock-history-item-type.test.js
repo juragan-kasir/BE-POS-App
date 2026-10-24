@@ -112,6 +112,13 @@ describe('GET /stock-history/get-all itemType', () => {
     expect(ids(res)).toEqual(idsOf(rows.productSale, rows.recipeHalus, rows.recipeMie, rows.openingMie))
   })
 
+  test('every row names its store', async () => {
+    const res = await getAll({ itemType: 'ingredient' })
+    expect(res.body.data.map((h) => h.storeData)).toEqual(
+      res.body.data.map(() => ({ id: store.id, name: `${TAG}_STORE` }))
+    )
+  })
+
   test('an unknown itemType is refused', async () => {
     const res = await getAll({ itemType: 'bundle' })
     expect(res.status).toBe(400)

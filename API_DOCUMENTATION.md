@@ -2440,21 +2440,30 @@ Auth required.
 | `endDate` | string | ISO date |
 | `store` | number | Store ID |
 
+Each row carries `productData` (the menu, also on recipe-sale ingredient rows) and `storeData` (`id`, `name` of the row's store).
+
 **Response:**
 ```json
 {
   "success": true,
   "data": [
     {
-      "id": 1,
+      "id": 11,
+      "store": 1,
       "product": 1,
-      "productName": "Nasi Goreng",
-      "type": "out",
-      "quantity": 5,
+      "ingredient": 2,
+      "ingredientName": "Bakso Alus",
       "referenceType": "sale",
-      "referenceId": 100,
-      "notes": "Order #100",
-      "createdAt": "2026-07-11T10:30:00Z"
+      "referenceId": 7,
+      "quantityBefore": "100.0000",
+      "quantityChange": "-3.0000",
+      "quantityAfter": "97.0000",
+      "unit": "pcs",
+      "notes": "Penjualan: ORD42683323LR2T",
+      "createdBy": 16,
+      "createdAt": "2026-10-24T12:30:00.000Z",
+      "productData": { "id": 1, "nameProduct": "Bakso Urat" },
+      "storeData": { "id": 1, "name": "Bakso ABC" }
     }
   ],
   "pagination": { "total": 500, "page": 1, "limit": 20, "totalPages": 25 }
