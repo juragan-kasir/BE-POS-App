@@ -16,6 +16,7 @@
     "demo:reset": "bash scripts/reset-warung-demo-db.sh",
     "migrate": "node scripts/run-migrations.js",
     "db:bootstrap": "node scripts/bootstrap-db.js",
+    "backfill:recipe-mode": "node scripts/backfill-recipe-mode.js",
     "migrate:create": "sequelize-cli migration:generate",
     "guard:force-sync": "node scripts/check-no-force-sync.js",
     "check:production-schema": "node scripts/check-production-schema.js",
