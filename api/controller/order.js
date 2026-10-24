@@ -481,6 +481,7 @@ const evaluatePromoCampaign = async (items, store, customerId, subtotal) => {
 
   let bestDiscount = 0
   let bestCampaignId = null
+  let bestCampaignName = null
   let bestReward = null
 
   for (const campaign of campaigns) {
@@ -648,6 +649,7 @@ const evaluatePromoCampaign = async (items, store, customerId, subtotal) => {
     if (discountAmount > bestDiscount) {
       bestDiscount = discountAmount
       bestCampaignId = campaign.id
+      bestCampaignName = campaign.name
       bestReward = reward
     }
   }
@@ -655,6 +657,7 @@ const evaluatePromoCampaign = async (items, store, customerId, subtotal) => {
   return {
     discountAmount: bestDiscount,
     campaignId: bestCampaignId,
+    campaignName: bestCampaignName,
     reward: bestReward
   }
 }
@@ -4151,6 +4154,221 @@ exports.getCustomerMenu = async (req, res) => {
 // printed before D-10: 8 chars). Anything else is treated as no session.
 const DINER_SESSION_PATTERN = /^[A-Za-z0-9_-]{8,128}$/
 
+// FG-PRICE-02: the QR channel's one item-pricing path, shared by the public
+// quote and createCustomerOrder. Resolves every line's unit price from the DB
+// (bundles and outlet-resolved product prices; no override) and collects the
+// optional expectedPrice mismatches. Returns { error } for a refusal.
+const resolveCustomerItemPrices = async (items, store) => {
+  const refuse = (status, body) => ({ error: { status, body } })
+  // Pre-load bundles
+  const bundleMap = {}
+  for (const item of items) {
+    if (item.bundleId) {
+      const bundle = await db.product_bundle.findByPk(item.bundleId, {
+        include: [
+          {
+            model: db.product_bundle_item,
+            as: 'items',
+            include: [{ model: Product, as: 'productData' }]
+          }
+        ]
+      })
+      if (
+        !bundle ||
+        !bundle.isAvailable ||
+        bundle.status !== 'active' ||
+        !isBundleWithinValidityPeriod(bundle) ||
+        // AUD-2 (security): a bundle assigned to a different store (or
+        // not assigned at all) is unavailable for this store — foreign
+        // and nonexistent bundles stay indistinguishable.
+        !(await isBundleOrderableAtStore(bundle, store))
+      ) {
+        return refuse(400, {
+          message: `Bundle not available: ${item.bundleName || item.bundleId}`
+        })
+      }
+      bundleMap[item.bundleId] = bundle
+    }
+  }
+
+  // ===== SERVER-SIDE PRICE VALIDATION =====
+  // Re-calculate all prices from DB. Never trust FE-sent prices.
+  // Price override is never allowed on the public, unauthenticated
+  // customer ordering path — it is an admin-only POS capability.
+  // W3-2: optional per-line expectedPrice is compared against the exact
+  // server-resolved unit price; every line resolves so one 409 carries all
+  // mismatches in original request order, before any write below.
+  const priceMismatches = []
+  for (let index = 0; index < items.length; index++) {
+    const item = items[index]
+    if (item.priceOverride !== undefined && item.priceOverride !== null) {
+      return refuse(403, {
+        message: 'Price override not allowed for customer orders'
+      })
+    }
+    const expected = parseExpectedPrice(item.expectedPrice)
+    if (expected.present && !expected.valid) {
+      return refuse(400, {
+        message: 'expectedPrice must be an integer >= 0'
+      })
+    }
+    if (item.bundleId && bundleMap[item.bundleId]) {
+      const bundle = bundleMap[item.bundleId]
+      const serverPrice = Number(bundle.bundlePrice) || 0
+      item.price = serverPrice
+      item.subtotal = serverPrice * Number(item.quantity)
+      if (expected.present && expected.value !== serverPrice) {
+        priceMismatches.push({
+          index,
+          bundleId: item.bundleId,
+          expectedPrice: expected.value,
+          currentPrice: serverPrice
+        })
+      }
+    } else if (item.productId) {
+      const prod = await Product.findByPk(item.productId)
+      if (
+        !prod ||
+        // AUD-2 (security): a product assigned to a different store (or
+        // not assigned to this store while other rows exist) is treated
+        // exactly like an unknown product — foreign and nonexistent
+        // products stay indistinguishable.
+        !(await isProductOrderableAtStore(prod.id, store))
+      ) {
+        return refuse(400, {
+          message: `Product not found: ${item.productName || item.productId}`
+        })
+      }
+      // P1-7: inactive or unavailable products are refused explicitly.
+      if (!isProductSellable(prod)) {
+        return refuse(400, {
+          code: 'PRODUCT_NOT_AVAILABLE',
+          message: `Produk "${prod.nameProduct || item.productName || item.productId}" sedang tidak tersedia`
+        })
+      }
+      // W3-1 (DR-11): same outlet-resolved catalog price as the counter
+      // path; override stays prohibited here.
+      const catalogPrice = await resolveCatalogBase(prod, store)
+      const serverPrice = await getServerItemPrice(prod, item, store, catalogPrice)
+      item.basePrice = catalogPrice
+      item.price = serverPrice
+      item.subtotal = serverPrice * Number(item.quantity)
+      if (expected.present && expected.value !== serverPrice) {
+        priceMismatches.push({
+          index,
+          productId: item.productId,
+          expectedPrice: expected.value,
+          currentPrice: serverPrice
+        })
+      }
+    }
+  }
+  return { bundleMap, priceMismatches }
+}
+
+// FG-PRICE-02 / FG-PROMO-01: the QR total — the same campaign, discount base
+// and PPN resolver for the quote the diner sees and the order that is charged.
+// `discountApplied` names the campaign so the diner sees why the total is lower.
+const quoteCustomerTotals = async (items, store) => {
+  const subTotal = items.reduce((sum, item) => sum + Number(item.subtotal || 0), 0)
+  const campaign = await evaluatePromoCampaign(
+    items.map((item) => ({
+      ...item,
+      productId: item.productId || item.product,
+      unitPrice: item.price ?? 0,
+      subtotal: item.price * item.quantity
+    })),
+    store,
+    null,
+    subTotal
+  )
+  const discountAmount = Math.min(subTotal, Math.max(0, Number(campaign.discountAmount) || 0))
+  const afterDiscount = subTotal - discountAmount
+  const taxRate = await getActiveTaxRate(store)
+  const taxAmount = Math.round(afterDiscount * (taxRate / 100))
+  return {
+    subTotal,
+    discountAmount,
+    appliedCampaignId: discountAmount > 0 ? campaign.campaignId : null,
+    appliedReward: discountAmount > 0 ? campaign.reward : null,
+    discountApplied:
+      discountAmount > 0
+        ? [{ campaignId: campaign.campaignId, name: campaign.campaignName, amount: discountAmount }]
+        : [],
+    taxRate,
+    taxAmount,
+    serviceChargeAmount: 0,
+    totalPrice: afterDiscount + taxAmount
+  }
+}
+
+// POST /order/customer-quote — public, read-only. FG-PRICE-02: the diner's
+// summary comes from the same pricing and totals as createCustomerOrder, so
+// what BISA shows (discount, PPN base, total) is what the order will charge.
+// Nothing is written; stock is checked when the order is placed.
+exports.quoteCustomerOrder = async (req, res) => {
+  const { store: bodyStore, items } = req.body || {}
+  try {
+    const store = Number(bodyStore)
+    if (!Number.isInteger(store) || store <= 0 || !Array.isArray(items) || !items.length) {
+      return res.status(400).json({ message: 'store and items are required' })
+    }
+    for (const item of items) {
+      const qty = item && item.quantity
+      if (!Number.isInteger(qty) || qty <= 0) {
+        return res.status(400).json({
+          message: 'quantity must be a positive integer for every item'
+        })
+      }
+    }
+    const location = await db.location.findOne({
+      where: { id: store },
+      attributes: ['id', 'status']
+    })
+    if (!location) return res.status(404).json({ message: 'Store not found' })
+    if (location.status === 'archived') {
+      return res.status(409).json({
+        message: 'This outlet is archived and cannot take new orders',
+        code: 'STORE_ARCHIVED'
+      })
+    }
+
+    // Price a copy: the helpers resolve prices onto the line objects.
+    const lines = items.map((item) => ({ ...item }))
+    const resolved = await resolveCustomerItemPrices(lines, store)
+    if (resolved.error) return res.status(resolved.error.status).json(resolved.error.body)
+    const {
+      appliedCampaignId: _campaignId,
+      appliedReward: _reward,
+      ...quote
+    } = await quoteCustomerTotals(lines, store)
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        ...quote,
+        items: lines.map((line, index) => ({
+          index,
+          productId: line.productId ?? null,
+          bundleId: line.bundleId ?? null,
+          quantity: line.quantity,
+          unitPrice: line.price,
+          subtotal: line.subtotal
+        }))
+      }
+    })
+  } catch (error) {
+    // Explicitly-tagged setup errors (PPN_MISSING) surface as-is.
+    if (error.statusCode && error.statusCode < 500) {
+      return res
+        .status(error.statusCode)
+        .json({ message: error.message, ...(error.code ? { code: error.code } : {}) })
+    }
+    console.error('Customer quote failed:', error)
+    return res.status(500).json({ message: 'Internal server error' })
+  }
+}
+
 exports.createCustomerOrder = async (req, res) => {
   const {
     store: bodyStore,
@@ -4274,105 +4492,9 @@ exports.createCustomerOrder = async (req, res) => {
     const discountValue = 0
     let discountType = 'none'
 
-    // Pre-load bundles
-    const bundleMap = {}
-    for (const item of items) {
-      if (item.bundleId) {
-        const bundle = await db.product_bundle.findByPk(item.bundleId, {
-          include: [
-            {
-              model: db.product_bundle_item,
-              as: 'items',
-              include: [{ model: Product, as: 'productData' }]
-            }
-          ]
-        })
-        if (
-          !bundle ||
-          !bundle.isAvailable ||
-          bundle.status !== 'active' ||
-          !isBundleWithinValidityPeriod(bundle) ||
-          // AUD-2 (security): a bundle assigned to a different store (or
-          // not assigned at all) is unavailable for this store — foreign
-          // and nonexistent bundles stay indistinguishable.
-          !(await isBundleOrderableAtStore(bundle, store))
-        ) {
-          return res.status(400).json({
-            message: `Bundle not available: ${item.bundleName || item.bundleId}`
-          })
-        }
-        bundleMap[item.bundleId] = bundle
-      }
-    }
-
-    // ===== SERVER-SIDE PRICE VALIDATION =====
-    // Re-calculate all prices from DB. Never trust FE-sent prices.
-    // Price override is never allowed on the public, unauthenticated
-    // customer ordering path — it is an admin-only POS capability.
-    // W3-2: optional per-line expectedPrice is compared against the exact
-    // server-resolved unit price; every line resolves so one 409 carries all
-    // mismatches in original request order, before any write below.
-    const priceMismatches = []
-    for (let index = 0; index < items.length; index++) {
-      const item = items[index]
-      if (item.priceOverride !== undefined && item.priceOverride !== null) {
-        return res.status(403).json({ message: 'Price override not allowed for customer orders' })
-      }
-      const expected = parseExpectedPrice(item.expectedPrice)
-      if (expected.present && !expected.valid) {
-        return res.status(400).json({ message: 'expectedPrice must be an integer >= 0' })
-      }
-      if (item.bundleId && bundleMap[item.bundleId]) {
-        const bundle = bundleMap[item.bundleId]
-        const serverPrice = Number(bundle.bundlePrice) || 0
-        item.price = serverPrice
-        item.subtotal = serverPrice * Number(item.quantity)
-        if (expected.present && expected.value !== serverPrice) {
-          priceMismatches.push({
-            index,
-            bundleId: item.bundleId,
-            expectedPrice: expected.value,
-            currentPrice: serverPrice
-          })
-        }
-      } else if (item.productId) {
-        const prod = await Product.findByPk(item.productId)
-        if (
-          !prod ||
-          // AUD-2 (security): a product assigned to a different store (or
-          // not assigned to this store while other rows exist) is treated
-          // exactly like an unknown product — foreign and nonexistent
-          // products stay indistinguishable.
-          !(await isProductOrderableAtStore(prod.id, store))
-        ) {
-          return res.status(400).json({
-            message: `Product not found: ${item.productName || item.productId}`
-          })
-        }
-        // P1-7: inactive or unavailable products are refused explicitly.
-        if (!isProductSellable(prod)) {
-          return res.status(400).json({
-            code: 'PRODUCT_NOT_AVAILABLE',
-            message: `Produk "${prod.nameProduct || item.productName || item.productId}" sedang tidak tersedia`
-          })
-        }
-        // W3-1 (DR-11): same outlet-resolved catalog price as the counter
-        // path; override stays prohibited here.
-        const catalogPrice = await resolveCatalogBase(prod, store)
-        const serverPrice = await getServerItemPrice(prod, item, store, catalogPrice)
-        item.basePrice = catalogPrice
-        item.price = serverPrice
-        item.subtotal = serverPrice * Number(item.quantity)
-        if (expected.present && expected.value !== serverPrice) {
-          priceMismatches.push({
-            index,
-            productId: item.productId,
-            expectedPrice: expected.value,
-            currentPrice: serverPrice
-          })
-        }
-      }
-    }
+    const resolved = await resolveCustomerItemPrices(items, store)
+    if (resolved.error) return res.status(resolved.error.status).json(resolved.error.body)
+    const { bundleMap, priceMismatches } = resolved
 
     // W3-2: pre-transaction gate — no stock check, total, or write below may
     // run on a stale client expectation.
@@ -4497,31 +4619,11 @@ exports.createCustomerOrder = async (req, res) => {
       }
     }
 
-    // Evaluate promo campaigns
-    const campaignResult = await evaluatePromoCampaign(
-      items.map((item) => ({
-        ...item,
-        productId: item.productId || item.product,
-        unitPrice: item.price ?? 0,
-        subtotal: item.price * item.quantity
-      })),
-      store,
-      null,
-      subTotal
-    )
-
-    let discountAmount = 0
-    let appliedCampaignId = null
-    if (campaignResult.discountAmount > 0) {
-      discountAmount = campaignResult.discountAmount
-      appliedCampaignId = campaignResult.campaignId
-      discountType = 'nominal'
-    }
-
-    const afterDiscount = subTotal - discountAmount
-    const taxRate = await getActiveTaxRate(store)
-    const taxAmount = Math.round(afterDiscount * (taxRate / 100))
-    const totalPrice = afterDiscount + taxAmount
+    // FG-PRICE-02: the same totals the public quote shows the diner.
+    const quote = await quoteCustomerTotals(items, store)
+    const { discountAmount, taxRate, taxAmount, totalPrice } = quote
+    const { appliedCampaignId, appliedReward } = quote
+    if (discountAmount > 0) discountType = 'nominal'
 
     const qrOrderData = {
       orderNumber,
@@ -4704,11 +4806,11 @@ exports.createCustomerOrder = async (req, res) => {
           orderId: createdOrder.id,
           memberId: null,
           discountApplied: discountAmount,
-          freeItemsGiven: campaignResult.reward
+          freeItemsGiven: appliedReward
             ? [
                 {
-                  productId: campaignResult.reward.productId,
-                  quantity: campaignResult.reward.quantity
+                  productId: appliedReward.productId,
+                  quantity: appliedReward.quantity
                 }
               ]
             : null,

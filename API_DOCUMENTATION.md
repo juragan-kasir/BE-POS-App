@@ -1374,7 +1374,34 @@ No auth. **Query:** `store` (number).
 **Removed 2026-10-23.** The endpoint is no longer mounted; use staff-verified member lookup at settlement. QR `customer-create` rejects a client-supplied `customerId` with `MEMBER_ATTACH_REQUIRES_STAFF`.
 
 ### POST `/order/customer-create`
-No auth. Same structure as `/order/create`, except `customerId` is rejected with `MEMBER_ATTACH_REQUIRES_STAFF`; staff attach a verified member at settlement. Closed/archived outlets return `STORE_CLOSED`/`STORE_ARCHIVED`.
+No auth. Same structure as `/order/create`, except `customerId` is rejected with `MEMBER_ATTACH_REQUIRES_STAFF`; staff attach a verified member at settlement. Closed/archived outlets return `STORE_CLOSED`/`STORE_ARCHIVED`. The charged totals come from the same pricing as `/order/customer-quote`: the best automatic promo campaign for the outlet is applied, and PPN is computed on the discounted subtotal.
+
+### POST `/order/customer-quote`
+No auth; rate-limited (200 / 15 min per store + IP). Read-only quote for the diner's summary — nothing is written and stock is not checked. Uses the same item pricing, campaign and PPN resolver as `/order/customer-create`, so the quoted total is the total the order will charge.
+
+**Request:**
+```json
+{ "store": 1, "items": [{ "productId": 7, "quantity": 2, "options": [], "modifiers": [] }, { "bundleId": 3, "quantity": 1 }] }
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "subTotal": 100000,
+    "discountAmount": 10000,
+    "discountApplied": [{ "campaignId": 4, "name": "Diskon 10%", "amount": 10000 }],
+    "taxRate": 11,
+    "taxAmount": 9900,
+    "serviceChargeAmount": 0,
+    "totalPrice": 99900,
+    "items": [{ "index": 0, "productId": 7, "bundleId": null, "quantity": 2, "unitPrice": 50000, "subtotal": 100000 }]
+  }
+}
+```
+
+Key errors: 400 `store and items are required` / non-positive quantity / product or bundle not available (`PRODUCT_NOT_AVAILABLE`); 403 price override; 404 `Store not found`; 409 `STORE_ARCHIVED`; 400 `PPN_MISSING` when the outlet has no PPN configured.
 
 ---
 
@@ -4176,7 +4203,7 @@ Auth required (super_admin). Auto-activate campaigns based on schedule.
 ---
 
 ### GET `/promo/customer-active`
-No auth. Public active-promo list for the customer app: at most 3 campaigns, highest `priority` first, currently inside their date window and (when set) today's time window and day-of-week list.
+No auth. Public active-promo list for the customer app: at most 10 campaigns, highest `priority` first, currently inside their date window and (when set) today's time window and day-of-week list (`daysOfWeek` is 0 = Sunday … 6 = Saturday). The cap is applied after the time/day filter.
 
 **Query:**
 | Field | Type | Description |
