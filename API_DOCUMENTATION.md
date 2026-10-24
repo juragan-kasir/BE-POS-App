@@ -3503,8 +3503,12 @@ Auth required (super_admin/admin).
 }
 ```
 
+**Response (201):** `{ "success": true, "message": "BOM created", "data": { ...bom, "lines": [...] }, "recipeModeAdopted": false }`
+
+`recipeModeAdopted: true` means saving this active BOM moved the product from `inventoryMode` `stocked` to `make_to_order`, so its sales now deduct the recipe ingredients (audited as a product update). This happens only when every store selling the product has an active BOM and the product has no production order that was not cancelled. `hybrid` and `make_to_order` are never changed.
+
 ### PUT `/bom/edit/:id`
-Auth required (super_admin/admin). Same fields, all optional.
+Auth required (super_admin/admin). Same fields, all optional. The response carries the same `recipeModeAdopted` flag (for example, when a draft BOM is activated).
 
 ### DELETE `/bom/delete/:id`
 Auth required (super_admin/admin).
