@@ -10,12 +10,24 @@ const stockHistoryController = {
       const {
         referenceType,
         product,
+        ingredient,
+        itemType,
         startDate,
         endDate,
         store: queryStore,
         page = 1,
         limit = 50
       } = req.query
+
+      // History Stok shows ingredients and finished products on separate
+      // tabs. A recipe sale row carries both `ingredient` and the menu
+      // `product`, so the ingredient column alone decides the item type.
+      if (itemType !== undefined && !['ingredient', 'product'].includes(itemType)) {
+        return res.status(400).json({
+          success: false,
+          message: "itemType must be 'ingredient' or 'product'"
+        })
+      }
 
       let store = queryStore
       if (req.user?.roleType !== 'super_admin') {
@@ -38,6 +50,14 @@ const stockHistoryController = {
 
       if (product) {
         where.product = product
+      }
+
+      if (itemType === 'ingredient') {
+        where.ingredient = ingredient ? ingredient : { [Op.ne]: null }
+      } else if (itemType === 'product') {
+        where.ingredient = null
+      } else if (ingredient) {
+        where.ingredient = ingredient
       }
 
       if (startDate || endDate) {
