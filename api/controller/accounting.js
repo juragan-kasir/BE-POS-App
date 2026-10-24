@@ -3,6 +3,8 @@ const db = require('../../db/models')
 const { Op } = require('sequelize')
 const { createAudit } = require('../../utils/auditLog')
 const { getStoreLocalDate } = require('../../utils/businessDate')
+const { FIELD_MAX } = require('../validation/fieldLimits')
+const { bodyFor } = require('../../utils/valueTooLong')
 const {
   ensureDefaultAccounts,
   makeEntryNumber,
@@ -234,7 +236,11 @@ module.exports = {
       const { code, name, type, normalBalance, parentId, description, status } =
         req.body
       if (code && String(code) !== account.code) {
-        const safeCode = String(code).trim().slice(0, 50)
+        const safeCode = String(code).trim()
+        // BA DR-28: account.code is VARCHAR(20); a longer code is refused, never cut.
+        if (safeCode.length > FIELD_MAX.ACCOUNT_CODE) {
+          return res.status(400).json(bodyFor({ field: 'code', max: FIELD_MAX.ACCOUNT_CODE }))
+        }
         const clash = await db.account.findOne({ // codacy-ignore-line
           where: { store, code: safeCode }
         })
