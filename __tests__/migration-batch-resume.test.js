@@ -28,7 +28,10 @@ const B1_FIRST_12 = B1.slice(0, 12)
 
 // Migrations added after the 2026-10-08 incident are not part of the
 // verified production ledger snapshot; keep the historical fixture frozen.
-const POST_INCIDENT_MIGRATIONS = ['20261023000001-harden-audit-log.js']
+const POST_INCIDENT_MIGRATIONS = [
+  '20261023000001-harden-audit-log.js',
+  '20261024000001-dr28-widen-text-columns.js'
+]
 
 // Production-like ledger: every non-E2 file recorded, plus the given E2 names.
 const ledgerWith = (...ran) =>

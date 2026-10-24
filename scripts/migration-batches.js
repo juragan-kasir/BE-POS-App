@@ -104,10 +104,22 @@ const E2_BATCHES = Object.freeze({
     // append-only triggers). Both replay safely. No governance gate: no
     // business-data decision and no destructive rewrite.
     openGates: []
+  }),
+  B5: deepFreeze({
+    id: 'B5',
+    title: 'DR-28 field-length widening',
+    expectedCount: 1,
+    migrations: ['20261024000001-dr28-widen-text-columns.js'],
+    // BA DR-28 step 4: widen tenant.name, table.area, stock_transfer.reason
+    // and the URL/image/path columns to the field-length standard. Widening
+    // a VARCHAR is catalog-only; nothing is narrowed or rewritten, and the
+    // migration replays safely. No governance gate: the decision is DR-28
+    // (product owner, 2026-10-24) and no business data changes.
+    openGates: []
   })
 })
 
-const BATCH_ORDER = Object.freeze(['B1', 'B2', 'B3', 'B4'])
+const BATCH_ORDER = Object.freeze(['B1', 'B2', 'B3', 'B4', 'B5'])
 
 // D-08 B1 resume contracts. A resume finishes a batch whose earlier members
 // were recorded by an interrupted run; it never redefines the batch (the

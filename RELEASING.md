@@ -91,14 +91,22 @@ vocabulary and field rules are in `db/migration-dispositions/README.md`.
    for the same `--env`. Flags that could retarget the runner are refused.
    - **D-08 E2 runs in bounded batches (Option C)**, one separately approved
      batch at a time:
-     `npm run migrate -- --env production --batch B1` (then `B2`, then `B3`).
+     `npm run migrate -- --env production --batch B1` (then `B2`, `B3`, `B4`, `B5`).
      The batches are defined in `scripts/migration-batches.js` and recorded
      in `docs/superpowers/evidence/d08-e2-batch-contract-record.md`:
      - **B1**: the original 13 E2 migrations;
      - **B2**: P1 M1 + M2 + M5;
      - **B3**: P1 M3 only, after P1 is live with canonical payment writes
        verified (gate P1-CANONICAL-WRITES-VERIFIED was resolved 2026-10-08
-       and carries no open gate).
+       and carries no open gate);
+     - **B4**: post-P1 additive schema (`goods_receipt.stockPosted`, auditLog
+       append-only backstop);
+     - **B5**: BA DR-28 field-length widening — `tenant.name` 150,
+       `table.area` 50, `stock_transfer.reason` 255, URL/image/path columns
+       2048. Widening a VARCHAR is catalog-only (no rewrite, no value
+       touched); nothing is narrowed; it replays safely and `down()` is a
+       no-op. Raise the ORM/BE/FE limits for these columns only after B5 is
+       recorded in production.
     - After the preflight, the runner refuses a batch whose members are
       missing or already recorded, when any pending migration outside the
       batch would run first, or when a governance gate is open (B3: P1
