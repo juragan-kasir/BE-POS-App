@@ -2432,7 +2432,9 @@ Auth required.
 |-------|------|-------------|
 | `page` | number | Page number |
 | `limit` | number | Items per page |
-| `product` | number | Product ID |
+| `product` | number | Product ID. With `itemType=ingredient`: the ingredient rows of that menu's recipe sales |
+| `itemType` | string | `ingredient` (rows with an ingredient, including recipe-sale rows that also carry the menu product) or `product` (finished-product rows only). Anything else → 400 |
+| `ingredient` | number | Ingredient ID (ignored with `itemType=product`) |
 | `referenceType` | string | Filter by type (e.g. `sale`, `purchase`, `adjustment`) |
 | `startDate` | string | ISO date |
 | `endDate` | string | ISO date |
