@@ -24,7 +24,8 @@ const ALL_E2 = [...B1, ...B2, ...batches.E2_BATCHES.B3.migrations, ...batches.E2
 const ledgerWith = (...ran) => FILES.filter((f) => !ALL_E2.includes(f) || ran.flat().includes(f))
 const POST_INCIDENT_MIGRATIONS = [
   '20261023000001-harden-audit-log.js',
-  '20261024000001-dr28-widen-text-columns.js'
+  '20261024000001-dr28-widen-text-columns.js',
+  '20261025000001-dr28-min-order-qty-integer.js'
 ]
 const incidentLedgerWith = (...ran) =>
   ledgerWith(...ran).filter((f) => !POST_INCIDENT_MIGRATIONS.includes(f))

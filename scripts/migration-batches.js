@@ -116,10 +116,21 @@ const E2_BATCHES = Object.freeze({
     // migration replays safely. No governance gate: the decision is DR-28
     // (product owner, 2026-10-24) and no business data changes.
     openGates: []
+  }),
+  B6: deepFreeze({
+    id: 'B6',
+    title: 'DR-28 minOrderQty as a whole number',
+    expectedCount: 1,
+    migrations: ['20261025000001-dr28-min-order-qty-integer.js'],
+    // BA DR-28 decision 4: supplier_product.minOrderQty VARCHAR(50) ->
+    // INTEGER. Fails closed before any DDL when a value is not digits only
+    // (nothing is guessed or rewritten); replays safely. No governance gate:
+    // the decision is DR-28 (product owner, 2026-10-24).
+    openGates: []
   })
 })
 
-const BATCH_ORDER = Object.freeze(['B1', 'B2', 'B3', 'B4', 'B5'])
+const BATCH_ORDER = Object.freeze(['B1', 'B2', 'B3', 'B4', 'B5', 'B6'])
 
 // D-08 B1 resume contracts. A resume finishes a batch whose earlier members
 // were recorded by an interrupted run; it never redefines the batch (the

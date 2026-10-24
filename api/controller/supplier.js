@@ -4,6 +4,7 @@ const { createNotification } = require('../../utils/createNotification')
 const { createAudit } = require('../../utils/auditLog')
 const { enrichAuditFields } = require('../../utils/auditFields')
 const ExcelJS = require('exceljs')
+const { parseMinOrderQty } = require('../../utils/minOrderQty')
 const {
   superAdminStoreIds,
   nullableArrayStoresWhere
@@ -117,7 +118,9 @@ const syncSupplierProducts = async (supplierId, products, userId) => {
     const leadTimeUnit =
       typeof item === 'object' ? item.leadTimeUnit || 'hari' : 'hari'
     const qualityRating = typeof item === 'object' ? item.qualityRating || 0 : 0
-    const minOrderQty = typeof item === 'object' ? item.minOrderQty || '1' : '1'
+    // DR-28: a whole number; the schema already refused anything else
+    const minOrderQty =
+      typeof item === 'object' ? (parseMinOrderQty(item.minOrderQty) ?? 1) : 1
     const notes = typeof item === 'object' ? item.notes || null : null
     const lastPrice = typeof item === 'object' ? item.lastPrice || 0 : 0
     const productId = typeof item === 'object' ? item.productId || null : null
@@ -1509,7 +1512,7 @@ const supplierController = {
             worksheet.getCell(`D${r}`).value = p.leadTime || 0
             worksheet.getCell(`E${r}`).value = p.leadTimeUnit || 'hari'
             worksheet.getCell(`F${r}`).value = p.qualityRating || 0
-            worksheet.getCell(`G${r}`).value = p.minOrderQty || '1'
+            worksheet.getCell(`G${r}`).value = p.minOrderQty ?? 1
             worksheet.getCell(`H${r}`).value = p.notes || ''
           })
           rowStart = rowStart + existingProducts.length
@@ -1622,6 +1625,11 @@ const supplierController = {
 
           const nameStr = String(name).trim()
           if (nameStr.startsWith('Contoh:')) return
+          const minOrderQtyNumber = parseMinOrderQty(minOrderQty)
+          if (minOrderQtyNumber === null) {
+            errors.push(`Row ${rowNumber}: minOrderQty must be a whole number`)
+            return
+          }
 
           products.push({
             name: nameStr,
@@ -1630,7 +1638,7 @@ const supplierController = {
             leadTime: Number(leadTime) || 0,
             leadTimeUnit: leadTimeUnit ? String(leadTimeUnit).trim() : 'hari',
             qualityRating: Number(qualityRating) || 0,
-            minOrderQty: minOrderQty ? String(minOrderQty).trim() : '1',
+            minOrderQty: minOrderQtyNumber,
             notes: notes ? String(notes).trim() : null
           })
         } catch (error) {

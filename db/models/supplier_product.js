@@ -41,9 +41,10 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.DECIMAL(5, 2),
         defaultValue: 0
       },
+      // BA DR-28 decision 4: a whole number (migration 20261025000001)
       minOrderQty: {
-        type: DataTypes.STRING,
-        defaultValue: '1'
+        type: DataTypes.INTEGER,
+        defaultValue: 1
       },
       notes: {
         type: DataTypes.TEXT,

@@ -1,5 +1,6 @@
 const { z } = require('zod')
 const { FIELD_MAX, tooLong } = require('./fieldLimits')
+const { parseMinOrderQty } = require('../../utils/minOrderQty')
 const { isValidTimezone } = require('../../utils/businessDate')
 const { parsePhoneInput } = require('../../utils/memberIdentity')
 
@@ -39,6 +40,15 @@ const strToNum = () =>
     .transform((v) => (v === '' || v === null || v === undefined ? 0 : Number(v)))
     .refine((v) => !isNaN(v), { message: 'must be a number' })
     .refine((v) => v >= 0, { message: 'must not be negative' })
+
+// BA DR-28 decision 4: digits (or a whole number), empty = 1, stored as a number.
+const minOrderQtyField = () =>
+  z
+    .union([z.number(), z.string()])
+    .optional()
+    .nullable()
+    .transform((v) => parseMinOrderQty(v))
+    .refine((v) => v !== null, { message: 'harus angka bulat' })
 
 // ponytail: null = "semua toko" untuk promo campaign (store column JSONB)
 const strToNumNullable = () =>
@@ -897,7 +907,7 @@ exports.createSupplierSchema = z.object({
           leadTime: z.number().optional().default(0),
           leadTimeUnit: z.string().max(FIELD_MAX.LEAD_TIME_UNIT, tooLong(FIELD_MAX.LEAD_TIME_UNIT)).optional().default('hari'),
           qualityRating: strToNum().optional().default(0),
-          minOrderQty: z.string().optional().default('1'),
+          minOrderQty: minOrderQtyField(),
           notes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().nullable(),
           lastPrice: z.number().optional().default(0),
           productId: z.number().optional().nullable()
