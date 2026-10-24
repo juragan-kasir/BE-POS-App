@@ -215,7 +215,8 @@ describe('SEC-007 — createCustomerReview (POST /order/customer-review)', () =>
   })
 
   test('overlong comments are rejected instead of truncated', async () => {
-    const long = 'x'.repeat(501)
+    // BA DR-28 decision 6: a review comment holds 255 characters
+    const long = 'x'.repeat(256)
     const res = await postReview({
       name: 'Panjang',
       productId: String(globalProduct.id),
@@ -224,7 +225,7 @@ describe('SEC-007 — createCustomerReview (POST /order/customer-review)', () =>
       comment: long
     })
     expect(res.status).toBe(400)
-    expect(res.body.message).toMatch(/at most 500/i)
+    expect(res.body).toMatchObject({ code: 'VALUE_TOO_LONG', field: 'comment', max: 255 })
   })
 
   test('an order claim must reference an existing order in the same store', async () => {

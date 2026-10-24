@@ -18,11 +18,13 @@ let adminUser
 let token
 const categoryIds = []
 
-const addCategory = (body) =>
+// POST /accounting/accounts has no schema, so only the net guards its
+// VARCHAR columns (account.name 255, account.code 20).
+const addAccount = (body) =>
   request(app)
-    .post('/category/add-new-category')
+    .post('/accounting/accounts')
     .set('Authorization', `Bearer ${token}`)
-    .send({ store: [store.id], ...body })
+    .send({ code: `${TAG}`.slice(-10) + Math.floor(Math.random() * 1e6), type: 'asset', normalBalance: 'debit', ...body })
 
 beforeAll(async () => {
   store = await db.location.create({ name: `${TAG}_STORE`, status: 'active' })
@@ -42,6 +44,7 @@ beforeAll(async () => {
 })
 
 afterAll(async () => {
+  await db.account.destroy({ where: { store: store.id }, force: true })
   const rows = await db.category.findAll({ where: { name: { [db.Sequelize.Op.like]: `${TAG}%` } }, paranoid: false })
   const ids = [...categoryIds, ...rows.map((r) => r.id)]
   if (db.category_store) await db.category_store.destroy({ where: { category: ids }, force: true })
@@ -51,16 +54,10 @@ afterAll(async () => {
   await db.location.destroy({ where: { id: store.id }, force: true })
 })
 
-const created = (res) => {
-  const id = res.body?.data?.id
-  if (id) categoryIds.push(id)
-  return id
-}
-
 describe('a value longer than its column', () => {
   test('is refused with 400 VALUE_TOO_LONG naming the field, and nothing is saved', async () => {
     const name = `${TAG}_${'x'.repeat(300)}`
-    const res = await addCategory({ name })
+    const res = await addAccount({ name })
     expect(res.status).toBe(400)
     expect(res.body).toMatchObject({
       success: false,
@@ -69,36 +66,34 @@ describe('a value longer than its column', () => {
       max: 255,
       errors: [{ field: 'name' }]
     })
-    expect(await db.category.count({ where: { name } })).toBe(0)
+    expect(await db.account.count({ where: { name } })).toBe(0)
   })
 
-  test('a narrow column reports its own limit (category.color is VARCHAR(20))', async () => {
-    const res = await addCategory({ name: `${TAG}_color`, color: '#'.padEnd(30, 'a') })
+  test('a narrow column reports its own limit (account.code is VARCHAR(20))', async () => {
+    const res = await addAccount({ name: `${TAG}_code`, code: 'C'.repeat(25) })
     expect(res.status).toBe(400)
-    expect(res.body).toMatchObject({ code: 'VALUE_TOO_LONG', field: 'color', max: 20 })
+    expect(res.body).toMatchObject({ code: 'VALUE_TOO_LONG', field: 'code', max: 20 })
   })
 
   test('exactly at the limit is saved', async () => {
     const name = `${TAG}_`.padEnd(255, 'y')
-    const res = await addCategory({ name })
-    expect(res.status).toBe(200)
-    expect(await db.category.count({ where: { name } })).toBe(1)
+    const res = await addAccount({ name })
+    expect(res.status).toBe(201)
+    expect(await db.account.count({ where: { name } })).toBe(1)
   })
 
   test('characters are counted like Postgres: 255 emoji fit a VARCHAR(255)', async () => {
     const name = `${TAG}`.slice(0, 4) + '😀'.repeat(251)
     expect([...name]).toHaveLength(255)
     expect(name.length).toBeGreaterThan(255) // UTF-16 units
-    const res = await addCategory({ name })
-    expect(res.status).toBe(200)
-    created(res)
+    const res = await addAccount({ name })
+    expect(res.status).toBe(201)
   })
 
   test('only trailing spaces past the limit are accepted, as Postgres trims them', async () => {
     const name = `${TAG}_`.padEnd(255, 'z') + '    '
-    const res = await addCategory({ name })
-    expect(res.status).toBe(200)
-    created(res)
+    const res = await addAccount({ name })
+    expect(res.status).toBe(201)
   })
 
   test('Model.update and bulkCreate are refused too', async () => {

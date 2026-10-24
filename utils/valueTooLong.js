@@ -110,6 +110,15 @@ const valueTooLongResponder = (req, res, next) => {
   next()
 }
 
+// For a handler that reads the body itself: the first [field, value, max]
+// whose string value is longer than max, as { field, max }, or null.
+const firstTooLong = (entries) => {
+  for (const [field, value, max] of entries) {
+    if (typeof value === 'string' && value.length > max) return { field, max }
+  }
+  return null
+}
+
 // For the app's error handler: the 400 for an error that reached it.
 const valueTooLongFromError = (error) => {
   if (error instanceof ValueTooLongError) return { field: error.field, max: error.max }
@@ -123,5 +132,6 @@ module.exports = {
   valueTooLongResponder,
   valueTooLongFromError,
   bodyFor,
-  findTooLong
+  findTooLong,
+  firstTooLong
 }

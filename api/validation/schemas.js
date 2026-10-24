@@ -1,4 +1,5 @@
 const { z } = require('zod')
+const { FIELD_MAX, tooLong } = require('./fieldLimits')
 const { isValidTimezone } = require('../../utils/businessDate')
 const { parsePhoneInput } = require('../../utils/memberIdentity')
 
@@ -139,16 +140,16 @@ exports.loginSchema = z.object({
 // an authorized admin via /auth/change-profile-user. (CRIT-1)
 exports.registerSchema = z
   .object({
-    userName: z.string().min(1, 'Username is required'),
+    userName: z.string().max(FIELD_MAX.SHORT_LABEL, tooLong(FIELD_MAX.SHORT_LABEL)).min(1, 'Username is required'),
     password: z.string().min(6, 'Password min 6 characters'),
     confirmPassword: z.string().min(1, 'Confirm password is required'),
-    email: z.string().email('Invalid email').optional().or(z.literal('')),
-    fullName: z.string().optional().default(''),
-    phoneNumber: z.string().optional().default(''),
+    email: z.string().max(FIELD_MAX.EMAIL, tooLong(FIELD_MAX.EMAIL)).email('Invalid email').optional().or(z.literal('')),
+    fullName: z.string().max(FIELD_MAX.PERSON_NAME, tooLong(FIELD_MAX.PERSON_NAME)).optional().default(''),
+    phoneNumber: z.string().max(FIELD_MAX.PHONE, tooLong(FIELD_MAX.PHONE)).optional().default(''),
     gender: z.string().optional().default(''),
-    address: z.string().optional().default(''),
+    address: z.string().max(FIELD_MAX.ADDRESS, tooLong(FIELD_MAX.ADDRESS)).optional().default(''),
     dateOfBirth: z.string().optional().nullable(),
-    placeOfBirth: z.string().optional().default('')
+    placeOfBirth: z.string().max(FIELD_MAX.SHORT_LABEL, tooLong(FIELD_MAX.SHORT_LABEL)).optional().default('')
   })
   .refine((d) => d.password === d.confirmPassword, {
     message: 'Password and confirm password do not match',
@@ -156,26 +157,26 @@ exports.registerSchema = z
   })
 
 exports.resetPasswordSchema = z.object({
-  email: z.string().email('Invalid email').optional(),
+  email: z.string().max(FIELD_MAX.EMAIL, tooLong(FIELD_MAX.EMAIL)).email('Invalid email').optional(),
   userName: z.string().optional()
 })
 
 // ===================== Product =====================
 exports.createProductSchema = z.object({
-  nameProduct: z.string().optional().default(''),
+  nameProduct: z.string().max(FIELD_MAX.BUSINESS_NAME, tooLong(FIELD_MAX.BUSINESS_NAME)).optional().default(''),
   category: optionalStrToNum(),
   status: statusEnum,
-  description: z.string().optional().default(''),
+  description: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().default(''),
   price: optionalStrToNum().default(0),
   costPrice: optionalStrToNum().default(0),
   stock: strToNum().optional().default(0),
   minStock: strToNum().optional().default(0),
-  unit: z.string().optional().default('pcs'),
-  baseUnit: z.string().optional().default('pcs'),
+  unit: z.string().max(FIELD_MAX.UNIT, tooLong(FIELD_MAX.UNIT)).optional().default('pcs'),
+  baseUnit: z.string().max(FIELD_MAX.UNIT, tooLong(FIELD_MAX.UNIT)).optional().default('pcs'),
   conversionFactor: z.coerce.string().optional().default('1'),
   point: strToNum().optional().default(0),
-  barcode: z.string().optional().nullable(),
-  brand: z.string().optional().nullable(),
+  barcode: z.string().max(FIELD_MAX.BARCODE, tooLong(FIELD_MAX.BARCODE)).optional().nullable(),
+  brand: z.string().max(FIELD_MAX.BUSINESS_NAME, tooLong(FIELD_MAX.BUSINESS_NAME)).optional().nullable(),
   hasModifiers: z.union([z.boolean(), z.string()]).optional().default(false),
   modifiers: jsonField().optional().default([]),
   isOption: z.union([z.boolean(), z.string()]).optional().default(false),
@@ -186,14 +187,14 @@ exports.createProductSchema = z.object({
   tax: jsonField().optional().nullable(),
   priceTiers: jsonField().optional().default([]),
   currencyId: strToNum().optional().nullable(),
-  currencyCode: z.string().optional().nullable(),
+  currencyCode: z.string().max(FIELD_MAX.CURRENCY_CODE, tooLong(FIELD_MAX.CURRENCY_CODE)).optional().nullable(),
   tipeProduk: z.string().optional().default('menu'),
   inventoryMode: inventoryModeEnum,
   composition: jsonField().optional().default([]),
   redeemPoints: strToNum().optional().default(0),
   estimationTime: strToNum().optional().default(0),
   createdBy: z.union([z.number(), strToNum()]).optional().nullable(),
-  image: z.string().optional().nullable(),
+  image: z.string().max(FIELD_MAX.URL_COLUMN, tooLong(FIELD_MAX.URL_COLUMN)).optional().nullable(),
   imageOrder: z.string().optional().nullable()
 })
 
@@ -204,14 +205,14 @@ exports.updateProductSchema = exports.createProductSchema.partial().extend({
 
 // ===================== Category =====================
 exports.createCategorySchema = z.object({
-  name: z.string().min(1, 'Category name is required'),
-  description: z.string().optional().nullable(),
+  name: z.string().max(FIELD_MAX.SHORT_LABEL, tooLong(FIELD_MAX.SHORT_LABEL)).min(1, 'Category name is required'),
+  description: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().nullable(),
   parentId: z.coerce.number().optional().nullable(),
-  color: z.string().optional().nullable(),
+  color: z.string().max(FIELD_MAX.HEX_COLOR, tooLong(FIELD_MAX.HEX_COLOR)).optional().nullable(),
   sortOrder: z.coerce.number().optional().default(0),
-  value: z.string().optional(),
-  image: z.string().optional().nullable(),
-  icon: z.string().optional().nullable(),
+  value: z.string().max(FIELD_MAX.SHORT_LABEL, tooLong(FIELD_MAX.SHORT_LABEL)).optional(),
+  image: z.string().max(FIELD_MAX.URL_COLUMN, tooLong(FIELD_MAX.URL_COLUMN)).optional().nullable(),
+  icon: z.string().max(FIELD_MAX.SHORT_LABEL, tooLong(FIELD_MAX.SHORT_LABEL)).optional().nullable(),
   status: statusEnum,
   store: storeArray().optional().nullable(),
   isActive: z.union([z.boolean(), z.string()]).optional()
@@ -261,7 +262,7 @@ const orderItemSchema = z
       .refine((v) => v === undefined || Number.isInteger(v), {
         message: 'priceOverride must be an integer'
       }),
-    notes: z.string().optional().default(''),
+    notes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().default(''),
     modifiers: z.array(z.any()).optional().default([]),
     variant: z.string().optional()
   })
@@ -272,21 +273,21 @@ exports.createOrderSchema = z.object({
   tableId: strToNum().optional().nullable(),
   customerId: strToNum().optional().nullable(),
   customerName: z.string().optional().nullable(),
-  customerPhone: z.string().optional().nullable(),
+  customerPhone: z.string().max(FIELD_MAX.PHONE, tooLong(FIELD_MAX.PHONE)).optional().nullable(),
   items: z.array(orderItemSchema).min(1, 'At least one item is required'),
   discountId: strToNum().optional().nullable(),
-  promoCode: z.string().optional().nullable(),
+  promoCode: z.string().max(FIELD_MAX.CODE, tooLong(FIELD_MAX.CODE)).optional().nullable(),
   discountType: z
     .enum(['none', 'percent', 'nominal'])
     .optional()
     .default('none'),
   discountValue: strToNum().optional().default(0),
-  notes: z.string().optional().default(''),
+  notes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().default(''),
   source: z.enum(['pos', 'online', 'qr', 'waiter']).optional().default('pos'),
   cashierId: strToNum().optional().nullable(),
   cashierName: z.string().optional().nullable(),
   currencyId: strToNum().optional().nullable(),
-  currencyCode: z.string().optional().nullable(),
+  currencyCode: z.string().max(FIELD_MAX.CURRENCY_CODE, tooLong(FIELD_MAX.CURRENCY_CODE)).optional().nullable(),
   exchangeRate: z.string().optional().default('1'),
   totalCovers: strToNum().optional().default(0),
   shiftId: strToNum().optional().nullable(),
@@ -359,7 +360,7 @@ exports.updateOrderStatusSchema = z.object({
   changedBy: strToNum().optional().nullable(),
   changedByName: z.string().optional().nullable(),
   customerId: strToNum().optional().nullable(),
-  notes: z.string().optional().default(''),
+  notes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().default(''),
   // DR-04: tender fields for settling an order to paid via update-status.
   // Optional so non-paid transitions keep their existing shape; when
   // status is 'paid' the controller requires a complete tender (method,
@@ -754,33 +755,33 @@ const assertSellableProductAssignment = (productInput) => {
 
 // ===================== Location =====================
 exports.createLocationSchema = z.object({
-  name: z.string().min(1, 'Location name is required'),
+  name: z.string().max(FIELD_MAX.BUSINESS_NAME, tooLong(FIELD_MAX.BUSINESS_NAME)).min(1, 'Location name is required'),
   store: strToNum().optional().nullable(),
   // Target-tenant candidate for the new store. It is validated against the
   // resolved authorization context by assertOperationalStoreTenant and is
   // never treated as ownership evidence on its own.
   tenantId: strToNum().optional().nullable(),
-  address: z.string().optional().nullable(),
-  detailLocation: z.string().optional().nullable(),
-  city: z.string().optional().nullable(),
-  province: z.string().optional().nullable(),
-  district: z.string().optional().nullable(),
-  village: z.string().optional().nullable(),
-  postalCode: z.string().optional().nullable(),
+  address: z.string().max(FIELD_MAX.ADDRESS, tooLong(FIELD_MAX.ADDRESS)).optional().nullable(),
+  detailLocation: z.string().max(FIELD_MAX.ADDRESS, tooLong(FIELD_MAX.ADDRESS)).optional().nullable(),
+  city: z.string().max(FIELD_MAX.REGION, tooLong(FIELD_MAX.REGION)).optional().nullable(),
+  province: z.string().max(FIELD_MAX.REGION, tooLong(FIELD_MAX.REGION)).optional().nullable(),
+  district: z.string().max(FIELD_MAX.REGION, tooLong(FIELD_MAX.REGION)).optional().nullable(),
+  village: z.string().max(FIELD_MAX.REGION, tooLong(FIELD_MAX.REGION)).optional().nullable(),
+  postalCode: z.string().max(FIELD_MAX.POSTAL_CODE, tooLong(FIELD_MAX.POSTAL_CODE)).optional().nullable(),
   latitude: z.string().optional().nullable(),
   longitude: z.string().optional().nullable(),
   mainBranch: z.union([z.boolean(), z.string()]).optional().default(false),
-  description: z.string().optional().nullable(),
+  description: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().nullable(),
   openingHours: jsonField().optional().nullable(),
-  managerName: z.string().optional().nullable(),
-  email: z.string().email().optional().or(z.literal('')),
-  phoneNumber: z.string().optional().nullable(),
-  category: z.string().optional().nullable(),
+  managerName: z.string().max(FIELD_MAX.PERSON_NAME, tooLong(FIELD_MAX.PERSON_NAME)).optional().nullable(),
+  email: z.string().max(FIELD_MAX.EMAIL, tooLong(FIELD_MAX.EMAIL)).email().optional().or(z.literal('')),
+  phoneNumber: z.string().max(FIELD_MAX.PHONE, tooLong(FIELD_MAX.PHONE)).optional().nullable(),
+  category: z.string().max(FIELD_MAX.SHORT_LABEL, tooLong(FIELD_MAX.SHORT_LABEL)).optional().nullable(),
   status: statusEnum,
   timezone: ianaTimezone().optional(),
   socialMedia: jsonField().optional().nullable(),
   dailyTarget: strToNum().optional().default(0),
-  image: z.string().optional().nullable()
+  image: z.string().max(FIELD_MAX.URL_COLUMN, tooLong(FIELD_MAX.URL_COLUMN)).optional().nullable()
 })
 
 // ponytail: passthrough preserves locationId, id, storeId, coordinates, etc.
@@ -827,22 +828,22 @@ const w3JsonField = () =>
 exports.storeConfigurationSchema = z
   .object({
     id: locationIdSelector,
-    name: z.string().min(1, 'Location name is required').optional(),
-    phoneNumber: z.string().optional().nullable(),
-    email: z.string().email().optional().or(z.literal('')),
-    address: z.string().optional().nullable(),
-    detailLocation: z.string().optional().nullable(),
-    city: z.string().optional().nullable(),
-    province: z.string().optional().nullable(),
-    district: z.string().optional().nullable(),
-    village: z.string().optional().nullable(),
-    postalCode: z.string().optional().nullable(),
-    description: z.string().optional().nullable(),
-    category: z.string().optional().nullable(),
-    managerName: z.string().optional().nullable(),
+    name: z.string().max(FIELD_MAX.BUSINESS_NAME, tooLong(FIELD_MAX.BUSINESS_NAME)).min(1, 'Location name is required').optional(),
+    phoneNumber: z.string().max(FIELD_MAX.PHONE, tooLong(FIELD_MAX.PHONE)).optional().nullable(),
+    email: z.string().max(FIELD_MAX.EMAIL, tooLong(FIELD_MAX.EMAIL)).email().optional().or(z.literal('')),
+    address: z.string().max(FIELD_MAX.ADDRESS, tooLong(FIELD_MAX.ADDRESS)).optional().nullable(),
+    detailLocation: z.string().max(FIELD_MAX.ADDRESS, tooLong(FIELD_MAX.ADDRESS)).optional().nullable(),
+    city: z.string().max(FIELD_MAX.REGION, tooLong(FIELD_MAX.REGION)).optional().nullable(),
+    province: z.string().max(FIELD_MAX.REGION, tooLong(FIELD_MAX.REGION)).optional().nullable(),
+    district: z.string().max(FIELD_MAX.REGION, tooLong(FIELD_MAX.REGION)).optional().nullable(),
+    village: z.string().max(FIELD_MAX.REGION, tooLong(FIELD_MAX.REGION)).optional().nullable(),
+    postalCode: z.string().max(FIELD_MAX.POSTAL_CODE, tooLong(FIELD_MAX.POSTAL_CODE)).optional().nullable(),
+    description: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().nullable(),
+    category: z.string().max(FIELD_MAX.SHORT_LABEL, tooLong(FIELD_MAX.SHORT_LABEL)).optional().nullable(),
+    managerName: z.string().max(FIELD_MAX.PERSON_NAME, tooLong(FIELD_MAX.PERSON_NAME)).optional().nullable(),
     latitude: z.string().optional().nullable(),
     longitude: z.string().optional().nullable(),
-    image: z.string().optional().nullable(),
+    image: z.string().max(FIELD_MAX.URL_COLUMN, tooLong(FIELD_MAX.URL_COLUMN)).optional().nullable(),
     openingHours: w3JsonField().optional().nullable(),
     socialMedia: w3JsonField().optional().nullable(),
     timezone: ianaTimezone().optional(),
@@ -863,41 +864,41 @@ exports.assertSellableProductAssignment = assertSellableProductAssignment
 
 // ===================== Supplier =====================
 exports.createSupplierSchema = z.object({
-  name: z.string().min(1, 'Supplier name is required'),
+  name: z.string().max(FIELD_MAX.BUSINESS_NAME, tooLong(FIELD_MAX.BUSINESS_NAME)).min(1, 'Supplier name is required'),
   store: storeArray().optional().nullable(),
-  phone: z.string().optional().nullable(),
-  email: z.string().email().optional().or(z.literal('')),
-  contactPerson: z.string().optional().nullable(),
-  address: z.string().optional().nullable(),
-  description: z.string().optional().nullable(),
+  phone: z.string().max(FIELD_MAX.PHONE, tooLong(FIELD_MAX.PHONE)).optional().nullable(),
+  email: z.string().max(FIELD_MAX.EMAIL, tooLong(FIELD_MAX.EMAIL)).email().optional().or(z.literal('')),
+  contactPerson: z.string().max(FIELD_MAX.PERSON_NAME, tooLong(FIELD_MAX.PERSON_NAME)).optional().nullable(),
+  address: z.string().max(FIELD_MAX.ADDRESS, tooLong(FIELD_MAX.ADDRESS)).optional().nullable(),
+  description: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().nullable(),
   status: statusEnum,
   paymentType: z.enum(['cbd', 'cad', 'tempo']).optional().default('cbd'),
   tempoDays: z.number().optional().default(0),
   categoryId: z.number().optional().nullable(),
-  mobile: z.string().optional().nullable(),
-  whatsapp: z.string().optional().nullable(),
-  fax: z.string().optional().nullable(),
-  website: z.string().optional().nullable(),
+  mobile: z.string().max(FIELD_MAX.PHONE, tooLong(FIELD_MAX.PHONE)).optional().nullable(),
+  whatsapp: z.string().max(FIELD_MAX.PHONE, tooLong(FIELD_MAX.PHONE)).optional().nullable(),
+  fax: z.string().max(FIELD_MAX.PHONE, tooLong(FIELD_MAX.PHONE)).optional().nullable(),
+  website: z.string().max(FIELD_MAX.URL_COLUMN, tooLong(FIELD_MAX.URL_COLUMN)).optional().nullable(),
   taxInclude: z.boolean().optional().default(true),
   taxType: z.string().optional().nullable(),
-  taxNumber: z.string().optional().nullable(),
-  taxName: z.string().optional().nullable(),
-  nitku: z.string().optional().nullable(),
+  taxNumber: z.string().max(FIELD_MAX.NPWP, tooLong(FIELD_MAX.NPWP)).optional().nullable(),
+  taxName: z.string().max(FIELD_MAX.BUSINESS_NAME, tooLong(FIELD_MAX.BUSINESS_NAME)).optional().nullable(),
+  nitku: z.string().max(FIELD_MAX.NITKU, tooLong(FIELD_MAX.NITKU)).optional().nullable(),
   taxTransactionType: z.string().optional().nullable(),
   defaultDiscount: z.number().optional().default(0),
-  defaultDescription: z.string().optional().nullable(),
+  defaultDescription: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().nullable(),
   products: z
     .array(
       z
         .object({
-          name: z.string().min(1),
+          name: z.string().max(FIELD_MAX.BUSINESS_NAME, tooLong(FIELD_MAX.BUSINESS_NAME)).min(1),
           price: strToNum().optional().default(0),
-          unit: z.string().optional().default('pcs'),
+          unit: z.string().max(FIELD_MAX.UNIT, tooLong(FIELD_MAX.UNIT)).optional().default('pcs'),
           leadTime: z.number().optional().default(0),
-          leadTimeUnit: z.string().optional().default('hari'),
+          leadTimeUnit: z.string().max(FIELD_MAX.LEAD_TIME_UNIT, tooLong(FIELD_MAX.LEAD_TIME_UNIT)).optional().default('hari'),
           qualityRating: strToNum().optional().default(0),
           minOrderQty: z.string().optional().default('1'),
-          notes: z.string().optional().nullable(),
+          notes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().nullable(),
           lastPrice: z.number().optional().default(0),
           productId: z.number().optional().nullable()
         })
@@ -909,10 +910,10 @@ exports.createSupplierSchema = z.object({
     .array(
       z
         .object({
-          fullName: z.string().min(1),
-          position: z.string().optional().nullable(),
-          email: z.string().optional().nullable(),
-          phone: z.string().optional().nullable()
+          fullName: z.string().max(FIELD_MAX.PERSON_NAME, tooLong(FIELD_MAX.PERSON_NAME)).min(1),
+          position: z.string().max(FIELD_MAX.SHORT_LABEL, tooLong(FIELD_MAX.SHORT_LABEL)).optional().nullable(),
+          email: z.string().max(FIELD_MAX.EMAIL, tooLong(FIELD_MAX.EMAIL)).optional().nullable(),
+          phone: z.string().max(FIELD_MAX.PHONE, tooLong(FIELD_MAX.PHONE)).optional().nullable()
         })
         .passthrough()
     )
@@ -922,9 +923,9 @@ exports.createSupplierSchema = z.object({
     .array(
       z
         .object({
-          bankName: z.string().min(1),
-          accountNumber: z.string().min(1),
-          accountName: z.string().min(1),
+          bankName: z.string().max(FIELD_MAX.BUSINESS_NAME, tooLong(FIELD_MAX.BUSINESS_NAME)).min(1),
+          accountNumber: z.string().max(FIELD_MAX.BANK_ACCOUNT, tooLong(FIELD_MAX.BANK_ACCOUNT)).min(1),
+          accountName: z.string().max(FIELD_MAX.PERSON_NAME, tooLong(FIELD_MAX.PERSON_NAME)).min(1),
           isDefault: z.boolean().optional().default(false),
           status: statusEnum.optional().default('active')
         })
@@ -938,8 +939,8 @@ exports.updateSupplierSchema = exports.createSupplierSchema.partial()
 
 // ===================== Supplier Category =====================
 exports.createSupplierCategorySchema = z.object({
-  name: z.string().min(1, 'Category name is required'),
-  description: z.string().optional().nullable(),
+  name: z.string().max(FIELD_MAX.SHORT_LABEL, tooLong(FIELD_MAX.SHORT_LABEL)).min(1, 'Category name is required'),
+  description: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().nullable(),
   status: statusEnum
 })
 
@@ -948,14 +949,14 @@ exports.updateSupplierCategorySchema =
 
 // ===================== Ingredient =====================
 exports.createIngredientSchema = z.object({
-  name: z.string().min(1, 'Ingredient name is required'),
+  name: z.string().max(FIELD_MAX.BUSINESS_NAME, tooLong(FIELD_MAX.BUSINESS_NAME)).min(1, 'Ingredient name is required'),
   store: strToNum().optional().nullable(),
   category: strToNum().optional().nullable(),
   supplier: strToNum().optional().nullable(),
   stock: strToNum().optional().default(0),
   minStock: strToNum().optional().default(0),
-  unit: z.string().optional().default('pcs'),
-  baseUnit: z.string().optional().default('pcs'),
+  unit: z.string().max(FIELD_MAX.UNIT, tooLong(FIELD_MAX.UNIT)).optional().default('pcs'),
+  baseUnit: z.string().max(FIELD_MAX.UNIT, tooLong(FIELD_MAX.UNIT)).optional().default('pcs'),
   conversionFactor: z.coerce.string().optional().default('1'),
   costPrice: strToNum().optional().default(0),
   status: statusEnum
@@ -966,14 +967,14 @@ exports.createIngredientSchema = z.object({
 // parsed it as 0 and silently zeroed the ingredient's stock (and reset
 // unit/costPrice/status). Omitted = unchanged.
 exports.updateIngredientSchema = z.object({
-  name: z.string().min(1, 'Ingredient name is required').optional(),
+  name: z.string().max(FIELD_MAX.BUSINESS_NAME, tooLong(FIELD_MAX.BUSINESS_NAME)).min(1, 'Ingredient name is required').optional(),
   store: strToNum().optional().nullable(),
   category: strToNum().optional().nullable(),
   supplier: strToNum().optional().nullable(),
   stock: strToNum().optional(),
   minStock: strToNum().optional(),
-  unit: z.string().optional(),
-  baseUnit: z.string().optional(),
+  unit: z.string().max(FIELD_MAX.UNIT, tooLong(FIELD_MAX.UNIT)).optional(),
+  baseUnit: z.string().max(FIELD_MAX.UNIT, tooLong(FIELD_MAX.UNIT)).optional(),
   conversionFactor: z.coerce.string().optional(),
   costPrice: strToNum().optional(),
   status: statusEnumBase.optional()
@@ -982,29 +983,29 @@ exports.updateIngredientSchema = z.object({
 exports.adjustIngredientStockSchema = z.object({
   type: z.enum(['add', 'subtract', 'set']),
   quantity: z.coerce.number().finite().nonnegative(),
-  notes: z.string().max(500).optional().nullable()
+  notes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().nullable()
 })
 
 // ===================== User =====================
 const userBaseSchema = z.object({
-  userName: z.string().min(1, 'Username is required'),
+  userName: z.string().max(FIELD_MAX.SHORT_LABEL, tooLong(FIELD_MAX.SHORT_LABEL)).min(1, 'Username is required'),
   password: z.string().min(6, 'Password min 6 characters'),
   confirmPassword: z.string().min(1, 'Confirm password is required'),
-  email: z.string().email().optional().or(z.literal('')),
+  email: z.string().max(FIELD_MAX.EMAIL, tooLong(FIELD_MAX.EMAIL)).email().optional().or(z.literal('')),
   userType: z.enum(['admin', 'user', 'kasir']).default('user'),
-  fullName: z.string().optional().default(''),
-  phoneNumber: z.string().optional().default(''),
+  fullName: z.string().max(FIELD_MAX.PERSON_NAME, tooLong(FIELD_MAX.PERSON_NAME)).optional().default(''),
+  phoneNumber: z.string().max(FIELD_MAX.PHONE, tooLong(FIELD_MAX.PHONE)).optional().default(''),
   gender: z.string().optional().default(''),
-  address: z.string().optional().default(''),
+  address: z.string().max(FIELD_MAX.ADDRESS, tooLong(FIELD_MAX.ADDRESS)).optional().default(''),
   dateOfBirth: z.string().optional().nullable(),
-  placeOfBirth: z.string().optional().default(''),
+  placeOfBirth: z.string().max(FIELD_MAX.SHORT_LABEL, tooLong(FIELD_MAX.SHORT_LABEL)).optional().default(''),
   store: optionalStrToNum().nullable(),
   shift: strToNumNullable(),
   position: optionalStrToNum().nullable(),
   roleId: optionalStrToNum().nullable(),
-  department: z.string().optional().nullable(),
+  department: z.string().max(FIELD_MAX.SHORT_LABEL, tooLong(FIELD_MAX.SHORT_LABEL)).optional().nullable(),
   departmentId: optionalStrToNum().nullable(),
-  employmentType: z.string().optional().nullable(),
+  employmentType: z.string().max(FIELD_MAX.SHORT_LABEL, tooLong(FIELD_MAX.SHORT_LABEL)).optional().nullable(),
   startDate: z.string().optional().nullable(),
   status: statusEnum,
   accessMenu: jsonField().optional().nullable(),
@@ -1020,28 +1021,28 @@ exports.createUserSchema = userBaseSchema.refine(
 )
 
 const employeeBaseSchema = z.object({
-  userName: z.string().optional().nullable(),
+  userName: z.string().max(FIELD_MAX.SHORT_LABEL, tooLong(FIELD_MAX.SHORT_LABEL)).optional().nullable(),
   password: z.string().optional().nullable(),
   confirmPassword: z.string().optional().nullable(),
-  email: z.string().email().optional().or(z.literal('')),
+  email: z.string().max(FIELD_MAX.EMAIL, tooLong(FIELD_MAX.EMAIL)).email().optional().or(z.literal('')),
   userType: z.enum(['admin', 'user', 'kasir']).default('user'),
-  fullName: z.string().optional().default(''),
-  phoneNumber: z.string().optional().default(''),
+  fullName: z.string().max(FIELD_MAX.PERSON_NAME, tooLong(FIELD_MAX.PERSON_NAME)).optional().default(''),
+  phoneNumber: z.string().max(FIELD_MAX.PHONE, tooLong(FIELD_MAX.PHONE)).optional().default(''),
   gender: z.string().optional().default(''),
-  address: z.string().optional().default(''),
+  address: z.string().max(FIELD_MAX.ADDRESS, tooLong(FIELD_MAX.ADDRESS)).optional().default(''),
   dateOfBirth: z.string().optional().nullable(),
-  placeOfBirth: z.string().optional().default(''),
-  employeeId: z.string().optional().nullable(),
+  placeOfBirth: z.string().max(FIELD_MAX.SHORT_LABEL, tooLong(FIELD_MAX.SHORT_LABEL)).optional().default(''),
+  employeeId: z.string().max(FIELD_MAX.CODE, tooLong(FIELD_MAX.CODE)).optional().nullable(),
   store: optionalStrToNum().nullable(),
   shift: strToNumNullable(),
   position: optionalStrToNum().nullable(),
   roleId: optionalStrToNum().nullable(),
-  department: z.string().optional().nullable(),
+  department: z.string().max(FIELD_MAX.SHORT_LABEL, tooLong(FIELD_MAX.SHORT_LABEL)).optional().nullable(),
   departmentId: optionalStrToNum().nullable(),
-  employmentType: z.string().optional().nullable(),
+  employmentType: z.string().max(FIELD_MAX.SHORT_LABEL, tooLong(FIELD_MAX.SHORT_LABEL)).optional().nullable(),
   startDate: z.string().optional().nullable(),
   endDate: z.string().optional().nullable(),
-  contractDuration: z.string().optional().nullable(),
+  contractDuration: z.string().max(FIELD_MAX.SHORT_LABEL, tooLong(FIELD_MAX.SHORT_LABEL)).optional().nullable(),
   status: statusEnum,
   accessMenu: jsonField().optional().nullable(),
   monthlySalary: z.string().optional().nullable(),
@@ -1083,7 +1084,7 @@ exports.updateUserSchema = userBaseSchema.partial().extend({
 
 // ===================== Discount =====================
 exports.createDiscountSchema = z.object({
-  name: z.string().min(1, 'Discount name is required'),
+  name: z.string().max(FIELD_MAX.BUSINESS_NAME, tooLong(FIELD_MAX.BUSINESS_NAME)).min(1, 'Discount name is required'),
   store: strToNum().nullable().optional(),
   type: z.preprocess(
     (val) => (val === '' || val === undefined ? 'percent' : val),
@@ -1094,10 +1095,10 @@ exports.createDiscountSchema = z.object({
   minimumOrder: strToNum().optional().default(0),
   startDate: z.string().optional().nullable(),
   endDate: z.string().optional().nullable(),
-  code: z.string().nullable().optional(),
+  code: z.string().max(FIELD_MAX.CODE, tooLong(FIELD_MAX.CODE)).nullable().optional(),
   conditions: jsonField().optional(),
   status: z.union([z.boolean(), z.string()]).optional().default(true),
-  description: z.string().nullable().optional()
+  description: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).nullable().optional()
 })
 
 exports.updateDiscountSchema = exports.createDiscountSchema.partial()
@@ -1118,7 +1119,7 @@ const poItemSchema = z.object({
 exports.createPurchaseOrderSchema = z.object({
   store: strToNum(),
   items: z.array(poItemSchema).min(1, 'At least one item is required'),
-  notes: z.string().optional().default(''),
+  notes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().default(''),
   discount: strToNum().optional().default(0),
   additionalCost: strToNum().optional().default(0),
   overDeliveryTolerance: strToNum().optional().default(10),
@@ -1145,10 +1146,10 @@ exports.updatePurchaseOrderSchema = z
   .object({
     store: strToNum().optional(),
     items: z.array(poItemSchema).optional(),
-    notes: z.string().optional(),
+    notes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional(),
     discount: strToNum().optional(),
     additionalCost: strToNum().optional(),
-    additionalCostNotes: z.string().optional().nullable(),
+    additionalCostNotes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().nullable(),
     overDeliveryTolerance: strToNum().optional(),
     pic: strToNum().optional().nullable(),
     createdBy: z.union([z.number(), strToNum()]).optional().nullable(),
@@ -1186,7 +1187,7 @@ const goodsRequestItemSchema = z.object({
   supplier: strToNum().optional().nullable(),
   qty: strToNum(),
   unit: z.string().optional().default('pcs'),
-  notes: z.string().optional().nullable()
+  notes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().nullable()
 })
 
 exports.createGoodsRequestSchema = z.object({
@@ -1194,10 +1195,10 @@ exports.createGoodsRequestSchema = z.object({
   items: z
     .array(goodsRequestItemSchema)
     .min(1, 'At least one item is required'),
-  requestedBy: z.string().optional().default(''),
+  requestedBy: z.string().max(FIELD_MAX.PERSON_NAME, tooLong(FIELD_MAX.PERSON_NAME)).optional().default(''),
   requestDate: z.string().optional().nullable(),
   neededDate: z.string().optional().nullable(),
-  notes: z.string().optional().default('')
+  notes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().default('')
 })
 
 exports.updateGoodsRequestSchema = exports.createGoodsRequestSchema.partial()
@@ -1205,15 +1206,15 @@ exports.updateGoodsRequestSchema = exports.createGoodsRequestSchema.partial()
 // ===================== Reservation =====================
 exports.createReservationSchema = z.object({
   store: strToNum(),
-  customerName: z.string().min(1, 'Customer name is required'),
-  customerPhone: z.string().optional().nullable(),
-  customerEmail: z.string().email().optional().or(z.literal('')),
+  customerName: z.string().max(FIELD_MAX.PERSON_NAME, tooLong(FIELD_MAX.PERSON_NAME)).min(1, 'Customer name is required'),
+  customerPhone: z.string().max(FIELD_MAX.PHONE, tooLong(FIELD_MAX.PHONE)).optional().nullable(),
+  customerEmail: z.string().max(FIELD_MAX.EMAIL, tooLong(FIELD_MAX.EMAIL)).email().optional().or(z.literal('')),
   reservationDate: z.string().min(1, 'Date is required'),
   startTime: z.string().min(1, 'Time is required'),
   endTime: z.string().optional().nullable(),
   guestCount: strToNum().optional().default(1),
   tableId: strToNum().optional().nullable(),
-  notes: z.string().optional().default(''),
+  notes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().default(''),
   status: z
     .enum(['pending', 'confirmed', 'completed', 'cancelled', 'no_show'])
     .optional()
@@ -1225,13 +1226,13 @@ exports.updateReservationSchema = exports.createReservationSchema.partial()
 // ===================== Table =====================
 exports.createTableSchema = z.object({
   store: strToNum().optional().nullable(),
-  name: z.string().min(1, 'Table name is required'),
+  name: z.string().max(FIELD_MAX.SHORT_LABEL, tooLong(FIELD_MAX.SHORT_LABEL)).min(1, 'Table name is required'),
   capacity: strToNum().optional().default(4),
   status: z
     .enum(['available', 'occupied', 'reserved', 'maintenance'])
     .optional()
     .default('available'),
-  description: z.string().optional().nullable()
+  description: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().nullable()
 })
 
 exports.updateTableSchema = exports.createTableSchema.partial().extend({
@@ -1241,7 +1242,7 @@ exports.updateTableSchema = exports.createTableSchema.partial().extend({
 // ===================== Tax Config =====================
 exports.createTaxConfigSchema = z.object({
   store: strToNum().optional().nullable(),
-  name: z.string().min(1, 'Tax name is required'),
+  name: z.string().max(FIELD_MAX.BUSINESS_NAME, tooLong(FIELD_MAX.BUSINESS_NAME)).min(1, 'Tax name is required'),
   rate: z.union([z.number(), z.string()])
     .transform((v) => {
       if (typeof v === 'number') return v
@@ -1257,7 +1258,7 @@ exports.createTaxConfigSchema = z.object({
     }),
   type: z.enum(['ppn', 'service_charge', 'other']).optional().default('ppn'),
   status: statusEnum,
-  description: z.string().optional().nullable()
+  description: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().nullable()
 })
 
 exports.updateTaxConfigSchema = exports.createTaxConfigSchema.partial().extend({
@@ -1277,10 +1278,10 @@ exports.createExpenseSchema = z
     store: strToNum().optional().nullable(),
     categoryId: strToNum().optional().nullable(),
     amount: strToNum().optional().nullable(),
-    description: z.string().optional().nullable(),
+    description: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().nullable(),
     date: z.string().optional(),
-    notes: z.string().optional().default(''),
-    payee: z.string().optional().nullable(),
+    notes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().default(''),
+    payee: z.string().max(FIELD_MAX.BUSINESS_NAME, tooLong(FIELD_MAX.BUSINESS_NAME)).optional().nullable(),
     employeeId: strToNum().optional().nullable(),
     paymentMethod: z.enum(['cash', 'bank', 'e-wallet']).optional().nullable(),
     frequency: z
@@ -1322,10 +1323,10 @@ exports.bulkCreateExpensesSchema = z
             categoryId: strToNum().optional().nullable(),
             category: strToNum().optional().nullable(),
             amount: strToNum().optional().nullable(),
-            description: z.string().optional().nullable(),
+            description: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().nullable(),
             date: z.string().optional(),
-            notes: z.string().optional().default(''),
-            payee: z.string().optional().nullable(),
+            notes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().default(''),
+            payee: z.string().max(FIELD_MAX.BUSINESS_NAME, tooLong(FIELD_MAX.BUSINESS_NAME)).optional().nullable(),
             employeeId: strToNum().optional().nullable(),
             paymentMethod: z
               .enum(['cash', 'bank', 'e-wallet'])
@@ -1364,21 +1365,21 @@ exports.markExpensePaidSchema = z
   .object({
     paymentDate: z.string().optional().nullable(),
     paymentMethod: z.enum(['cash', 'bank', 'e-wallet']).optional().nullable(),
-    note: z.string().optional().nullable()
+    note: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().nullable()
   })
   .passthrough()
 
 // ===================== Member =====================
 exports.createMemberSchema = z.object({
   store: strToNum().optional().nullable(),
-  nameMember: z.string().min(1, 'Member name is required'),
+  nameMember: z.string().max(FIELD_MAX.PERSON_NAME, tooLong(FIELD_MAX.PERSON_NAME)).min(1, 'Member name is required'),
   phoneNumber: memberPhoneNumber(),
-  email: z.string().email().optional().or(z.literal('')),
+  email: z.string().max(FIELD_MAX.EMAIL, tooLong(FIELD_MAX.EMAIL)).email().optional().or(z.literal('')),
   point: strToNum().optional().default(0),
   tier: strToNum().optional().nullable(),
   birthDate: z.string().optional().nullable(),
   gender: z.string().optional().default(''),
-  address: z.string().optional().nullable(),
+  address: z.string().max(FIELD_MAX.ADDRESS, tooLong(FIELD_MAX.ADDRESS)).optional().nullable(),
   createdBy: strToNum().optional(),
   status: z.string().optional().default('active')
 })
@@ -1396,12 +1397,12 @@ const grItemSchema = z.object({
   ingredientName: z.string().optional(),
   qtyReceived: strToNum().optional().default(0),
   quantity: strToNum().optional().default(0),
-  conditionNotes: z.string().optional().default(''),
+  conditionNotes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().default(''),
   unit: z.string().optional().default('pcs'),
   price: strToNum().optional().default(0),
   costPrice: strToNum().optional().default(0),
   conversionToBase: strToNum().optional().default(1),
-  batchNumber: z.string().optional().nullable(),
+  batchNumber: z.string().max(FIELD_MAX.CODE, tooLong(FIELD_MAX.CODE)).optional().nullable(),
   expiryDate: z.string().optional().nullable()
 })
 
@@ -1411,11 +1412,11 @@ exports.createGoodsReceiptSchema = z.object({
   supplier: strToNum().optional().nullable(),
   pic: strToNum().optional().nullable(),
   documentation: z.string().optional().nullable(),
-  suratJalan: z.string().optional().nullable(),
-  taxInvoiceNo: z.string().optional().nullable(),
+  suratJalan: z.string().max(FIELD_MAX.DOCUMENT_NUMBER, tooLong(FIELD_MAX.DOCUMENT_NUMBER)).optional().nullable(),
+  taxInvoiceNo: z.string().max(FIELD_MAX.DOCUMENT_NUMBER, tooLong(FIELD_MAX.DOCUMENT_NUMBER)).optional().nullable(),
   shippingCost: strToNum().optional().default(0),
   items: z.array(grItemSchema).min(1, 'At least one item is required'),
-  notes: z.string().optional().default(''),
+  notes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().default(''),
   receivedDate: z.string().optional(),
   idempotencyKey: z.string().max(255).optional().nullable(),
   status: z
@@ -1440,7 +1441,7 @@ exports.createProductionOrderSchema = z.object({
   productItemId: strToNum(),
   plannedQty: strToNum(),
   scheduledDate: z.string().optional().nullable(),
-  notes: z.string().optional().default(''),
+  notes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().default(''),
   status: z
     .enum(['planned', 'in_progress', 'completed', 'cancelled', 'draft'])
     .optional()
@@ -1454,8 +1455,8 @@ exports.updateProductionOrderSchema =
 exports.createStockOpnameSchema = z.object({
   store: strToNum().optional().nullable(),
   auditDate: z.string().optional().nullable(),
-  auditor: z.string().optional().nullable(),
-  notes: z.string().optional().default(''),
+  auditor: z.string().max(FIELD_MAX.PERSON_NAME, tooLong(FIELD_MAX.PERSON_NAME)).optional().nullable(),
+  notes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().default(''),
   status: statusEnum,
   items: z.array(z.record(z.any())).optional().default([])
 })
@@ -1470,7 +1471,7 @@ const shiftTypeSchema = z.enum(SHIFT_TYPES, {
 
 exports.createShiftSchema = z.object({
   store: z.any().optional().nullable(),
-  nama_shift: z.string().min(1, 'Shift name is required'),
+  nama_shift: z.string().max(FIELD_MAX.SHORT_LABEL, tooLong(FIELD_MAX.SHORT_LABEL)).min(1, 'Shift name is required'),
   tipe_shift: shiftTypeSchema.optional().default(SHIFT_TYPES[0]),
   jam_mulai: z.string().min(1, 'Start time is required'),
   jam_selesai: z.string().min(1, 'End time is required'),
@@ -1487,8 +1488,8 @@ exports.updateShiftSchema = exports.createShiftSchema.partial().extend({
 // ===================== Department / Position =====================
 exports.createDepartmentSchema = z.object({
   store: strToNum().optional().nullable(),
-  name: z.string().min(1, 'Department name is required'),
-  description: z.string().optional().nullable(),
+  name: z.string().max(FIELD_MAX.SHORT_LABEL, tooLong(FIELD_MAX.SHORT_LABEL)).min(1, 'Department name is required'),
+  description: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().nullable(),
   status: statusEnum
 })
 
@@ -1501,10 +1502,10 @@ exports.updateDepartmentSchema = exports.createDepartmentSchema
 // ===================== Shift Template =====================
 exports.createShiftTemplateSchema = z.object({
   store: strToNum().optional().nullable(),
-  name: z.string().min(1, 'Template name is required'),
+  name: z.string().max(FIELD_MAX.SHORT_LABEL, tooLong(FIELD_MAX.SHORT_LABEL)).min(1, 'Template name is required'),
   startTime: z.string().min(1, 'Start time is required'),
   endTime: z.string().min(1, 'End time is required'),
-  description: z.string().optional().nullable(),
+  description: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().nullable(),
   status: statusEnum
 })
 
@@ -1532,7 +1533,7 @@ exports.createCashRegisterSchema = z.object({
   storeId: strToNum().optional().nullable(),
   openingBalance: strToNum().optional().default(0),
   shift: strToNum().optional().nullable(),
-  notes: z.string().optional().default(''),
+  notes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().default(''),
   // Phase 39 Batch 6C: explicit cashier confirmation to also reset stale
   // OCCUPIED-with-no-active-order tables to AVAILABLE as part of opening.
   confirmTableReset: z.boolean().optional().default(false)
@@ -1542,7 +1543,7 @@ exports.updateCashRegisterSchema = z.object({
   store: strToNum().optional().nullable(),
   storeId: strToNum().optional().nullable(),
   closingBalance: strToNum().optional().nullable(),
-  notes: z.string().optional().default('')
+  notes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().default('')
 })
 
 // ===================== Cash Movement =====================
@@ -1565,7 +1566,7 @@ exports.createCashMovementSchema = z.object({
     'other'
   ]),
   amount: z.any().transform((v) => Number(v)),
-  notes: z.string().optional().default(''),
+  notes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().default(''),
   idempotencyKey: z.string().max(255).optional().nullable()
 })
 
@@ -1574,7 +1575,7 @@ exports.decideCashMovementSchema = z.object({
 })
 
 exports.reverseCashMovementSchema = z.object({
-  notes: z.string().optional().default('')
+  notes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().default('')
 })
 
 exports.decideVarianceSchema = z.object({
@@ -1584,8 +1585,8 @@ exports.decideVarianceSchema = z.object({
 // ===================== BOM =====================
 exports.createBomSchema = z.object({
   productId: strToNum(),
-  name: z.string().optional().default(''),
-  notes: z.string().optional().default(''),
+  name: z.string().max(FIELD_MAX.BUSINESS_NAME, tooLong(FIELD_MAX.BUSINESS_NAME)).optional().default(''),
+  notes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().default(''),
   // Only an 'active' recipe deducts at sale; 'draft'/'inactive' never do.
   // An unknown value (a typo) is refused instead of silently disabling it.
   status: statusEnumBase.optional().default('active'),
@@ -1595,8 +1596,8 @@ exports.createBomSchema = z.object({
       z.object({
         ingredientId: strToNum(),
         qty: z.union([z.number(), strToNum()]),
-        unit: z.string().optional().default('pcs'),
-        notes: z.string().optional().default('')
+        unit: z.string().max(FIELD_MAX.UNIT, tooLong(FIELD_MAX.UNIT)).optional().default('pcs'),
+        notes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().default('')
       })
     )
     .min(1, 'At least one ingredient is required')
@@ -1606,16 +1607,16 @@ exports.createBomSchema = z.object({
 // applies the create defaults, so an update that omitted `status`/`name`
 // silently re-activated a draft BOM and blanked its name. Omitted = unchanged.
 exports.updateBomSchema = z.object({
-  name: z.string().optional(),
-  notes: z.string().optional(),
+  name: z.string().max(FIELD_MAX.BUSINESS_NAME, tooLong(FIELD_MAX.BUSINESS_NAME)).optional(),
+  notes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional(),
   status: statusEnumBase.optional(),
   lines: z
     .array(
       z.object({
         ingredientId: strToNum(),
         qty: z.union([z.number(), strToNum()]),
-        unit: z.string().optional().default('pcs'),
-        notes: z.string().optional().default('')
+        unit: z.string().max(FIELD_MAX.UNIT, tooLong(FIELD_MAX.UNIT)).optional().default('pcs'),
+        notes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().default('')
       })
     )
     .min(1, 'At least one ingredient is required')
@@ -1626,7 +1627,7 @@ exports.updateBomSchema = z.object({
 exports.createStockTransferSchema = z.object({
   fromStore: strToNum(),
   toStore: strToNum(),
-  transferredBy: z.string().optional().default(''),
+  transferredBy: z.string().max(FIELD_MAX.PERSON_NAME, tooLong(FIELD_MAX.PERSON_NAME)).optional().default(''),
   items: z
     .array(
       z.object({
@@ -1635,11 +1636,11 @@ exports.createStockTransferSchema = z.object({
         quantity: strToNum().optional(),
         qty: strToNum().optional(),
         unit: z.string().optional().default('pcs'),
-        notes: z.string().optional().default('')
+        notes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().default('')
       })
     )
     .min(1, 'At least one item is required'),
-  notes: z.string().optional().default('')
+  notes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().default('')
 })
 
 // ===================== Checkout / POS =====================
@@ -1648,14 +1649,14 @@ exports.createCheckoutSchema = z.object({
   discountId: z.union([z.number(), strToNum()]).nullable().optional(),
   paymentMethod: z.string().min(1),
   paymentAmount: z.union([z.number(), strToNum()]),
-  notes: z.string().optional().default(''),
+  notes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().default(''),
   items: z
     .array(
       z.object({
         idProduct: z.union([z.number(), strToNum()]),
         qty: z.union([z.number(), strToNum()]),
         price: z.union([z.number(), strToNum()]).optional(),
-        notes: z.string().optional().default('')
+        notes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().default('')
       })
     )
     .min(1, 'At least one item is required')
@@ -1663,8 +1664,8 @@ exports.createCheckoutSchema = z.object({
 
 // ===================== Type Payment =====================
 exports.createTypePaymentSchema = z.object({
-  name: z.string().min(1, 'name is required'),
-  icon: z.string().optional().default(''),
+  name: z.string().max(FIELD_MAX.SHORT_LABEL, tooLong(FIELD_MAX.SHORT_LABEL)).min(1, 'name is required'),
+  icon: z.string().max(FIELD_MAX.SHORT_LABEL, tooLong(FIELD_MAX.SHORT_LABEL)).optional().default(''),
   type: z.string().optional().default('cash'),
   status: z.union([z.boolean(), z.string()]).optional().default('active'),
   store: z
@@ -1689,10 +1690,10 @@ exports.updateTypePaymentSchema = exports.createTypePaymentSchema.partial()
 
 // ===================== Expense Category =====================
 exports.createExpenseCategorySchema = z.object({
-  name: z.string().min(1, 'name is required'),
-  description: z.string().optional().default(''),
-  icon: z.string().optional().default(''),
-  accountCode: z.string().optional().default(''),
+  name: z.string().max(FIELD_MAX.SHORT_LABEL, tooLong(FIELD_MAX.SHORT_LABEL)).min(1, 'name is required'),
+  description: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().default(''),
+  icon: z.string().max(FIELD_MAX.SHORT_LABEL, tooLong(FIELD_MAX.SHORT_LABEL)).optional().default(''),
+  accountCode: z.string().max(FIELD_MAX.ACCOUNT_CODE, tooLong(FIELD_MAX.ACCOUNT_CODE)).optional().default(''),
   status: statusEnum
 })
 exports.updateExpenseCategorySchema =
@@ -1700,8 +1701,8 @@ exports.updateExpenseCategorySchema =
 
 // ===================== Ingredient Category =====================
 exports.createIngredientCategorySchema = z.object({
-  name: z.string().min(1, 'name is required'),
-  description: z.string().optional().default(''),
+  name: z.string().max(FIELD_MAX.SHORT_LABEL, tooLong(FIELD_MAX.SHORT_LABEL)).min(1, 'name is required'),
+  description: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().default(''),
   status: z.enum(['active', 'inactive', 'draft']).optional().default('active')
 })
 exports.updateIngredientCategorySchema =
@@ -1734,7 +1735,7 @@ const normalizeBenefitsInput = (v) => {
 }
 
 exports.createMemberTierSchema = z.object({
-  name: z.string().min(1, 'name is required'),
+  name: z.string().max(FIELD_MAX.SHORT_LABEL, tooLong(FIELD_MAX.SHORT_LABEL)).min(1, 'name is required'),
   minPoints: z.union([z.number(), strToNum()]).optional().default(0),
   maxPoints: z.union([z.number(), strToNum()]).nullable().optional(),
   discountPercent: z.union([z.number(), strToNum()]).optional().default(0),
@@ -1743,7 +1744,7 @@ exports.createMemberTierSchema = z.object({
     normalizeBenefitsInput,
     z.array(z.union([z.string(), z.object({ text: z.string() })])).optional().default([])
   ),
-  color: z.string().optional().default(''),
+  color: z.string().max(FIELD_MAX.HEX_COLOR, tooLong(FIELD_MAX.HEX_COLOR)).optional().default(''),
   status: statusEnum
 })
 exports.updateMemberTierSchema = exports.createMemberTierSchema.partial()
@@ -1760,8 +1761,8 @@ const roleAccessMenuSchema = z.array(
 exports.roleAccessMenuSchema = roleAccessMenuSchema
 
 exports.createRoleSchema = z.object({
-  name: z.string().min(1, 'name is required'),
-  description: z.string().optional().default(''),
+  name: z.string().max(FIELD_MAX.SHORT_LABEL, tooLong(FIELD_MAX.SHORT_LABEL)).min(1, 'name is required'),
+  description: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().default(''),
   status: z.string().optional().default('active'),
   createdBy: z.union([z.number(), z.string()]).optional().nullable(),
   roleType: z
@@ -1781,8 +1782,8 @@ exports.createRoleSchema = z.object({
 // An edit changes only the fields it sends.
 exports.updateRoleSchema = z.object({
   id: z.union([z.number(), z.string()]).optional(),
-  name: z.string().min(1, 'name is required').optional(),
-  description: z.string().optional(),
+  name: z.string().max(FIELD_MAX.SHORT_LABEL, tooLong(FIELD_MAX.SHORT_LABEL)).min(1, 'name is required').optional(),
+  description: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional(),
   status: z.string().optional(),
   roleType: z.enum(['super_admin', 'admin', 'kasir', 'user']).optional(),
   store: z.union([z.number(), z.string()]).optional().nullable(),
@@ -1801,8 +1802,8 @@ exports.createPurchasePaymentSchema = z.object({
   amount: z.union([z.number(), strToNum()]),
   paymentMethod: z.string().min(1),
   paymentDate: z.string().optional(),
-  reference: z.string().optional().default(''),
-  notes: z.string().optional().default(''),
+  reference: z.string().max(FIELD_MAX.REFERENCE, tooLong(FIELD_MAX.REFERENCE)).optional().default(''),
+  notes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().default(''),
   idempotencyKey: z.string().max(255).optional().nullable()
 })
 exports.updatePurchasePaymentSchema =
@@ -1811,13 +1812,16 @@ exports.updatePurchasePaymentSchema =
 // ===================== Purchase Return =====================
 exports.createPurchaseReturnSchema = z.object({
   purchaseOrder: z.union([z.number(), strToNum()]),
-  reason: z.string().optional().nullable(),
+  reason: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().nullable(),
   returnedBy: z
-    .union([z.number(), z.string().min(1)])
+    .union([
+      z.number(),
+      z.string().min(1).max(FIELD_MAX.PERSON_NAME, tooLong(FIELD_MAX.PERSON_NAME))
+    ])
     .optional()
     .nullable(),
   items: z.array(z.record(z.any())).min(1, 'At least one item is required'),
-  notes: z.string().optional().nullable()
+  notes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().nullable()
 })
 exports.updatePurchaseReturnSchema =
   exports.createPurchaseReturnSchema.partial()
@@ -1838,8 +1842,8 @@ exports.createSplitBillSchema = z.object({
 // ===================== Currency =====================
 exports.createCurrencySchema = z.object({
   code: z.string().min(1, 'code is required').max(10),
-  name: z.string().min(1, 'name is required'),
-  symbol: z.string().optional().default(''),
+  name: z.string().max(FIELD_MAX.SHORT_LABEL, tooLong(FIELD_MAX.SHORT_LABEL)).min(1, 'name is required'),
+  symbol: z.string().max(FIELD_MAX.CURRENCY_CODE, tooLong(FIELD_MAX.CURRENCY_CODE)).optional().default(''),
   exchangeRate: z.union([z.number(), strToNum()]).optional().default(1),
   isDefault: z
     .union([
@@ -1853,9 +1857,9 @@ exports.updateCurrencySchema = exports.createCurrencySchema.partial()
 
 // ===================== Social Media =====================
 exports.createSocialMediaSchema = z.object({
-  name: z.string().min(1, 'name is required'),
-  url: z.string().min(1, 'url is required'),
-  icon: z.string().optional().default(''),
+  name: z.string().max(FIELD_MAX.SHORT_LABEL, tooLong(FIELD_MAX.SHORT_LABEL)).min(1, 'name is required'),
+  url: z.string().max(FIELD_MAX.URL_COLUMN, tooLong(FIELD_MAX.URL_COLUMN)).min(1, 'url is required'),
+  icon: z.string().max(FIELD_MAX.SHORT_LABEL, tooLong(FIELD_MAX.SHORT_LABEL)).optional().default(''),
   isActive: z
     .union([
       z.boolean(),
@@ -1900,7 +1904,7 @@ exports.createAccountsReceivableSchema = z.object({
   dueDate: z.string().optional(),
   creditTerm: z.union([z.number(), strToNum()]).optional().nullable(),
   status: z.string().optional(),
-  notes: z.string().optional().default('')
+  notes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().default('')
 })
 exports.updateAccountsReceivableSchema =
   exports.createAccountsReceivableSchema.partial()
@@ -1909,7 +1913,7 @@ exports.updateAccountsReceivableSchema =
 exports.createInvoiceSchema = z.object({
   orderId: z.union([z.number(), strToNum()]),
   customerName: z.string().optional().default(''),
-  notes: z.string().optional().default('')
+  notes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().default('')
 })
 exports.updateInvoiceSchema = exports.createInvoiceSchema.partial()
 
@@ -1924,7 +1928,7 @@ exports.updateInvoiceSettingSchema = z.object({
   socialMediaVisibility: z.union([z.string(), z.record(z.any())]).optional(),
   addressFieldsVisibility: z.union([z.string(), z.record(z.any())]).optional(),
   memberFieldsVisibility: z.union([z.string(), z.record(z.any())]).optional(),
-  footer: z.string().optional().default('Terima kasih atas kunjungan Anda'),
+  footer: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().default('Terima kasih atas kunjungan Anda'),
   removeLogo: z.union([z.boolean(), z.string()]).optional(),
   logo: z.any().optional()
 })
@@ -1940,12 +1944,12 @@ exports.createPosTransferSchema = z.object({
         productId: strToNum(),
         qty: strToNum(),
         unit: z.string().optional().default('pcs'),
-        notes: z.string().optional().default('')
+        notes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().default('')
       })
     )
     .min(1, 'At least one item'),
-  notes: z.string().optional().default(''),
-  transferredBy: z.string().optional().default('')
+  notes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().default(''),
+  transferredBy: z.string().max(FIELD_MAX.PERSON_NAME, tooLong(FIELD_MAX.PERSON_NAME)).optional().default('')
 })
 
 exports.createPosAdjustSchema = z.object({
@@ -1953,13 +1957,13 @@ exports.createPosAdjustSchema = z.object({
   qty: strToNum().optional(),
   sign: z.enum(['+', '-']).optional(),
   value: strToNum().optional(),
-  reason: z.string().optional().default(''),
+  reason: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().default(''),
   storeId: strToNum().optional()
 })
 
 exports.createPosReturnSchema = z.object({
   items: z.array(z.record(z.any())).min(1, 'At least one item'),
-  reason: z.string().optional().default(''),
+  reason: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().default(''),
   returnedBy: strToNum().optional()
 })
 
@@ -1988,12 +1992,12 @@ exports.updatePriceByStoreSchema = z.object({
 
 exports.sendInvoiceEmailSchema = z.object({
   orderId: z.union([z.number(), strToNum()]),
-  email: z.string().email('Invalid email')
+  email: z.string().max(FIELD_MAX.EMAIL, tooLong(FIELD_MAX.EMAIL)).email('Invalid email')
 })
 
 exports.addBatchSchema = z.object({
   productId: strToNum(),
-  batchCode: z.string().min(1, 'Batch code is required'),
+  batchCode: z.string().max(FIELD_MAX.CODE, tooLong(FIELD_MAX.CODE)).min(1, 'Batch code is required'),
   expiryDate: z.string().optional().nullable(),
   qty: strToNum(),
   store: strToNum()
@@ -2001,14 +2005,14 @@ exports.addBatchSchema = z.object({
 
 // ===================== DELIVERY =====================
 exports.createDriverSchema = z.object({
-  name: z.string().min(1, 'Driver name is required'),
+  name: z.string().max(FIELD_MAX.PERSON_NAME, tooLong(FIELD_MAX.PERSON_NAME)).min(1, 'Driver name is required'),
   store: storeArray().optional().nullable(),
-  phone: z.string().optional().nullable(),
-  email: z.string().email().optional().or(z.literal('')),
-  vehicleType: z.string().optional().nullable(),
-  vehiclePlate: z.string().optional().nullable(),
+  phone: z.string().max(FIELD_MAX.PHONE, tooLong(FIELD_MAX.PHONE)).optional().nullable(),
+  email: z.string().max(FIELD_MAX.EMAIL, tooLong(FIELD_MAX.EMAIL)).email().optional().or(z.literal('')),
+  vehicleType: z.string().max(FIELD_MAX.SHORT_LABEL, tooLong(FIELD_MAX.SHORT_LABEL)).optional().nullable(),
+  vehiclePlate: z.string().max(FIELD_MAX.VEHICLE_PLATE, tooLong(FIELD_MAX.VEHICLE_PLATE)).optional().nullable(),
   status: statusEnum,
-  notes: z.string().optional().nullable()
+  notes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().nullable()
 })
 exports.updateDriverSchema = exports.createDriverSchema.partial()
 
@@ -2016,9 +2020,9 @@ exports.createDeliveryOrderSchema = z.object({
   order: optionalStrToNum(),
   store: strToNum(),
   customerName: z.string().min(1, 'Customer name is required'),
-  customerPhone: z.string().optional().nullable(),
-  deliveryAddress: z.string().min(1, 'Delivery address is required'),
-  deliveryNotes: z.string().optional().nullable(),
+  customerPhone: z.string().max(FIELD_MAX.PHONE, tooLong(FIELD_MAX.PHONE)).optional().nullable(),
+  deliveryAddress: z.string().max(FIELD_MAX.ADDRESS, tooLong(FIELD_MAX.ADDRESS)).min(1, 'Delivery address is required'),
+  deliveryNotes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().nullable(),
   destinationLat: optionalStrToNum(),
   destinationLng: optionalStrToNum(),
   deliveryFee: optionalStrToNum().default(0),
@@ -2036,7 +2040,7 @@ exports.updateDeliveryStatusSchema = z.object({
     'delivered',
     'cancelled'
   ]),
-  note: z.string().optional().nullable(),
+  note: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().nullable(),
   changedBy: optionalStrToNum(),
   changedByName: z.string().optional().nullable()
 })
@@ -2047,7 +2051,7 @@ exports.assignDriverSchema = z.object({
 })
 
 exports.cancelDeliverySchema = z.object({
-  reason: z.string().min(1, 'Cancellation reason is required')
+  reason: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).min(1, 'Cancellation reason is required')
 })
 
 exports.updateDriverStatusSchema = z.object({
@@ -2090,8 +2094,8 @@ exports.askFaqSchema = z.object({
 // ===================== Queue / Waitlist =====================
 exports.createQueueSchema = z.object({
   store: strToNum(),
-  customerName: z.string().min(1, 'Customer name is required'),
-  customerPhone: z.string().optional().nullable(),
+  customerName: z.string().max(FIELD_MAX.PERSON_NAME, tooLong(FIELD_MAX.PERSON_NAME)).min(1, 'Customer name is required'),
+  customerPhone: z.string().max(FIELD_MAX.PHONE, tooLong(FIELD_MAX.PHONE)).optional().nullable(),
   partySize: z
     .number()
     .int()
@@ -2101,26 +2105,26 @@ exports.createQueueSchema = z.object({
     .enum(['normal', 'vip', 'elderly', 'pregnant', 'disabled'])
     .default('normal'),
   estimatedWaitMinutes: z.number().int().optional().nullable(),
-  notes: z.string().optional().nullable(),
+  notes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().nullable(),
   assignedTo: strToNum().optional().nullable()
 })
 
 exports.updateQueueSchema = z.object({
-  customerName: z.string().min(1).optional(),
-  customerPhone: z.string().optional().nullable(),
+  customerName: z.string().max(FIELD_MAX.PERSON_NAME, tooLong(FIELD_MAX.PERSON_NAME)).min(1).optional(),
+  customerPhone: z.string().max(FIELD_MAX.PHONE, tooLong(FIELD_MAX.PHONE)).optional().nullable(),
   partySize: z.number().int().min(1).optional(),
   priority: z
     .enum(['normal', 'vip', 'elderly', 'pregnant', 'disabled'])
     .optional(),
   estimatedWaitMinutes: z.number().int().optional().nullable(),
-  notes: z.string().optional().nullable(),
+  notes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().nullable(),
   assignedTo: strToNum().optional().nullable()
 })
 
 exports.updateQueueStatusSchema = z.object({
   status: z.enum(['waiting', 'seated', 'cancelled', 'no_show', 'expired']),
   tableId: strToNum().optional().nullable(),
-  notes: z.string().optional().nullable()
+  notes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().nullable()
 })
 
 // ===================== Supplier Performance =====================
@@ -2133,16 +2137,16 @@ exports.calculateSupplierScoreSchema = z.object({
 })
 
 exports.updateSupplierScoreNoteSchema = z.object({
-  notes: z.string().optional().nullable()
+  notes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().nullable()
 })
 
 // ===================== Automated Promotions =====================
 exports.createPromoCampaignSchema = z.object({
   // ponytail: null = "semua toko" — strToNumNullable agar FE boleh kirim null
   store: strToNumNullable(),
-  name: z.string().min(1, 'Campaign name is required'),
-  description: z.string().optional().nullable(),
-  code: z.string().optional().nullable(),
+  name: z.string().max(FIELD_MAX.BUSINESS_NAME, tooLong(FIELD_MAX.BUSINESS_NAME)).min(1, 'Campaign name is required'),
+  description: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().nullable(),
+  code: z.string().max(FIELD_MAX.CODE, tooLong(FIELD_MAX.CODE)).optional().nullable(),
   type: z.enum([
     'happy_hour',
     'birthday',
@@ -2217,9 +2221,9 @@ exports.createPromoCampaignSchema = z.object({
 })
 
 exports.updatePromoCampaignSchema = z.object({
-  name: z.string().min(1).optional(),
-  description: z.string().optional().nullable(),
-  code: z.string().optional().nullable(),
+  name: z.string().max(FIELD_MAX.BUSINESS_NAME, tooLong(FIELD_MAX.BUSINESS_NAME)).min(1).optional(),
+  description: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().nullable(),
+  code: z.string().max(FIELD_MAX.CODE, tooLong(FIELD_MAX.CODE)).optional().nullable(),
   type: z
     .enum([
       'happy_hour',
@@ -2264,7 +2268,7 @@ exports.applyPromoSchema = z.object({
   store: strToNum(),
   orderId: strToNum().optional().nullable(),
   memberId: strToNum().optional().nullable(),
-  code: z.string().optional(),
+  code: z.string().max(FIELD_MAX.CODE, tooLong(FIELD_MAX.CODE)).optional(),
   cartItems: z
     .array(
       z.object({
@@ -2316,13 +2320,13 @@ const returnItemSchema = z.object({
     )
     .optional()
     .default(1),
-  notes: z.string().optional().default('')
+  notes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().default('')
 })
 
 exports.createSalesReturnSchema = z.object({
   items: z.array(returnItemSchema).min(1, 'At least one item required'),
-  reason: z.string().min(1, 'Reason is required'),
-  returnedBy: z.union([strToNum(), z.string()]).optional(),
+  reason: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).min(1, 'Reason is required'),
+  returnedBy: z.union([strToNum(), z.string().max(FIELD_MAX.PERSON_NAME, tooLong(FIELD_MAX.PERSON_NAME))]).optional(),
   refundMethod: z.string().max(50).optional(),
   idempotencyKey: z.string().max(255).optional().nullable()
 })
@@ -2346,7 +2350,7 @@ exports.createShiftSwapSchema = z.object({
   targetShiftId: strToNumNullable(),
   tanggal_mulai: z.string().optional().nullable(),
   tanggal_selesai: z.string().optional().nullable(),
-  note: z.string().optional().nullable()
+  note: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().nullable()
 })
 
 exports.updateShiftSwapStatusSchema = z.object({
@@ -2367,12 +2371,12 @@ exports.createOvertimeSchema = z.object({
     .regex(/^\d{4}-\d{2}-\d{2}$/, 'Tanggal harus format YYYY-MM-DD'),
   start_time: timeSchema,
   end_time: timeSchema,
-  note: z.string().optional().nullable()
+  note: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().nullable()
 })
 
 exports.updateOvertimeStatusSchema = z.object({
   status: z.enum(['approved', 'rejected']),
-  note: z.string().optional().nullable()
+  note: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().nullable()
 })
 
 exports.postOvertimePayrollSchema = z.object({
@@ -2392,10 +2396,10 @@ exports.createParkedCartSchema = z.object({
   tableId: strToNumNullable().optional(),
   customerId: strToNumNullable().optional(),
   customerName: z.string().optional().nullable(),
-  customerPhone: z.string().optional().nullable(),
+  customerPhone: z.string().max(FIELD_MAX.PHONE, tooLong(FIELD_MAX.PHONE)).optional().nullable(),
   discountId: strToNumNullable().optional(),
-  promoCode: z.string().optional().nullable(),
-  notes: z.string().optional().nullable(),
+  promoCode: z.string().max(FIELD_MAX.CODE, tooLong(FIELD_MAX.CODE)).optional().nullable(),
+  notes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().nullable(),
   cart: z.object({
     items: z.array(z.object({}).passthrough()),
     totalCovers: strToNumNullable().optional(),

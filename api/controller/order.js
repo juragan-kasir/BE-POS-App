@@ -48,6 +48,8 @@ const {
   existingOrderSummary
 } = require('../service/orderIdempotency')
 const { resolveAttributedRegister } = require('../service/settlementAttribution')
+const { FIELD_MAX } = require('../validation/fieldLimits')
+const { bodyFor, firstTooLong } = require('../../utils/valueTooLong')
 const {
   resolveProductUnitCosts,
   bundleUnitCost,
@@ -4393,6 +4395,15 @@ exports.createCustomerOrder = async (req, res) => {
       return res.status(400).json({ message: 'store and items are required' })
     }
 
+    // BA DR-28: the public QR order is not behind validate(); its typed text
+    // is checked here (customer name 100, notes 255).
+    const tooLong = firstTooLong([
+      ['customerName', customerName, FIELD_MAX.PERSON_NAME],
+      ['notes', notes, FIELD_MAX.TEXT],
+      ...(Array.isArray(items) ? items : []).map((item, i) => [`items.${i}.notes`, item?.notes, FIELD_MAX.TEXT])
+    ])
+    if (tooLong) return res.status(400).json(bodyFor(tooLong))
+
     // N-5 (security): public, unauthenticated QR-order endpoint — the client-
     // supplied `store` is not trusted as tenant authority. A valid table
     // belonging to the claimed store (the physical QR/table is the
@@ -5030,10 +5041,13 @@ exports.createCustomerReview = async (req, res) => {
         message: 'rating must be an integer between 1 and 5'
       })
     }
-    const reviewName = (name || userName || 'Anonim')
-      .toString()
-      .trim()
-      .slice(0, 100)
+    const reviewName = (name || userName || 'Anonim').toString().trim()
+    // BA DR-28: an over-long name or comment is refused, never cut.
+    const tooLongReview = firstTooLong([
+      ['name', reviewName, FIELD_MAX.PERSON_NAME],
+      ['comment', (comment || '').toString().trim(), FIELD_MAX.TEXT]
+    ])
+    if (tooLongReview) return res.status(400).json(bodyFor(tooLongReview))
     const storeNum = Number(store ?? storeId) || null
     // SEC-007 — store tenancy: a review may only attribute a product to a
     // store that actually sells it, using the exact membership rule the
@@ -5048,12 +5062,6 @@ exports.createCustomerReview = async (req, res) => {
       })
     }
     const commentText = (comment || '').toString().trim()
-    if (commentText.length > 500) {
-      return res.status(400).json({
-        success: false,
-        message: 'comment must be at most 500 characters'
-      })
-    }
     const device = (deviceId || '').toString().trim().slice(0, 64) || null
     // Optional same-device idempotency: one review per (productId, deviceId).
     // The unique index makes this race-safe; a repeated submission returns the
