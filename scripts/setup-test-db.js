@@ -440,6 +440,21 @@ module.exports = async () => {
     } catch {}
   }
 
+  // BA DR-28 decision 4 (migration 20261025000001): supplier_product.minOrderQty
+  // is INTEGER. Mirror it for snapshot-built test DBs; a no-op once INTEGER.
+  try {
+    psqlTest(`DO $$ BEGIN
+      IF (SELECT data_type FROM information_schema.columns
+           WHERE table_schema = 'public' AND table_name = 'supplier_product'
+             AND column_name = 'minOrderQty') = 'character varying' THEN
+        ALTER TABLE "supplier_product" ALTER COLUMN "minOrderQty" DROP DEFAULT;
+        ALTER TABLE "supplier_product" ALTER COLUMN "minOrderQty" TYPE INTEGER
+          USING COALESCE(NULLIF(btrim("minOrderQty"), ''), '1')::integer;
+        ALTER TABLE "supplier_product" ALTER COLUMN "minOrderQty" SET DEFAULT 1;
+      END IF;
+    END $$`)
+  } catch {}
+
   // FG-SEC-05: mirror the audit DB backstop migration for fresh CI clones
   // whose dev-schema snapshot predates it. The trigger is idempotent; the
   // UPDATE is a no-op on an empty test DB and repairs stale pre-run data.

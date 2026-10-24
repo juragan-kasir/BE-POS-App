@@ -30,7 +30,8 @@ const B1_FIRST_12 = B1.slice(0, 12)
 // verified production ledger snapshot; keep the historical fixture frozen.
 const POST_INCIDENT_MIGRATIONS = [
   '20261023000001-harden-audit-log.js',
-  '20261024000001-dr28-widen-text-columns.js'
+  '20261024000001-dr28-widen-text-columns.js',
+  '20261025000001-dr28-min-order-qty-integer.js'
 ]
 
 // Production-like ledger: every non-E2 file recorded, plus the given E2 names.

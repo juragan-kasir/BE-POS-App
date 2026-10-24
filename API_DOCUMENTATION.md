@@ -2127,7 +2127,7 @@ At least one of `productId` / `search` is required.
         "leadTime": 1,
         "leadTimeUnit": "hari",
         "qualityRating": 4,
-        "minOrderQty": "10 karton",
+        "minOrderQty": 10,
         "notes": "Rasa original",
         "lastPrice": 3400
       }
@@ -2188,10 +2188,12 @@ Auth required (super_admin). Replace a supplier's product catalog from Excel (`m
   "success": true,
   "message": "Successfully imported 2 products",
   "data": [
-    { "name": "Indomie Goreng", "price": 3500, "unit": "pcs", "leadTime": 1, "leadTimeUnit": "hari", "qualityRating": 4, "minOrderQty": "10 karton", "notes": "Rasa original" }
+    { "name": "Indomie Goreng", "price": 3500, "unit": "pcs", "leadTime": 1, "leadTimeUnit": "hari", "qualityRating": 4, "minOrderQty": 10, "notes": "Rasa original" }
   ]
 }
 ```
+
+`minOrderQty` is a whole number (BA DR-28 decision 4): digits or a number, empty = 1; anything else is refused (`products.N.minOrderQty: harus angka bulat`, or `Row N: minOrderQty must be a whole number` on import).
 
 Key errors: 400 No file uploaded; 400 Validation errors; 404 Supplier not found (non-preview id).
 
@@ -2349,7 +2351,7 @@ Auth required. Supplier-catalog product names (deduplicated by name) used as ref
       "leadTime": 1,
       "leadTimeUnit": "hari",
       "qualityRating": 4,
-      "minOrderQty": "10 karton",
+      "minOrderQty": 10,
       "notes": "Rasa original",
       "lastPrice": 3400
     }
