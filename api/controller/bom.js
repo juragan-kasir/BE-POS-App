@@ -84,6 +84,56 @@ const refreshProductCosting = async (productId, bomLines, ingredients, transacti
   await prod.update({ hppPerPorsi: hpp, foodCostPersen, marginPersen, composition }, { transaction })
 }
 
+// Client note 2026-10-24 (Waroeng Bakso): a menu with an active recipe is
+// expected to use up its ingredients when sold, yet a product keeps the
+// default 'stocked' mode unless someone changes it, so every sale deducted
+// the finished-good stock and History Stock never showed the ingredients.
+// Saving an active BOM therefore moves a 'stocked' product to
+// 'make_to_order', unless
+//   - it has a production order that was not cancelled (a produced item
+//     really is sold from its own stock), or
+//   - a store that sells it has no active BOM yet: the mode is global, and
+//     make_to_order without a BOM refuses the sale (stockMutationService).
+// A product with no product_store rows is sold by every active store.
+// 'hybrid' and 'make_to_order' are explicit choices and stay as they are.
+// Returns true when the mode was switched.
+const adoptRecipeMode = async (productId, transaction) => {
+  const product = await db.product.findByPk(productId, { transaction, lock: transaction.LOCK.UPDATE })
+  if (!product || (product.inventoryMode || 'stocked') !== 'stocked') return false
+
+  const produced = await db.productionOrder.count({
+    where: { productItemId: productId, status: { [Op.ne]: 'cancelled' } },
+    transaction
+  })
+  if (produced > 0) return false
+
+  const assigned = await db.product_store.findAll({ where: { product: productId }, attributes: ['store'], transaction })
+  const sellingStores = assigned.length
+    ? assigned.map((r) => Number(r.store))
+    : (await db.location.findAll({ where: { status: 'active' }, attributes: ['id'], transaction })).map((l) => l.id)
+  const activeBoms = await db.bom_header.findAll({
+    where: { productId, status: 'active' },
+    attributes: ['store'],
+    transaction
+  })
+  const storesWithRecipe = new Set(activeBoms.map((b) => Number(b.store)))
+  if (sellingStores.length === 0 || !sellingStores.every((s) => storesWithRecipe.has(s))) return false
+
+  await product.update({ inventoryMode: 'make_to_order' }, { transaction })
+  return true
+}
+
+const auditRecipeMode = (req, productId) =>
+  createAudit(
+    req,
+    'update',
+    'product',
+    productId,
+    `Product ${productId} now deducts its recipe ingredients (active BOM)`,
+    { inventoryMode: 'stocked' },
+    { inventoryMode: 'make_to_order' }
+  )
+
 const bomController = {
   async getAll(req, res) {
     try {
@@ -260,20 +310,22 @@ const bomController = {
           { transaction: t }
         )
         await refreshProductCosting(productId, bomLines, ingredients, t)
-        return bom
+        const recipeModeAdopted = bom.status === 'active' && (await adoptRecipeMode(productId, t))
+        return { bom, recipeModeAdopted }
       })
 
-      const result = await db.bom_header.findByPk(created.id, {
+      const result = await db.bom_header.findByPk(created.bom.id, {
         include: [
           { model: db.product, as: 'productData' },
           { model: db.bom_line, as: 'lines' }
         ]
       })
 
-      createAudit(req, 'create', 'bom', created.id, `Created BOM ${created.id} for product ${productId}`)
+      createAudit(req, 'create', 'bom', created.bom.id, `Created BOM ${created.bom.id} for product ${productId}`)
+      if (created.recipeModeAdopted) auditRecipeMode(req, productId)
       return res
         .status(201)
-        .json({ success: true, message: 'BOM created', data: result })
+        .json({ success: true, message: 'BOM created', data: result, recipeModeAdopted: created.recipeModeAdopted })
     } catch (error) {
       if (error instanceof BomAuthoringError) {
         return res.status(400).json({ success: false, message: error.message })
@@ -324,7 +376,9 @@ const bomController = {
           const ings = await db.ingredient.findAll({ where: { id: ingIds }, transaction: t })
           await refreshProductCosting(bom.productId, currentLines, ings, t)
         }
-        return bom
+        const recipeModeAdopted =
+          bom.status === 'active' && currentLines.length > 0 && (await adoptRecipeMode(bom.productId, t))
+        return { bom, recipeModeAdopted }
       })
 
       if (!outcome) {
@@ -341,9 +395,10 @@ const bomController = {
       })
 
       createAudit(req, 'update', 'bom', id, `Updated BOM: ${id}`)
+      if (outcome.recipeModeAdopted) auditRecipeMode(req, outcome.bom.productId)
       return res
         .status(200)
-        .json({ success: true, message: 'BOM updated', data: result })
+        .json({ success: true, message: 'BOM updated', data: result, recipeModeAdopted: outcome.recipeModeAdopted })
     } catch (error) {
       if (error instanceof BomAuthoringError) {
         return res.status(400).json({ success: false, message: error.message })
