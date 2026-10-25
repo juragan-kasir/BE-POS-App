@@ -1,4 +1,5 @@
 'use strict'
+const { lastFourDigits } = require('../../utils/cardNumber')
 module.exports = (sequelize, DataTypes) => {
   const transaction = sequelize.define(
     'transaction',
@@ -22,7 +23,11 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.BIGINT
       },
       cardNumber: {
-        type: DataTypes.STRING
+        type: DataTypes.STRING,
+        // BA DR-28: only the last 4 digits are ever stored
+        set(value) {
+          this.setDataValue('cardNumber', lastFourDigits(value))
+        }
       },
       cardType: {
         type: DataTypes.STRING

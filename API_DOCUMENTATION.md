@@ -77,6 +77,8 @@ From the database net (any VARCHAR column, any route) and the handlers outside `
 }
 ```
 
+A payment row's `cardNumber` keeps only the last 4 digits (DR-28 decision 5): the model drops everything else on every write, so `"4111 1111 1111 1234"` is stored as `"1234"`, and a value with no digits is stored as `null`.
+
 ---
 
 ---
