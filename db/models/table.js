@@ -21,7 +21,7 @@ module.exports = (sequelize, DataTypes) => {
         defaultValue: 4
       },
       area: {
-        type: DataTypes.STRING(20),
+        type: DataTypes.STRING(50),
         defaultValue: 'indoor'
       },
       tableType: {

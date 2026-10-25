@@ -23,7 +23,7 @@ module.exports = (sequelize, DataTypes) => {
         unique: true
       },
       name: {
-        type: DataTypes.STRING(100),
+        type: DataTypes.STRING(150),
         allowNull: false
       },
       // Lifecycle: 'active' | 'suspended'. Suspended tenants authorize

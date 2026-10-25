@@ -57,7 +57,7 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.STRING
       },
       website: {
-        type: DataTypes.STRING
+        type: DataTypes.STRING(2048)
       },
       taxInclude: {
         type: DataTypes.BOOLEAN,

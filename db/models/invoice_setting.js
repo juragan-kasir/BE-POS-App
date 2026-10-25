@@ -47,7 +47,7 @@ module.exports = (sequelize, DataTypes) => {
         allowNull: true
       },
       logo: {
-        type: DataTypes.STRING,
+        type: DataTypes.STRING(2048),
         allowNull: true
       },
       footer: {
