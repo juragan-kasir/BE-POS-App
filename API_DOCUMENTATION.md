@@ -439,6 +439,28 @@ Auth required.
 
 ---
 
+### GET `/product/recipe-availability`
+Auth required (any role with access to the store). **Query:** `store` (resolved by `validateStoreAccess`; a store-bound caller always gets its own). Portions each recipe product (`inventoryMode` not `stocked`, with an active outlet BOM that has lines) can make from current ingredient stock: `portions = MIN over lines of FLOOR(stock / (line qty / totalQty))`, using the same 4-dp quantity a sale deducts. `limitingIngredientIds` are the lines giving that minimum. `requirements` + `ingredients` let the cashier subtract its cart from the shared balance. A recipe product missing from `products` has no active recipe at this store (its sale is refused). A recipe that a sale would refuse (foreign-store ingredient, unit mismatch) reports 0 portions.
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Success",
+  "data": {
+    "store": 1,
+    "products": [
+      { "productId": 10, "portions": 10, "limitingIngredientIds": [12], "requirements": [{ "ingredientId": 11, "perPortion": 10 }, { "ingredientId": 12, "perPortion": 100 }] }
+    ],
+    "ingredients": [{ "id": 12, "name": "Susu", "stock": 1000, "baseUnit": "ml" }]
+  }
+}
+```
+
+Key errors: 400 `store is required`.
+
+---
+
 ### GET `/product/get-product-all`
 Auth required. Full product list for table.
 
@@ -1393,13 +1415,13 @@ Auth required.
 ---
 
 ### GET `/order/customer-menu`
-No auth. **Query:** `store` (number).
+No auth. **Query:** `store` (number). Each product carries `availablePortions`: for a recipe product (`inventoryMode` not `stocked`) the portions its outlet recipe can make (0 without an active recipe), the same count as `/product/recipe-availability`; `null` for a stocked product. Ingredient names and stock are not exposed.
 
 #### ~~GET `/order/customer-member`~~ (removed)
 **Removed 2026-10-23.** The endpoint is no longer mounted; use staff-verified member lookup at settlement. QR `customer-create` rejects a client-supplied `customerId` with `MEMBER_ATTACH_REQUIRES_STAFF`.
 
 ### POST `/order/customer-create`
-No auth. Same structure as `/order/create`, except `customerId` is rejected with `MEMBER_ATTACH_REQUIRES_STAFF`; staff attach a verified member at settlement. Closed/archived outlets return `STORE_CLOSED`/`STORE_ARCHIVED`. The charged totals come from the same pricing as `/order/customer-quote`: the best automatic promo campaign for the outlet is applied, and PPN is computed on the discounted subtotal.
+No auth. Same structure as `/order/create`, except `customerId` is rejected with `MEMBER_ATTACH_REQUIRES_STAFF`; staff attach a verified member at settlement. Closed/archived outlets return `STORE_CLOSED`/`STORE_ARCHIVED`. Recipe products are checked when the order is placed: the order's ingredient needs (bundle components included, summed across lines) must fit current stock, else 409 `INGREDIENT_STOCK_CONFLICT` with `products` (ids) and a message naming the menus; a recipe product without an active recipe is 409 `RECIPE_UNAVAILABLE`. Stock is not reserved; payment still records a shortfall if stock moved in between (DR-18). The charged totals come from the same pricing as `/order/customer-quote`: the best automatic promo campaign for the outlet is applied, and PPN is computed on the discounted subtotal.
 
 ### POST `/order/customer-quote`
 No auth; rate-limited (200 / 15 min per store + IP). Read-only quote for the diner's summary — nothing is written and stock is not checked. Uses the same item pricing, campaign and PPN resolver as `/order/customer-create`, so the quoted total is the total the order will charge.

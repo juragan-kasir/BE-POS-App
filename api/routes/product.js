@@ -88,6 +88,13 @@ router.get(
   validateStoreAccess,
   productController.getProductByLocationSuperAdmin
 )
+// Recipe portions + limiting ingredients for the cashier grid.
+router.get(
+  '/recipe-availability',
+  authorization,
+  validateStoreAccess,
+  productController.getRecipeAvailability
+)
 router.get(
   '/get-product-all',
   authorization,

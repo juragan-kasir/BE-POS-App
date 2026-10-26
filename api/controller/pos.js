@@ -1973,7 +1973,7 @@ order: [['updatedAt', 'DESC']],
       // fix mirrors the same EXISTS-against-product_store scoping the
       // already-correct low-stock detail list uses (stockHistory.js
       // getLowStockAll), not a bare `AND store = :store`.
-      let lowStockProductQuery = `SELECT COUNT(*)::int as count FROM "product" p WHERE p.status = 'active' AND p."deletedAt" IS NULL AND p."minStock" > 0 AND p."stock" <= p."minStock"`
+      let lowStockProductQuery = `SELECT COUNT(*)::int as count FROM "product" p WHERE p.status = 'active' AND p."deletedAt" IS NULL AND p."minStock" > 0 AND p."stock" <= p."minStock" AND COALESCE(p."inventoryMode", 'stocked') <> 'make_to_order'`
       const productReplacements = {}
       if (store) {
         lowStockProductQuery += ` AND EXISTS (SELECT 1 FROM "product_store" ps WHERE ps.product = p.id AND ps.store = :store)`
