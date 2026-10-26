@@ -3507,18 +3507,48 @@ Auth required (super_admin/admin).
       "productName": "Nasi Goreng",
       "name": "Resep Nasi Goreng",
       "status": "active",
+      "totalQty": 1,
       "lines": [
-        { "ingredientId": 1, "ingredientName": "Beras", "qty": 0.5, "unit": "kg" }
-      ]
+        { "ingredientId": 1, "ingredientName": "Beras", "qty": 500, "unit": "g" }
+      ],
+      "costing": { "status": "auto", "yieldQty": 1, "recipeTotalCost": 7500, "hppPerPortion": 7500, "foodCostPercent": 50, "marginPercent": 50, "grossProfit": 7500, "missingCost": [] }
     }
   ]
 }
 ```
 
+`costing` is the live HPP of the recipe (same object as `GET /bom/costing/:productId`).
+
 ---
 
 ### GET `/bom/get-by-id/:id`
-Auth required.
+Auth required. Same row shape as `get-all`, including `costing`.
+
+### GET `/bom/costing/:productId`
+Auth required (super_admin/admin). Live HPP of a product per outlet recipe, read at the ingredients' current cost (an ingredient price change shows at once; sales already made keep their `order_item.hppSnapshot`). Store scope: the caller's pinned store (store-less callers see every outlet's recipe). A product without a recipe returns `recipes: []` — its cost is `product.costPrice`.
+
+`status`:
+- `auto` — every line has a cost: `hppPerPortion = Σ(line qty × ingredient cost per base unit) / yieldQty`;
+- `provisional` — the recipe is empty or a line has no cost (`missingCost`), so the product's estimate (`product.costPrice`) is used;
+- `unavailable` — neither; `hppPerPortion`, `foodCostPercent` and `marginPercent` are `null`.
+
+Food cost = HPP / price × 100; margin = (price − HPP) / price × 100; the sale snapshot uses the same HPP.
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Success",
+  "data": {
+    "productId": 10, "price": 15000, "estimate": 6000, "inventoryMode": "make_to_order",
+    "recipes": [
+      { "bomId": 1, "store": 1, "storeName": "Outlet Pusat", "status": "auto", "yieldQty": 10, "recipeTotalCost": 75000, "hppPerPortion": 7500, "foodCostPercent": 50, "marginPercent": 50, "grossProfit": 7500, "missingCost": [] }
+    ]
+  }
+}
+```
+
+Key errors: 400 invalid `productId`; 404 `Product not found`.
 
 ### POST `/bom/add`
 Auth required (super_admin/admin).
@@ -3530,6 +3560,7 @@ Auth required (super_admin/admin).
   "name": "string (default: '')",
   "notes": "string (default: '')",
   "status": "string (default: active)",
+  "totalQty": "integer ≥ 1 — recipe yield in portions (default: 1)",
   "lines": [
     {
       "ingredientId": "number (required)",
@@ -3542,6 +3573,8 @@ Auth required (super_admin/admin).
 ```
 
 **Response (201):** `{ "success": true, "message": "BOM created", "data": { ...bom, "lines": [...] }, "recipeModeAdopted": false }`
+
+Line quantities are for the whole yield, in the ingredient's base unit (whole numbers). One sold (or produced) portion deducts `line qty / totalQty` of each ingredient (4 decimals), and the HPP per portion is the recipe cost divided by `totalQty`. `totalQty` 0 (older recipes) counts as 1 portion.
 
 `recipeModeAdopted: true` means saving this active BOM moved the product from `inventoryMode` `stocked` to `make_to_order`, so its sales now deduct the recipe ingredients (audited as a product update). This happens only when every store selling the product has an active BOM and the product has no production order that was not cancelled. `hybrid` and `make_to_order` are never changed.
 

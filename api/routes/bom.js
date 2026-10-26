@@ -32,6 +32,14 @@ router.get(
   requireRole('super_admin', 'admin'),
   bomController.getByProduct
 )
+// Live HPP per outlet recipe (status, HPP per portion, food cost, margin).
+router.get(
+  '/costing/:productId',
+  authorization,
+  validateStoreAccess,
+  requireRole('super_admin', 'admin'),
+  bomController.costing
+)
 router.post(
   '/add',
   authorization,

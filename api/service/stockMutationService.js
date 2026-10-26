@@ -2,6 +2,7 @@
 
 const db = require('../../db/models')
 const { assertDecimalQuantity } = require('../../utils/decimalQuantityGuard')
+const { recipeYield } = require('./itemCostService')
 
 /**
  * Single authoritative path for mutating a product's stock (product.stock
@@ -618,13 +619,16 @@ async function resolveBomIngredientRequirements(flatItems, store, productById, t
       )
     }
 
-    for (const [ingredientId, qtyPerUnit] of perIngredientQty) {
+    // BOM lines are written for the whole recipe yield; one sold portion
+    // uses 1/yield of each line (ingredient stock is DECIMAL(10,4)).
+    const portions = recipeYield(bomHeader)
+    for (const [ingredientId, qtyPerRecipe] of perIngredientQty) {
       const ing = ingredientById.get(ingredientId)
       requirements.push({
         productId,
         ingredientId,
         ingredientName: ing.name,
-        qty: qtyPerUnit * orderQty
+        qty: Math.round(((qtyPerRecipe * orderQty) / portions) * 10000) / 10000
       })
     }
   }

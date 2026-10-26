@@ -3,6 +3,7 @@ const { Op } = require('sequelize')
 const { createAudit } = require('../../utils/auditLog')
 const { enrichAuditFields } = require('../../utils/auditFields')
 const { resolveStoreId } = require('../../utils/tenantScope')
+const { recipeYield } = require('../service/itemCostService')
 
 const generateProductionNo = () => {
   const date = new Date()
@@ -384,7 +385,9 @@ const productionOrderController = {
                 lock: transaction.LOCK.UPDATE
               })
               if (!ing) continue
-              const restoreQty = line.qty * order.plannedQty
+              // Same per-portion rule as the start: lines are per recipe yield.
+              const restoreQty =
+                Math.round(((line.qty * order.plannedQty) / recipeYield(bomHeader)) * 10000) / 10000
               const oldIngStock = Number(ing.stock)
               await ing.update(
                 { stock: oldIngStock + restoreQty },
@@ -494,10 +497,14 @@ const productionOrderController = {
         include: [{ model: db.bom_line, as: 'lines' }]
       })
       if (bomHeader?.lines?.length) {
+        // BOM lines are written for the recipe yield; one produced unit uses
+        // 1/yield of each line.
+        const portions = recipeYield(bomHeader)
         bomComponents = bomHeader.lines.map((l) => ({
           ingredientId: l.ingredientId,
           qty: l.qty,
-          unit: l.unit
+          unit: l.unit,
+          portions
         }))
       } else if (prodData.composition?.length) {
         bomComponents = prodData.composition
@@ -516,7 +523,8 @@ const productionOrderController = {
         const effectiveStore = order.store
 
         for (const comp of bomComponents) {
-          const qtyNeeded = (parseFloat(comp.qty) || 0) * order.plannedQty
+          const qtyNeeded =
+            Math.round((((parseFloat(comp.qty) || 0) * order.plannedQty) / (comp.portions || 1)) * 10000) / 10000
           if (qtyNeeded <= 0) continue
 
           const ingredientId = comp.ingredientId

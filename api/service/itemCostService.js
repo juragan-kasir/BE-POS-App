@@ -37,17 +37,70 @@ const ingredientPurchaseUnitCost = (baseUnitCost, ingredient) => {
 
 const roundCost = (value) => Math.round(value * 100) / 100
 
-// Recipe cost of one unit: Σ (base-unit cost × BOM quantity). Unknown (null)
-// as soon as one ingredient has no purchase price — a partial sum would
-// silently understate the cost.
-function recipeUnitCost(lines, ingredientById) {
+// Portions one recipe makes (bom_header.totalQty). The column predates the
+// yield and was never written by the API, so 0/empty means one portion.
+const recipeYield = (bomHeader) => {
+  const value = Number(bomHeader?.totalQty)
+  return Number.isInteger(value) && value > 1 ? value : 1
+}
+
+// Recipe cost of one portion: Σ (base-unit cost × BOM quantity) / yield.
+// Unknown (null) as soon as one ingredient has no purchase price — a partial
+// sum would silently understate the cost.
+function recipeUnitCost(lines, ingredientById, yieldQty = 1) {
   let total = 0
   for (const line of lines) {
     const cost = ingredientBaseUnitCost(ingredientById.get(line.ingredientId))
     if (!(cost > 0)) return null
     total += cost * Number(line.qty)
   }
-  return roundCost(total)
+  return roundCost(total / (yieldQty > 0 ? yieldQty : 1))
+}
+
+// HPP status of a recipe product (BRD Harga Modal/HPP §5), one rule for the
+// recipe screen, the product screens and the sale snapshot:
+//   - 'auto'        every line has a cost: HPP = recipe cost per portion;
+//   - 'provisional' the recipe is empty or a line has no cost, and the
+//                   product carries an estimate (product.costPrice);
+//   - 'unavailable' neither — there is no HPP to show or snapshot.
+// Food cost and margin are always derived from that same HPP.
+function recipeCosting({ lines = [], ingredientById = new Map(), yieldQty = 1, estimate = 0, price = 0 }) {
+  const missingCost = []
+  let recipeCost = 0
+  for (const line of lines) {
+    const ingredient = ingredientById.get(line.ingredientId)
+    const cost = ingredientBaseUnitCost(ingredient)
+    if (!(cost > 0)) {
+      missingCost.push({ ingredientId: line.ingredientId, name: ingredient?.name ?? null })
+      continue
+    }
+    recipeCost += cost * Number(line.qty)
+  }
+  const portions = yieldQty > 0 ? yieldQty : 1
+  const estimateCost = Number(estimate) > 0 ? roundCost(Number(estimate)) : null
+
+  let status = 'unavailable'
+  let hppPerPortion = null
+  if (lines.length > 0 && missingCost.length === 0) {
+    status = 'auto'
+    hppPerPortion = roundCost(recipeCost / portions)
+  } else if (estimateCost != null) {
+    status = 'provisional'
+    hppPerPortion = estimateCost
+  }
+
+  const sellPrice = Number(price) || 0
+  const ratio = hppPerPortion != null && sellPrice > 0 ? hppPerPortion / sellPrice : null
+  return {
+    status,
+    yieldQty: portions,
+    recipeTotalCost: missingCost.length === 0 && lines.length > 0 ? roundCost(recipeCost) : null,
+    hppPerPortion,
+    foodCostPercent: ratio == null ? null : roundCost(ratio * 100),
+    marginPercent: ratio == null ? null : roundCost((1 - ratio) * 100),
+    grossProfit: hppPerPortion != null && sellPrice > 0 ? roundCost(sellPrice - hppPerPortion) : null,
+    missingCost
+  }
 }
 
 /**
@@ -55,8 +108,9 @@ function recipeUnitCost(lines, ingredientById) {
  *
  * Mirrors the stock-deduction rule (stockMutationService F7): a product that
  * is not 'stocked' consumes its active outlet BOM, so its cost is that
- * recipe at the ingredients' current purchase prices; a 'stocked' product
- * (or one without a usable recipe) costs its product.costPrice.
+ * recipe per portion (recipeCosting) at the ingredients' current purchase
+ * prices; a 'stocked' product (or one without a usable recipe) costs its
+ * product.costPrice.
  *
  * @returns {Promise<Map<number, number|null>>} productId → unit cost or null
  */
@@ -99,7 +153,15 @@ async function resolveProductUnitCosts(productIds, store, transaction) {
   for (const product of products) {
     const recipe = recipeByProduct.get(product.id)
     if (recipe) {
-      costs.set(product.id, recipeUnitCost(recipe.lines, ingredientById))
+      // Same rule as the recipe screen: the recipe cost per portion, or the
+      // product's estimate while the recipe is still incomplete.
+      const { hppPerPortion } = recipeCosting({
+        lines: recipe.lines,
+        ingredientById,
+        yieldQty: recipeYield(recipe),
+        estimate: product.costPrice
+      })
+      costs.set(product.id, hppPerPortion)
       continue
     }
     const costPrice = Number(product.costPrice || 0)
@@ -137,7 +199,9 @@ function costedProductIds(items, bundleMap) {
 module.exports = {
   ingredientBaseUnitCost,
   ingredientPurchaseUnitCost,
+  recipeYield,
   recipeUnitCost,
+  recipeCosting,
   resolveProductUnitCosts,
   bundleUnitCost,
   costedProductIds
