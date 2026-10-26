@@ -428,7 +428,8 @@ const main = async () => {
             store: store.id,
             productId: product.id,
             name: `Resep ${spec.menu}`,
-            totalQty: Object.values(spec.components).reduce((a, b) => a + b, 0),
+            // totalQty is the recipe yield (portions); each recipe makes one.
+            totalQty: 1,
             notes: spec.notes || '',
             status: spec.status || 'active',
             createdBy: user.id

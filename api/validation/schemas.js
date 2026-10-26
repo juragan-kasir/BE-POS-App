@@ -1593,6 +1593,11 @@ exports.decideVarianceSchema = z.object({
 })
 
 // ===================== BOM =====================
+const bomYield = z.coerce
+  .number()
+  .int('Recipe yield must be a whole number of portions')
+  .min(1, 'Recipe yield must be at least 1 portion')
+  .max(10000, 'Recipe yield must be at most 10000 portions')
 exports.createBomSchema = z.object({
   productId: strToNum(),
   name: z.string().max(FIELD_MAX.BUSINESS_NAME, tooLong(FIELD_MAX.BUSINESS_NAME)).optional().default(''),
@@ -1600,6 +1605,8 @@ exports.createBomSchema = z.object({
   // Only an 'active' recipe deducts at sale; 'draft'/'inactive' never do.
   // An unknown value (a typo) is refused instead of silently disabling it.
   status: statusEnumBase.optional().default('active'),
+  // Recipe yield: portions the lines make (bom_header.totalQty).
+  totalQty: bomYield.optional(),
   createdBy: strToNum().optional(),
   lines: z
     .array(
@@ -1620,6 +1627,7 @@ exports.updateBomSchema = z.object({
   name: z.string().max(FIELD_MAX.BUSINESS_NAME, tooLong(FIELD_MAX.BUSINESS_NAME)).optional(),
   notes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional(),
   status: statusEnumBase.optional(),
+  totalQty: bomYield.optional(),
   lines: z
     .array(
       z.object({

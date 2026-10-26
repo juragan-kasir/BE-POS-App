@@ -1,7 +1,7 @@
 const db = require('../../db/models')
 const { Op } = require('sequelize')
 const { enrichAuditFields } = require('../../utils/auditFields')
-const { ingredientBaseUnitCost } = require('../service/itemCostService')
+const { recipeCosting, recipeYield } = require('../service/itemCostService')
 const { createAudit } = require('../../utils/auditLog')
 const { adoptRecipeMode } = require('../service/recipeModeService')
 
@@ -52,21 +52,30 @@ const validateBomLines = async (lines, store, transaction) => {
   return { bomLines, ingredients }
 }
 
-// Cost of ONE base unit of an ingredient (itemCostService). costPrice is the
-// purchase price per purchase unit (`unit`, e.g. Rp25.000 per kg) while BOM
-// lines are always in the base unit (enforced above). BA finding #4: using
-// costPrice directly priced 5 butir as 5 kg (Rp143.000 instead of Rp6.800).
-const baseUnitCost = ingredientBaseUnitCost
+// Recipe yield (bom_header.totalQty): whole portions, at least 1.
+const parseYield = (value) => {
+  if (value === undefined || value === null || value === '') return undefined
+  const n = Number(value)
+  if (!Number.isInteger(n) || n < 1) {
+    throw new BomAuthoringError('Recipe yield must be a whole number of portions (at least 1)')
+  }
+  return n
+}
 
 // HPP / food-cost / composition snapshot onto the product, from the BOM's
-// current lines and the ingredients' current cost per base unit.
-const refreshProductCosting = async (productId, bomLines, ingredients, transaction) => {
+// current lines, yield and the ingredients' current cost per base unit —
+// the same recipeCosting rule the costing endpoint and the sale snapshot
+// use. A recipe with an uncosted line stores 0 (unknown), never a partial
+// sum. BA finding #4: costs are per BASE unit (5 butir, not 5 kg).
+const refreshProductCosting = async (productId, bomLines, ingredients, transaction, yieldQty = 1) => {
   const prod = await db.product.findByPk(productId, { transaction })
   if (!prod || bomLines.length === 0) return
-  const costMap = Object.fromEntries(ingredients.map((i) => [i.id, baseUnitCost(i)]))
-  const hpp = Math.round(
-    bomLines.reduce((sum, l) => sum + (costMap[l.ingredientId] || 0) * Number(l.qty), 0)
-  )
+  const costing = recipeCosting({
+    lines: bomLines,
+    ingredientById: new Map(ingredients.map((i) => [i.id, i])),
+    yieldQty
+  })
+  const hpp = costing.status === 'auto' ? Math.round(costing.hppPerPortion) : 0
   const price = Number(prod.price || 0)
   const foodCostPersen =
     hpp > 0 && price > 0 ? Math.min(999.99, parseFloat(((hpp / price) * 100).toFixed(2))) : 0
@@ -84,6 +93,43 @@ const refreshProductCosting = async (productId, bomLines, ingredients, transacti
   })
   await prod.update({ hppPerPorsi: hpp, foodCostPersen, marginPersen, composition }, { transaction })
 }
+
+// Live HPP of each BOM (bom_header rows with `lines`), read at the
+// ingredients' current cost — never the snapshot stored on the product,
+// which is global while recipes are per outlet. Returns bomId → costing.
+const costingForBoms = async (boms) => {
+  const result = new Map()
+  if (!boms.length) return result
+  const productIds = [...new Set(boms.map((b) => b.productId))]
+  const ingredientIds = [...new Set(boms.flatMap((b) => (b.lines || []).map((l) => l.ingredientId)))]
+  const [products, ingredients] = await Promise.all([
+    db.product.findAll({ where: { id: productIds }, attributes: ['id', 'price', 'costPrice'] }),
+    ingredientIds.length
+      ? db.ingredient.findAll({
+          where: { id: ingredientIds },
+          attributes: ['id', 'name', 'costPrice', 'conversionFactor']
+        })
+      : []
+  ])
+  const productById = new Map(products.map((p) => [p.id, p]))
+  const ingredientById = new Map(ingredients.map((i) => [i.id, i]))
+  for (const bom of boms) {
+    const product = productById.get(bom.productId)
+    result.set(
+      bom.id,
+      recipeCosting({
+        lines: bom.lines || [],
+        ingredientById,
+        yieldQty: recipeYield(bom),
+        estimate: product?.costPrice,
+        price: product?.price
+      })
+    )
+  }
+  return result
+}
+
+const withCosting = (bom, costing) => ({ ...bom.toJSON(), costing: costing.get(bom.id) || null })
 
 // Saving an active BOM moves a 'stocked' product to make_to_order; the
 // rules are in recipeModeService.
@@ -135,11 +181,12 @@ const bomController = {
         offset
       })
       await enrichAuditFields(db, rows)
+      const costing = await costingForBoms(rows)
 
       return res.status(200).json({
         success: true,
         message: 'Success',
-        data: rows,
+        data: rows.map((bom) => withCosting(bom, costing)),
         pagination: {
           total: count,
           page: parseInt(page),
@@ -187,9 +234,10 @@ const bomController = {
         return res
           .status(404)
           .json({ success: false, message: 'BOM not found' })
+      const costing = await costingForBoms([bom])
       return res
         .status(200)
-        .json({ success: true, message: 'Success', data: bom })
+        .json({ success: true, message: 'Success', data: withCosting(bom, costing) })
     } catch (error) {
       console.error('Error =>', error)
       return res
@@ -234,6 +282,58 @@ const bomController = {
     }
   },
 
+  // HPP of a product per outlet recipe (BRD Harga Modal/HPP): status
+  // auto/provisional/unavailable, HPP per portion, food cost and margin,
+  // read live so an ingredient price change shows at once. A store-bound
+  // caller sees its own outlet only. Products without a recipe get an
+  // empty list — their cost is product.costPrice.
+  async costing(req, res) {
+    try {
+      const productId = Number(req.params.productId)
+      if (!Number.isInteger(productId) || productId <= 0) {
+        return res.status(400).json({ success: false, message: 'productId must be a positive integer' })
+      }
+      const product = await db.product.findByPk(productId, {
+        attributes: ['id', 'nameProduct', 'price', 'costPrice', 'inventoryMode']
+      })
+      if (!product) {
+        return res.status(404).json({ success: false, message: 'Product not found' })
+      }
+      const store = req.storeId
+      const boms = await db.bom_header.findAll({
+        where: { productId, ...(store ? { store } : {}) },
+        include: [
+          { model: db.bom_line, as: 'lines' },
+          { model: db.location, as: 'storeData', attributes: ['id', 'name'], required: false }
+        ],
+        order: [['store', 'ASC']]
+      })
+      const costing = await costingForBoms(boms)
+      return res.status(200).json({
+        success: true,
+        message: 'Success',
+        data: {
+          productId: product.id,
+          price: Number(product.price) || 0,
+          estimate: Number(product.costPrice) || 0,
+          inventoryMode: product.inventoryMode || 'stocked',
+          recipes: boms.map((bom) => ({
+            bomId: bom.id,
+            store: bom.store,
+            storeName: bom.storeData?.name ?? null,
+            status: bom.status,
+            ...costing.get(bom.id)
+          }))
+        }
+      })
+    } catch (error) {
+      console.error('Error =>', error)
+      return res
+        .status(500)
+        .json({ success: false, message: 'Internal server error' })
+    }
+  },
+
   async create(req, res) {
     try {
       // MEDIUM fix: removed req.cookies.store — cookie is client-controlled.
@@ -258,12 +358,14 @@ const bomController = {
         const existing = await db.bom_header.findOne({ where: { productId, store }, transaction: t })
         if (existing) throw new BomAuthoringError('BOM already exists for this product')
 
+        const yieldQty = parseYield(req.body.totalQty) ?? 1
         const { bomLines, ingredients } = await validateBomLines(lines, store, t)
         const bom = await db.bom_header.create(
           {
             store,
             productId,
             name: name || `BOM-${Date.now()}`,
+            totalQty: yieldQty,
             notes,
             status: req.body.status || 'active'
           },
@@ -273,7 +375,7 @@ const bomController = {
           bomLines.map((l) => ({ ...l, bomHeaderId: bom.id })),
           { transaction: t }
         )
-        await refreshProductCosting(productId, bomLines, ingredients, t)
+        await refreshProductCosting(productId, bomLines, ingredients, t, yieldQty)
         const recipeModeAdopted = bom.status === 'active' && (await adoptRecipeMode(productId, t))
         return { bom, recipeModeAdopted }
       })
@@ -320,6 +422,8 @@ const bomController = {
 
         // Only what the request carries changes; an empty name keeps the old.
         const updateData = {}
+        const yieldQty = parseYield(req.body.totalQty)
+        if (yieldQty !== undefined) updateData.totalQty = yieldQty
         if (typeof name === 'string' && name.trim() !== '') updateData.name = name
         if (notes !== undefined) updateData.notes = notes
         if (status) updateData.status = status
@@ -338,7 +442,7 @@ const bomController = {
         if (currentLines.length > 0) {
           const ingIds = [...new Set(currentLines.map((l) => l.ingredientId))]
           const ings = await db.ingredient.findAll({ where: { id: ingIds }, transaction: t })
-          await refreshProductCosting(bom.productId, currentLines, ings, t)
+          await refreshProductCosting(bom.productId, currentLines, ings, t, recipeYield(bom))
         }
         const recipeModeAdopted =
           bom.status === 'active' && currentLines.length > 0 && (await adoptRecipeMode(bom.productId, t))
