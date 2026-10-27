@@ -1,4 +1,9 @@
 const db = require('../../db/models')
+const {
+  assertNoOwnStockWrites,
+  InventoryLinkError,
+  inventoryLinkErrorBody
+} = require('../service/inventoryLinkService')
 const { Op } = require('sequelize')
 const batchService = require('../service/batchService')
 const { withDeadlockRetry } = require('../../utils/deadlockRetry')
@@ -498,6 +503,15 @@ const posController = {
       // is already enforced by createPosTransferSchema (strToNum >= 0).
       for (const [index, item] of items.entries()) {
         assertDecimalQuantity(Number(item.qty), `items[${index}].qty`)
+      }
+      // BRD BR-01: a product linked to an inventory item moves as the item.
+      try {
+        await assertNoOwnStockWrites(items.map((i) => i.productId))
+      } catch (linkError) {
+        if (linkError instanceof InventoryLinkError) {
+          return res.status(linkError.statusCode).json(inventoryLinkErrorBody(linkError))
+        }
+        throw linkError
       }
 
       // Phase 39 Batch 1: idempotency fast-path (goods-receipt convention).
@@ -1973,7 +1987,7 @@ order: [['updatedAt', 'DESC']],
       // fix mirrors the same EXISTS-against-product_store scoping the
       // already-correct low-stock detail list uses (stockHistory.js
       // getLowStockAll), not a bare `AND store = :store`.
-      let lowStockProductQuery = `SELECT COUNT(*)::int as count FROM "product" p WHERE p.status = 'active' AND p."deletedAt" IS NULL AND p."minStock" > 0 AND p."stock" <= p."minStock" AND COALESCE(p."inventoryMode", 'stocked') <> 'make_to_order'`
+      let lowStockProductQuery = `SELECT COUNT(*)::int as count FROM "product" p WHERE p.status = 'active' AND p."deletedAt" IS NULL AND p."minStock" > 0 AND p."stock" <= p."minStock" AND COALESCE(p."inventoryMode", 'stocked') IN ('stocked', 'hybrid')`
       const productReplacements = {}
       if (store) {
         lowStockProductQuery += ` AND EXISTS (SELECT 1 FROM "product_store" ps WHERE ps.product = p.id AND ps.store = :store)`

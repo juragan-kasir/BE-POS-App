@@ -471,7 +471,7 @@ Auth required. Full product list for table.
 ---
 
 ### GET `/product/get-by-id/:id`
-Auth required (super_admin/admin).
+Auth required (super_admin/admin). For an `inventory_item` product, `inventoryLinks` lists per outlet (a store-bound caller sees its own) the item read live: `{ store, storeName, bomId, ingredientId, ingredientName, qty, baseUnit, stock, minStock, costPerBaseUnit, unitCost, availableUnits }` (`unitCost` = cost of one sold unit, `availableUnits` = FLOOR(stock / qty)); `[]` for other modes.
 
 **Response:**
 ```json
@@ -533,9 +533,13 @@ Auth required (super_admin/admin). Content-Type: `multipart/form-data`.
 | `currencyId` | number | No | null |
 | `currencyCode` | string | No | null |
 | `tipeProduk` | string | No | `menu` |
+| `inventoryMode` | `stocked` \| `make_to_order` \| `hybrid` \| `inventory_item` | No | `stocked` |
+| `inventoryLinks` | JSON array `[{ store, ingredientId, qty }]` | for `inventory_item` | - |
 | `composition` | JSON array | No | `[]` |
 | `redeemPoints` | number | No | `0` |
 | `image` | file | No | null |
+
+`inventoryMode: inventory_item` (BRD BR-01/BR-02) — a finished good sold as it is, whose stock, cost and minimum are its inventory item's (ingredient) at each outlet. `inventoryLinks` names, per outlet that sells the product, the item and `qty` = base units of the item one sold unit uses (default 1; a pack of 24 = 24). Every outlet in `stores` needs one; the item must be an active ingredient of that outlet; a tenant admin may link only their own outlet (403). `stock` and `minStock` are not stored for such a product. A sale deducts the item once (one `stock_history` row on the ingredient, naming the product); availability, HPP (`/bom/costing`) and returns follow the outlet BOM, which holds the link as one line. Errors: 400 `INVENTORY_LINK_REQUIRED` / `INVENTORY_LINK_INVALID`, 409 `RECIPE_EXISTS` (the outlet already has a recipe of several ingredients — delete it first).
 
 **Response:**
 ```json
@@ -549,7 +553,7 @@ Auth required (super_admin/admin). Content-Type: `multipart/form-data`.
 ---
 
 ### PUT `/product/edit-product`
-Auth required (super_admin/admin). Content-Type: `multipart/form-data`. Same fields as add, all optional.
+Auth required (super_admin/admin). Content-Type: `multipart/form-data`. Same fields as add, all optional. For an `inventory_item` product, `inventoryLinks` replaces the links of the outlets it names (others are kept), every outlet selling the product must end up linked, and `stock`/`minStock` are ignored. Switching an existing product to `inventory_item` leaves its old product stock as it was, unused (see `npm run report:inventory-duplicates`).
 
 **Response:**
 ```json
@@ -2599,7 +2603,7 @@ Auth required. **Query:** `store` (number).
 Auth required. **Query:** `store` (number).
 
 ### POST `/stock-opname/create`
-Auth required (super_admin/admin).
+Auth required (super_admin/admin). A line whose product is `inventory_item` counts its inventory item (matched by name) and never the product's own stock; a line naming only such a product is 422 `PRODUCT_USES_INVENTORY_ITEM`.
 
 **Request:**
 ```json
@@ -3474,7 +3478,7 @@ Auth required.
 Auth required. Returns Excel file.
 
 ### POST `/goods-receipt/create`
-Auth required (super_admin/admin).
+Auth required (super_admin/admin). A product item whose product is `inventory_item` is 422 `PRODUCT_USES_INVENTORY_ITEM` (`products`: ids) — receive its inventory item instead (BRD BR-01). The same applies when a draft receipt is completed.
 
 **Request:**
 ```json
@@ -3516,7 +3520,7 @@ Auth required (super_admin/admin).
 ## BOM (Bill of Materials)
 
 ### GET `/bom/get-all`
-Auth required (super_admin/admin).
+Auth required (super_admin/admin). Recipes only: the one-line link of an `inventory_item` product is not listed, and `add`/`edit`/`delete` refuse it with 409 (it is changed from the product form).
 
 **Response:**
 ```json
@@ -3655,7 +3659,7 @@ Auth required. **Query:** `page`, `limit`, `search`, `status`.
 Auth required.
 
 ### POST `/production-order/create`
-Auth required (super_admin/admin).
+Auth required (super_admin/admin). An `inventory_item` product is 422 `PRODUCT_USES_INVENTORY_ITEM` (also when a planned order is started).
 
 **Request:**
 ```json
@@ -4870,7 +4874,7 @@ Auth required. **Query:** `barcode` (string), `store` (number).
 ---
 
 ### POST `/pos/transfer`
-Auth required (super_admin/admin).
+Auth required (super_admin/admin). An `inventory_item` product is 422 `PRODUCT_USES_INVENTORY_ITEM` — transfer its inventory item.
 
 **Request:**
 ```json

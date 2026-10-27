@@ -133,7 +133,9 @@ const statusEnum = statusEnumBase.default('active')
 // strip an existing `.default()` from a field (verified), so reusing the
 // create schema's defaulted version here would silently reset every
 // existing product's inventoryMode back to 'stocked' on any unrelated edit.
-const inventoryModeValues = ['stocked', 'make_to_order', 'hybrid']
+// 'inventory_item' (BRD BR-02): a finished good whose stock, cost and
+// minimum are its linked inventory item's, per outlet (inventoryLinks).
+const inventoryModeValues = ['stocked', 'make_to_order', 'hybrid', 'inventory_item']
 const inventoryModeEnumBase = z.enum(inventoryModeValues)
 const inventoryModeEnum = inventoryModeEnumBase.optional().default('stocked')
 
@@ -200,6 +202,9 @@ exports.createProductSchema = z.object({
   currencyCode: z.string().max(FIELD_MAX.CURRENCY_CODE, tooLong(FIELD_MAX.CURRENCY_CODE)).optional().nullable(),
   tipeProduk: z.string().optional().default('menu'),
   inventoryMode: inventoryModeEnum,
+  // [{ store, ingredientId, qty }] for an 'inventory_item' product;
+  // checked in inventoryLinkService.parseInventoryLinks.
+  inventoryLinks: jsonField().optional().nullable(),
   composition: jsonField().optional().default([]),
   redeemPoints: strToNum().optional().default(0),
   estimationTime: strToNum().optional().default(0),

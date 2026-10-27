@@ -4,6 +4,16 @@ const { createAudit } = require('../../utils/auditLog')
 const { enrichAuditFields } = require('../../utils/auditFields')
 const { resolveStoreId } = require('../../utils/tenantScope')
 const { recipeYield } = require('../service/itemCostService')
+const { isInventoryItemMode } = require('../service/inventoryLinkService')
+
+// A finished good linked to an inventory item has no stock of its own to
+// produce into (BRD BR-01/BR-02).
+const refuseLinkedProduction = (res, product) =>
+  res.status(422).json({
+    success: false,
+    code: 'PRODUCT_USES_INVENTORY_ITEM',
+    message: `Stok "${product.nameProduct}" mengikuti item persediaan dan tidak diproduksi`
+  })
 
 const generateProductionNo = () => {
   const date = new Date()
@@ -195,6 +205,7 @@ const productionOrderController = {
           .status(404)
           .json({ success: false, message: 'Product not found' })
       }
+      if (isInventoryItemMode(product.inventoryMode)) return refuseLinkedProduction(res, product)
 
       const productionNo = generateProductionNo()
 
@@ -480,6 +491,7 @@ const productionOrderController = {
           message: 'Only planned orders can be started'
         })
       }
+      if (isInventoryItemMode(order.productData?.inventoryMode)) return refuseLinkedProduction(res, order.productData)
 
       // Get BOM components from BOM table first, fallback to product.composition
       const prodData = order.productData
