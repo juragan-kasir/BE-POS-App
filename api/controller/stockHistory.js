@@ -4,6 +4,12 @@ const { enrichAuditFields } = require('../../utils/auditFields')
 const { createAudit } = require('../../utils/auditLog')
 const { scalarStoreScope, isSuperAdmin, resolveStoreId } = require('../../utils/tenantScope')
 
+// A make_to_order product never uses its own stock (its ingredients carry
+// the minimum), so it is never "low on stock" (BRD BR-03/BR-07).
+const usesOwnStock = {
+  [Op.or]: [{ inventoryMode: null }, { inventoryMode: { [Op.ne]: 'make_to_order' } }]
+}
+
 const stockHistoryController = {
   async getAll(req, res) {
     try {
@@ -153,7 +159,8 @@ const stockHistoryController = {
         db.product.findAll({
           where: {
             status: 'active',
-            minStock: { [Op.gt]: 0 }
+            minStock: { [Op.gt]: 0 },
+            ...usesOwnStock
           },
           attributes: ['id', 'nameProduct', 'stock', 'minStock', 'unit']
         }),
@@ -257,7 +264,8 @@ const stockHistoryController = {
           db.product.findAll({
             where: {
               status: 'active',
-              minStock: { [Op.gt]: 0 }
+              minStock: { [Op.gt]: 0 },
+              ...usesOwnStock
             },
             attributes: ['id', 'nameProduct', 'stock', 'minStock', 'unit']
           }),

@@ -28,6 +28,7 @@ const {
   adjustIngredientStockBatch,
   resolveBomIngredientRequirements
 } = require('../service/stockMutationService')
+const { recipeAvailability, recipeShortages } = require('../service/recipeAvailabilityService')
 const { withDeadlockRetry } = require('../../utils/deadlockRetry')
 const { getStoreOpenStatus } = require('../../utils/storeHours')
 const {
@@ -4133,6 +4134,18 @@ exports.getCustomerMenu = async (req, res) => {
       dto.effectivePrice = effectivePriceById.get(String(dto.id)) ?? null
     }
 
+    // BRD BR-05/BR-06: a recipe product's availability is the portions its
+    // outlet recipe can make from ingredient stock (0 without an active
+    // recipe — the sale would be refused). Only the count is public; the
+    // ingredients behind it are not. `null` for a stocked product.
+    const { products: recipeById } = await recipeAvailability(storeId)
+    for (const dto of customerProducts) {
+      dto.availablePortions =
+        (dto.inventoryMode || 'stocked') === 'stocked'
+          ? null
+          : recipeById.get(Number(dto.id))?.portions ?? 0
+    }
+
     const customerCategories = categories.map((c) => {
       const plain = c.get({ plain: true })
       const dto = {}
@@ -4575,6 +4588,47 @@ exports.createCustomerOrder = async (req, res) => {
       if (avail !== null && avail < Number(item.quantity)) {
         return res.status(400).json({
           message: `Stok "${prod.nameProduct}" tidak mencukupi. Tersedia: ${avail}, diminta: ${item.quantity}`
+        })
+      }
+    }
+
+    // BRD BR-06 (blokir): a recipe order that the ingredients cannot make is
+    // refused when it is placed, not discovered at payment. Same quantities
+    // as the deduction, summed across the order (bundle components
+    // included); stock is not reserved (BR-QR-008), so payment still records
+    // a shortfall if stock moved in between (DR-18).
+    {
+      const flatItems = []
+      for (const item of items) {
+        if (item.bundleId && bundleMap[item.bundleId]) {
+          const bundleQty = Number(item.quantity) || 1
+          for (const bi of bundleMap[item.bundleId].items) {
+            flatItems.push({ productId: bi.product, quantity: bi.quantity * bundleQty })
+          }
+        } else if (item.productId) {
+          flatItems.push({ productId: item.productId, quantity: Number(item.quantity) || 0 })
+        }
+      }
+      let shortages
+      try {
+        shortages = await recipeShortages(flatItems, store)
+      } catch (err) {
+        if (err.statusCode === 409) {
+          // The deduction's own message names ingredients; a public caller
+          // only learns that the menu cannot be made.
+          return res.status(409).json({
+            code: 'RECIPE_UNAVAILABLE',
+            message: 'Menu belum dapat dipesan: resep belum lengkap'
+          })
+        }
+        throw err
+      }
+      if (shortages.length) {
+        const names = [...new Set(shortages.flatMap((s) => s.products.map((p) => p.name)))]
+        return res.status(409).json({
+          code: 'INGREDIENT_STOCK_CONFLICT',
+          message: `Menu tidak tersedia: bahan tidak cukup untuk ${names.join(', ')}`,
+          products: [...new Set(shortages.flatMap((s) => s.products.map((p) => p.id)))]
         })
       }
     }

@@ -573,10 +573,29 @@ describe('QR table order (BISA-MAKAN) — same recipe, deducted exactly once at 
     expect(await saleMovement(created.body.data.id)).toEqual({ urat: -4, halus: -4 })
   })
 
+  // BRD BR-06 (blokir): a table order the ingredients cannot make is
+  // refused when it is placed.
+  test('a table order short on telur is refused when placed', async () => {
+    await adjust(tokenAdminA, ING.telur.id, { type: 'set', quantity: 1, notes: 'test BR-06' })
+    const table = await db.table.create({ store: storeA.id, name: tag('MEJA-3') })
+    const created = await request(app)
+      .post('/order/customer-create')
+      .send({
+        tableId: table.id,
+        store: storeA.id,
+        paymentMethod: 'cash',
+        customerName: 'Tamu Meja',
+        items: [{ productId: MENU['BAKSO TELUR'].id, productName: MENU['BAKSO TELUR'].nameProduct, quantity: 1 }]
+      })
+    expect(created.status).toBe(409)
+    expect(created.body.code).toBe('INGREDIENT_STOCK_CONFLICT')
+    expect(await stockOf('telur')).toBe(1)
+    await adjust(tokenAdminA, ING.telur.id, { type: 'set', quantity: 12, notes: 'restock after BR-06' })
+  })
+
   // DR-18: an already-taken table order is never refused at payment for
   // stock; the uncovered amount is recorded, stock never goes below zero.
   test('a table order paid while short on telur settles, clamps at 0 and records the shortfall', async () => {
-    await adjust(tokenAdminA, ING.telur.id, { type: 'set', quantity: 1, notes: 'test DR-18' })
     const table = await db.table.create({ store: storeA.id, name: tag('MEJA-2') })
     const created = await request(app)
       .post('/order/customer-create')
@@ -588,6 +607,9 @@ describe('QR table order (BISA-MAKAN) — same recipe, deducted exactly once at 
         items: [{ productId: MENU['BAKSO TELUR'].id, productName: MENU['BAKSO TELUR'].nameProduct, quantity: 1 }]
       })
     expect(created.status).toBe(201)
+    // Placement checks but does not reserve: other sales take telur down to
+    // 1 before this order is paid.
+    await adjust(tokenAdminA, ING.telur.id, { type: 'set', quantity: 1, notes: 'test DR-18' })
     const halusBefore = await stockOf('halus')
     const paid = await request(app)
       .put('/order/update-status')

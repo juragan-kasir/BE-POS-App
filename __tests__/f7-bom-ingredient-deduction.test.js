@@ -946,7 +946,7 @@ describe('F7 — QR customer paid via trusted cashier transition (Phase 3.1)', (
     expect(Number((await db.ingredient.findByPk(ing.id)).stock)).toBe(92) // 100 - (4*2)
   })
 
-  test('make_to_order with insufficient ingredient: create OK, trusted paid settles with a recorded shortage (DR-18)', async () => {
+  test('make_to_order the ingredients cannot make is refused when the QR order is placed (BRD BR-06)', async () => {
     const ing = await makeIngredient(storeA.id, { stock: 2 })
     const product = await makeProduct({ stock: 0, inventoryMode: 'make_to_order' })
     await makeBom(storeA.id, product.id, [{ ingredientId: ing.id, qty: 5 }])
@@ -957,10 +957,28 @@ describe('F7 — QR customer paid via trusted cashier transition (Phase 3.1)', (
       customerName: 'QR F7',
       items: [{ productId: product.id, productName: product.nameProduct, quantity: 1 }]
     })
-    // The public create itself cannot know the ingredient demand yet — the
-    // order is recorded unpaid without touching any stock.
+    expect(created.status).toBe(409)
+    expect(created.body.code).toBe('INGREDIENT_STOCK_CONFLICT')
+    expect(Number((await db.ingredient.findByPk(ing.id)).stock)).toBe(2)
+  })
+
+  test('make_to_order short at payment (stock moved after placement): trusted paid settles with a recorded shortage (DR-18)', async () => {
+    const ing = await makeIngredient(storeA.id, { stock: 5 })
+    const product = await makeProduct({ stock: 0, inventoryMode: 'make_to_order' })
+    await makeBom(storeA.id, product.id, [{ ingredientId: ing.id, qty: 5 }])
+
+    const created = await customerCreate({
+      store: storeA.id,
+      paymentMethod: 'cash',
+      customerName: 'QR F7',
+      items: [{ productId: product.id, productName: product.nameProduct, quantity: 1 }]
+    })
+    // Placement checks but does not reserve; the order is recorded unpaid
+    // without touching any stock.
     expect(created.status).toBe(201)
     expect(created.body.data.paymentStatus).toBe('unpaid')
+    // Another sale uses 3 of the 5 before this order is paid.
+    await db.ingredient.update({ stock: 2 }, { where: { id: ing.id } })
 
     const paid = await updateOrderStatus(tokenA, {
       id: created.body.data.id,

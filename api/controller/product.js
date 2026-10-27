@@ -1,4 +1,5 @@
 const db = require('../../db/models')
+const { recipeAvailability } = require('../service/recipeAvailabilityService')
 const Product = db.product
 const Category = db.category
 const StockHistory = db.stock_history
@@ -203,6 +204,33 @@ const findProductInScope = async (req, id, options = {}) => {
       ]
     }
   })
+}
+
+// BRD BR-05/FR-09: portions each recipe product can make at the caller's
+// outlet, its limiting ingredients, and the use per portion of every
+// ingredient — so the cashier can also subtract what is already in the cart
+// (FR-11: menus sharing an ingredient draw on one balance). Products that
+// are 'stocked', or have no active recipe here, are not listed.
+exports.getRecipeAvailability = async (req, res) => {
+  const store = req.storeId
+  if (store == null) {
+    return res.status(400).json({ success: false, message: 'store is required' })
+  }
+  try {
+    const { products, ingredients } = await recipeAvailability(Number(store))
+    return res.status(200).json({
+      success: true,
+      message: 'Success',
+      data: {
+        store: Number(store),
+        products: [...products].map(([productId, row]) => ({ productId, ...row })),
+        ingredients: [...ingredients.values()]
+      }
+    })
+  } catch (error) {
+    console.error('Error =>', error)
+    return res.status(500).json({ success: false, message: 'Internal server error' })
+  }
 }
 
 exports.getProductByLocationSuperAdmin = async (req, res) => {
