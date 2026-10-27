@@ -3,6 +3,7 @@ const { recipeAvailability } = require('../service/recipeAvailabilityService')
 const {
   usesOwnStock,
   isInventoryItemMode,
+  assertModeSelectable,
   InventoryLinkError,
   inventoryLinkErrorBody,
   parseInventoryLinks,
@@ -891,6 +892,9 @@ exports.postAddProduct = async (req, res) => {
       })
     }
 
+    // BRD phase 4F: 'hybrid' can no longer be chosen for a new product.
+    assertModeSelectable(inventoryMode)
+
     // BRD BR-02/FR-06: a finished good linked to an inventory item takes
     // its stock, cost and minimum from the item — none are stored on the
     // product. The links are checked before anything is written.
@@ -1186,6 +1190,7 @@ exports.editProductByLocationAndId = async (req, res) => {
     // BRD BR-02: after this edit, does the product take its stock from an
     // inventory item? Then every outlet selling it needs a link — the ones
     // sent here plus those already stored — and its own stock is left alone.
+    if (inventoryMode !== undefined) assertModeSelectable(inventoryMode, getAllProductByIdAndLocation.inventoryMode)
     const resultingMode = inventoryMode !== undefined ? inventoryMode : getAllProductByIdAndLocation.inventoryMode
     const linksInventoryItem = isInventoryItemMode(resultingMode)
     let validatedLinks = null
