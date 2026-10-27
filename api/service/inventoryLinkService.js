@@ -23,6 +23,12 @@ const OWN_STOCK_MODES = ['stocked', 'hybrid']
 const LINK_BOM_NAME = 'Item persediaan'
 const MAX_LINK_QTY = 100000
 
+// BRD phase 4F (G7): the BRD knows two kinds of product — a finished good
+// (own stock, or an inventory item) and a recipe made to order. 'hybrid'
+// deducts the product's own stock AND its recipe on every sale, so it is
+// kept for the products that already use it but can no longer be chosen.
+const RETIRED_MODES = ['hybrid']
+
 const usesOwnStock = (mode) => OWN_STOCK_MODES.includes(mode || 'stocked')
 const isInventoryItemMode = (mode) => mode === INVENTORY_ITEM_MODE
 
@@ -281,6 +287,77 @@ async function duplicateInventoryCandidates({ store = null } = {}) {
   return rows.sort((a, b) => a.store - b.store || a.productId - b.productId)
 }
 
+// A retired mode may stay on a product that has it, never be newly set.
+const assertModeSelectable = (mode, currentMode = null) => {
+  if (!RETIRED_MODES.includes(mode) || mode === currentMode) return
+  throw new InventoryLinkError(
+    'Mode hybrid tidak tersedia lagi. Pilih Stok sendiri, Dibuat saat dipesan, atau Item persediaan.',
+    { code: 'INVENTORY_MODE_RETIRED', field: 'inventoryMode' }
+  )
+}
+
+// BRD phase 4F (read-only): every 'hybrid' product with what it would need
+// to move to one of the BRD's kinds — the owner decides and changes the
+// mode from the product form. A product with a production order is sold
+// from what was produced (→ stocked: production already deducts the
+// recipe); one with an active recipe at every outlet selling it can be
+// made to order; otherwise stocked keeps today's product-stock behaviour.
+async function hybridProducts() {
+  const products = await db.product.findAll({
+    where: { inventoryMode: 'hybrid' },
+    attributes: ['id', 'nameProduct', 'status'],
+    order: [['id', 'ASC']]
+  })
+  if (!products.length) return []
+  const ids = products.map((p) => p.id)
+  const [assignments, outletStock, boms, produced, activeStores] = await Promise.all([
+    db.product_store.findAll({ where: { product: ids }, attributes: ['product', 'store'], raw: true }),
+    db.product_store_stock.findAll({ where: { product: ids }, attributes: ['product', 'store', 'stock'], raw: true }),
+    db.bom_header.findAll({
+      where: { productId: ids, status: 'active' },
+      attributes: ['productId', 'store'],
+      include: [{ model: db.bom_line, as: 'lines', attributes: ['id'], required: true }]
+    }),
+    db.productionOrder.findAll({
+      where: { productItemId: ids, status: { [Op.ne]: 'cancelled' } },
+      attributes: ['productItemId'],
+      raw: true
+    }),
+    db.location.findAll({ where: { status: 'active' }, attributes: ['id'], raw: true })
+  ])
+  const group = (rows, key, value) => {
+    const map = new Map()
+    for (const r of rows) {
+      const list = map.get(Number(r[key])) || []
+      list.push(value(r))
+      map.set(Number(r[key]), list)
+    }
+    return map
+  }
+  const storesBy = group(assignments, 'product', (r) => Number(r.store))
+  const stockBy = group(outletStock, 'product', (r) => ({ store: Number(r.store), stock: Number(r.stock) || 0 }))
+  const recipeStoresBy = group(boms, 'productId', (r) => Number(r.store))
+  const producedBy = group(produced, 'productItemId', () => 1)
+  const allStores = activeStores.map((l) => Number(l.id))
+
+  return products.map((p) => {
+    const stores = storesBy.get(p.id) || allStores
+    const recipeStores = [...new Set(recipeStoresBy.get(p.id) || [])]
+    const productionOrders = (producedBy.get(p.id) || []).length
+    const recipeEverywhere = stores.length > 0 && stores.every((s) => recipeStores.includes(s))
+    return {
+      productId: p.id,
+      productName: p.nameProduct,
+      status: p.status,
+      stores,
+      ownStock: stockBy.get(p.id) || [],
+      recipeStores,
+      productionOrders,
+      suggestedMode: productionOrders > 0 ? 'stocked' : recipeEverywhere ? 'make_to_order' : 'stocked'
+    }
+  })
+}
+
 const inventoryLinkErrorBody = (error) => ({
   success: false,
   code: error.code,
@@ -293,6 +370,9 @@ module.exports = {
   INVENTORY_ITEM_MODE,
   INVENTORY_MODES,
   OWN_STOCK_MODES,
+  RETIRED_MODES,
+  assertModeSelectable,
+  hybridProducts,
   LINK_BOM_NAME,
   usesOwnStock,
   isInventoryItemMode,

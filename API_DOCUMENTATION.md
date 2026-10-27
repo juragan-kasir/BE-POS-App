@@ -539,6 +539,8 @@ Auth required (super_admin/admin). Content-Type: `multipart/form-data`.
 | `redeemPoints` | number | No | `0` |
 | `image` | file | No | null |
 
+`inventoryMode: hybrid` is retired (BRD phase 4F): a product that already has it keeps it on any edit and may leave it, but a new product, or a switch from another mode, is 400 `INVENTORY_MODE_RETIRED` (`field: inventoryMode`). `npm run report:hybrid-products [--json]` lists the hybrid products read-only with a suggested mode (production orders → `stocked`; an active recipe at every selling outlet → `make_to_order`; else `stocked`).
+
 `inventoryMode: inventory_item` (BRD BR-01/BR-02) — a finished good sold as it is, whose stock, cost and minimum are its inventory item's (ingredient) at each outlet. `inventoryLinks` names, per outlet that sells the product, the item and `qty` = base units of the item one sold unit uses (default 1; a pack of 24 = 24). Every outlet in `stores` needs one; the item must be an active ingredient of that outlet; a tenant admin may link only their own outlet (403). `stock` and `minStock` are not stored for such a product. A sale deducts the item once (one `stock_history` row on the ingredient, naming the product); availability, HPP (`/bom/costing`) and returns follow the outlet BOM, which holds the link as one line. Errors: 400 `INVENTORY_LINK_REQUIRED` / `INVENTORY_LINK_INVALID`, 409 `RECIPE_EXISTS` (the outlet already has a recipe of several ingredients — delete it first).
 
 **Response:**

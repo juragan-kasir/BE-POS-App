@@ -18,6 +18,7 @@
     "db:bootstrap": "node scripts/bootstrap-db.js",
     "backfill:recipe-mode": "node scripts/backfill-recipe-mode.js",
     "report:inventory-duplicates": "node scripts/report-inventory-duplicates.js",
+    "report:hybrid-products": "node scripts/report-hybrid-products.js",
     "migrate:create": "sequelize-cli migration:generate",
     "guard:force-sync": "node scripts/check-no-force-sync.js",
     "check:production-schema": "node scripts/check-production-schema.js",
