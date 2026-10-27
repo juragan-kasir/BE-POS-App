@@ -4,6 +4,12 @@ const excelJS = require('exceljs')
 const { createAudit } = require('../../utils/auditLog')
 const { enrichAuditFields } = require('../../utils/auditFields')
 const { setProductStock } = require('../service/stockMutationService')
+const {
+  isInventoryItemMode,
+  assertNoOwnStockWrites,
+  InventoryLinkError,
+  inventoryLinkErrorBody
+} = require('../service/inventoryLinkService')
 const { scalarStoreScope, resolveStoreId } = require('../../utils/tenantScope')
 const { assertDecimalQuantity } = require('../../utils/decimalQuantityGuard')
 
@@ -46,6 +52,15 @@ const generateOpnameNumber = () => {
 // (sale, receipt, another opname) landing in between is silently
 // overwritten (lost update). Same discipline as setProductStock, which
 // already protects the product lines.
+// BRD BR-01: a product linked to an inventory item has no stock of its
+// own — its count is the item's (matched by name). A count that names only
+// the linked product is refused rather than lost.
+const linkedProductCount = async (product, ingredient, transaction) => {
+  if (!product || !isInventoryItemMode(product.inventoryMode)) return product
+  if (!ingredient) await assertNoOwnStockWrites([product.id], transaction)
+  return null
+}
+
 const lockIngredientRow = async (ingredient, transaction) => {
   if (!ingredient) return null
   return db.ingredient.findByPk(ingredient.id, {
@@ -456,6 +471,7 @@ const stockOpnameController = {
             )
           }
 
+          product = await linkedProductCount(product, ingredient, t)
           if (
             product &&
             reqStatus === 'completed' &&
@@ -593,6 +609,9 @@ const stockOpnameController = {
         throw err
       }
     } catch (error) {
+      if (error instanceof InventoryLinkError) {
+        return res.status(error.statusCode).json(inventoryLinkErrorBody(error))
+      }
       console.error(error)
       return res.status(500).json({
         success: false,
@@ -902,6 +921,7 @@ const stockOpnameController = {
               )
             }
 
+            product = await linkedProductCount(product, ingredient, t)
             if (
               product &&
               item.stokFisikJumlah !== null &&
@@ -1058,6 +1078,9 @@ const stockOpnameController = {
         data: updated
       })
     } catch (error) {
+      if (error instanceof InventoryLinkError) {
+        return res.status(error.statusCode).json(inventoryLinkErrorBody(error))
+      }
       console.error(error)
       return res.status(500).json({
         success: false,

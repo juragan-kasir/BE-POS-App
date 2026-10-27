@@ -29,6 +29,10 @@ const {
   resolveBomIngredientRequirements
 } = require('../service/stockMutationService')
 const { recipeAvailability, recipeShortages } = require('../service/recipeAvailabilityService')
+// make_to_order and inventory_item products are limited by their outlet
+// BOM's ingredients (a linked inventory item is a one-line BOM), never by
+// their own product stock.
+const { usesOwnStock, isInventoryItemMode } = require('../service/inventoryLinkService')
 const { withDeadlockRetry } = require('../../utils/deadlockRetry')
 const { getStoreOpenStatus } = require('../../utils/storeHours')
 const {
@@ -1001,7 +1005,7 @@ const loadAndPriceOrderItems = async (items, store, user = null) => {
         // its recipe ingredients are checked (and refused with
         // INGREDIENT_STOCK_CONFLICT) inside the sale transaction. Same rule
         // as the customer (QR) path.
-        if (prod.inventoryMode === 'make_to_order') continue
+        if (!usesOwnStock(prod.inventoryMode)) continue
         const needed = bi.quantity * bundleQty
         const avail = await getEffectiveStock(prod, store)
         if (avail !== null && avail < needed) {
@@ -1090,7 +1094,7 @@ const loadAndPriceOrderItems = async (items, store, user = null) => {
 
     // F7: see the bundle branch — a make_to_order product is limited by its
     // recipe ingredients, never by its own (usually zero) product stock.
-    const avail = prod.inventoryMode === 'make_to_order' ? null : await getEffectiveStock(prod, store)
+    const avail = usesOwnStock(prod.inventoryMode) ? await getEffectiveStock(prod, store) : null
     if (avail !== null && avail < qty) {
       return {
         ok: false,
@@ -2009,7 +2013,7 @@ const deductStockForOrder = async (
       // below). 'hybrid' and the default 'stocked' still deduct product
       // stock exactly as before. best_selling is still recorded for every
       // mode (it's a sales-count for reporting, not a stock signal).
-      if (product.inventoryMode !== 'make_to_order') {
+      if (usesOwnStock(product.inventoryMode)) {
         // BA gap 027 (DR-14): the outlet row is the authoritative stock. It
         // is re-read under a row lock (not the unlocked pre-check earlier in
         // the request), so two concurrent sales of the last unit cannot both
@@ -2838,7 +2842,7 @@ const deductStockForPaidOrder = async (
     const product = productById.get(item.product)
     if (!product) continue
 
-    if (product.inventoryMode !== 'make_to_order') {
+    if (usesOwnStock(product.inventoryMode)) {
       const qty = Math.floor(Number(item.quantity)) || 0
       // DR-14: the outlet row is the authoritative stock, read under a row
       // lock; a missing row is 0 and is never seeded from the global stock.
@@ -4144,6 +4148,9 @@ exports.getCustomerMenu = async (req, res) => {
         (dto.inventoryMode || 'stocked') === 'stocked'
           ? null
           : recipeById.get(Number(dto.id))?.portions ?? 0
+      // A linked finished good's effective stock IS what its inventory item
+      // can sell — also for a menu app that predates inventory_item.
+      if (isInventoryItemMode(dto.inventoryMode)) dto.effectiveStock = dto.availablePortions
     }
 
     const customerCategories = categories.map((c) => {
@@ -4557,7 +4564,7 @@ exports.createCustomerOrder = async (req, res) => {
           // F7: a make_to_order product's finished-good stock is not
           // authoritative — ingredients (resolved at deduction time) are.
           // Skip the finished-good availability pre-check for that mode.
-          if (prod.inventoryMode === 'make_to_order') continue
+          if (!usesOwnStock(prod.inventoryMode)) continue
           const needed = bi.quantity * bundleQty
           const avail = await getEffectiveStock(prod, store)
           if (avail !== null && avail < needed) {
@@ -4583,7 +4590,7 @@ exports.createCustomerOrder = async (req, res) => {
       // F7: a make_to_order product's finished-good stock is not
       // authoritative — ingredients (resolved at deduction time) are.
       // Skip the finished-good availability pre-check for that mode.
-      if (prod.inventoryMode === 'make_to_order') continue
+      if (!usesOwnStock(prod.inventoryMode)) continue
       const avail = await getEffectiveStock(prod, store)
       if (avail !== null && avail < Number(item.quantity)) {
         return res.status(400).json({

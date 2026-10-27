@@ -1,5 +1,16 @@
 const db = require('../../db/models')
 const { recipeAvailability } = require('../service/recipeAvailabilityService')
+const {
+  usesOwnStock,
+  isInventoryItemMode,
+  InventoryLinkError,
+  inventoryLinkErrorBody,
+  parseInventoryLinks,
+  validateInventoryLinks,
+  storedInventoryLinks,
+  saveInventoryLinks,
+  describeInventoryLinks
+} = require('../service/inventoryLinkService')
 const Product = db.product
 const Category = db.category
 const StockHistory = db.stock_history
@@ -661,6 +672,16 @@ exports.getAllProductInTable = async (req, res) => {
 }
 
 // Function Post Add Form Product
+// Inventory links name outlets; a tenant admin may link only their own.
+const scopedInventoryLinks = (req, links) => {
+  if (!links || isSuperAdmin(req)) return links
+  const callerStore = Number(req.storeId ?? req.user?.store)
+  if (links.some((l) => l.store !== callerStore)) {
+    throw new InventoryLinkError('Anda hanya dapat menautkan item persediaan toko Anda sendiri', { statusCode: 403 })
+  }
+  return links
+}
+
 exports.postAddProduct = async (req, res) => {
   const {
     nameProduct,
@@ -693,6 +714,7 @@ exports.postAddProduct = async (req, res) => {
     currencyCode,
     tipeProduk,
     inventoryMode,
+    inventoryLinks,
     redeemPoints,
     estimationTime
   } = req.body
@@ -758,9 +780,10 @@ exports.postAddProduct = async (req, res) => {
     // product_store_stock row (0 without one), so the outlet list showed 0
     // and the sale was refused while the edit form still showed the number.
     // Reject it with a clear message instead of stranding the stock. Products
-    // that don't use their own stock (make_to_order) are exempt.
+    // that don't use their own stock (make_to_order, inventory_item) are
+    // exempt.
     const initialStockValue = Number(stock) || 0
-    const usesProductStock = String(inventoryMode || 'stocked') !== 'make_to_order'
+    const usesProductStock = usesOwnStock(inventoryMode)
     if (parsedStores.length === 0 && initialStockValue > 0 && usesProductStock) {
       return res.status(400).json({
         success: false,
@@ -868,14 +891,25 @@ exports.postAddProduct = async (req, res) => {
       })
     }
 
+    // BRD BR-02/FR-06: a finished good linked to an inventory item takes
+    // its stock, cost and minimum from the item — none are stored on the
+    // product. The links are checked before anything is written.
+    const linksInventoryItem = isInventoryItemMode(inventoryMode)
+    const validatedLinks = linksInventoryItem
+      ? await validateInventoryLinks({
+          links: scopedInventoryLinks(req, parseInventoryLinks(inventoryLinks)) || [],
+          stores: parsedStores
+        })
+      : null
+
     const postData = await Product.create({
       nameProduct: nameProduct || null,
       category: normalizedCategory,
       description,
       price: price || 0,
       costPrice: costPrice || 0,
-      stock: stock || 0,
-      minStock: minStock || 0,
+      stock: linksInventoryItem ? 0 : stock || 0,
+      minStock: linksInventoryItem ? 0 : minStock || 0,
       unit,
       baseUnit: baseUnit || unit || 'pcs',
       conversionFactor:
@@ -923,7 +957,18 @@ exports.postAddProduct = async (req, res) => {
       await syncProductStores(postData.id, parsedStores)
     }
 
-    const initialStock = Number(stock) || 0
+    if (validatedLinks) {
+      try {
+        await db.sequelize.transaction((t) => saveInventoryLinks(postData.id, validatedLinks, t))
+      } catch (linkError) {
+        // Never leave a linked product without its links: it could not be sold.
+        await db.product_store.destroy({ where: { product: postData.id } })
+        await postData.destroy({ force: true })
+        throw linkError
+      }
+    }
+
+    const initialStock = linksInventoryItem ? 0 : Number(stock) || 0
     if (parsedStores.length > 0) {
       const perStore = Math.floor(initialStock / parsedStores.length)
       const remainder = initialStock - perStore * parsedStores.length
@@ -972,6 +1017,9 @@ exports.postAddProduct = async (req, res) => {
       data: postData
     })
   } catch (error) {
+    if (error instanceof InventoryLinkError) {
+      return res.status(error.statusCode).json(inventoryLinkErrorBody(error))
+    }
     console.error('Error =>', error)
     return res.status(500).json({
       success: false,
@@ -1013,6 +1061,7 @@ exports.editProductByLocationAndId = async (req, res) => {
     currencyCode,
     tipeProduk,
     inventoryMode,
+    inventoryLinks,
     redeemPoints,
     estimationTime
   } = req.body
@@ -1134,6 +1183,26 @@ exports.editProductByLocationAndId = async (req, res) => {
       }
     }
 
+    // BRD BR-02: after this edit, does the product take its stock from an
+    // inventory item? Then every outlet selling it needs a link — the ones
+    // sent here plus those already stored — and its own stock is left alone.
+    const resultingMode = inventoryMode !== undefined ? inventoryMode : getAllProductByIdAndLocation.inventoryMode
+    const linksInventoryItem = isInventoryItemMode(resultingMode)
+    let validatedLinks = null
+    if (linksInventoryItem) {
+      const sellingStores =
+        stores !== undefined
+          ? parsedStores
+          : (
+              await db.product_store.findAll({ where: { product: id }, attributes: ['store'], raw: true })
+            ).map((r) => Number(r.store))
+      validatedLinks = await validateInventoryLinks({
+        links: scopedInventoryLinks(req, parseInventoryLinks(inventoryLinks)) || [],
+        existing: await storedInventoryLinks(id),
+        stores: sellingStores
+      })
+    }
+
     let parsedPriceTiers = []
     if (priceTiers) {
       try {
@@ -1224,6 +1293,10 @@ exports.editProductByLocationAndId = async (req, res) => {
       ...(actorId !== null && actorId > 0 ? { modifiedBy: actorId } : {})
     }
 
+    if (linksInventoryItem) {
+      delete reqBody.stock
+      delete reqBody.minStock
+    }
     const newStock = Number(reqBody.stock) || 0
     // HIGH-7: storeId for per-store shadow stock must derive from trusted
     // server-side context (req.storeId / JWT claim), never unvalidated cookies.
@@ -1251,7 +1324,7 @@ exports.editProductByLocationAndId = async (req, res) => {
         transaction: t
       })
       oldStock = Number(lockedProduct.stock) || 0
-      stockDiff = newStock - oldStock
+      stockDiff = linksInventoryItem ? 0 : newStock - oldStock
 
       const [, editRows] = await Product.update(reqBody, {
         returning: true,
@@ -1264,6 +1337,8 @@ exports.editProductByLocationAndId = async (req, res) => {
       if (stores !== undefined) {
         await syncProductStores(id, parsedStores, t)
       }
+
+      if (validatedLinks) await saveInventoryLinks(Number(id), validatedLinks, t)
 
       // Update per-store stock for the current store — atomic upsert + adjust
       if (storeId && stockDiff !== 0) {
@@ -1331,6 +1406,9 @@ exports.editProductByLocationAndId = async (req, res) => {
       data: editLocation?.dataValues
     })
   } catch (error) {
+    if (error instanceof InventoryLinkError) {
+      return res.status(error.statusCode).json(inventoryLinkErrorBody(error))
+    }
     console.error('ERROR =>', error)
     return res.status(500).json({
       success: false,
@@ -2128,6 +2206,11 @@ exports.getProductById = async (req, res) => {
       id: storeId,
       name: locationMap[storeId] || null
     }))
+    // FR-02: stock, minimum and cost of a linked finished good, per outlet,
+    // read from its inventory item. A store-bound caller sees its own.
+    data.inventoryLinks = isInventoryItemMode(data.inventoryMode)
+      ? await describeInventoryLinks(Number(id), { store: isSuperAdmin(req) ? null : req.storeId ?? null })
+      : []
 
     return res.status(200).json({
       success: true,

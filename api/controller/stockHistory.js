@@ -3,11 +3,13 @@ const { Op } = require('sequelize')
 const { enrichAuditFields } = require('../../utils/auditFields')
 const { createAudit } = require('../../utils/auditLog')
 const { scalarStoreScope, isSuperAdmin, resolveStoreId } = require('../../utils/tenantScope')
+const { OWN_STOCK_MODES } = require('../service/inventoryLinkService')
 
-// A make_to_order product never uses its own stock (its ingredients carry
-// the minimum), so it is never "low on stock" (BRD BR-03/BR-07).
+// A make_to_order or inventory_item product never uses its own stock (its
+// ingredients / inventory item carry the minimum), so it is never "low on
+// stock" (BRD BR-02/BR-03/BR-07).
 const usesOwnStock = {
-  [Op.or]: [{ inventoryMode: null }, { inventoryMode: { [Op.ne]: 'make_to_order' } }]
+  [Op.or]: [{ inventoryMode: null }, { inventoryMode: OWN_STOCK_MODES }]
 }
 
 const stockHistoryController = {

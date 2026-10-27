@@ -196,7 +196,40 @@ function costedProductIds(items, bundleMap) {
   return ids
 }
 
+// HPP / food-cost / composition snapshot onto the product, from the BOM's
+// current lines, yield and the ingredients' current cost per base unit —
+// the same recipeCosting rule the costing endpoint and the sale snapshot
+// use. A recipe with an uncosted line stores 0 (unknown), never a partial
+// sum. BA finding #4: costs are per BASE unit (5 butir, not 5 kg).
+const refreshProductCosting = async (productId, bomLines, ingredients, transaction, yieldQty = 1) => {
+  const prod = await db.product.findByPk(productId, { transaction })
+  if (!prod || bomLines.length === 0) return
+  const costing = recipeCosting({
+    lines: bomLines,
+    ingredientById: new Map(ingredients.map((i) => [i.id, i])),
+    yieldQty
+  })
+  const hpp = costing.status === 'auto' ? Math.round(costing.hppPerPortion) : 0
+  const price = Number(prod.price || 0)
+  const foodCostPersen =
+    hpp > 0 && price > 0 ? Math.min(999.99, parseFloat(((hpp / price) * 100).toFixed(2))) : 0
+  const marginPersen =
+    hpp > 0 && price > 0 ? Math.max(0, parseFloat(((1 - hpp / price) * 100).toFixed(2))) : 0
+  const composition = bomLines.map((l) => {
+    const ing = ingredients.find((i) => i.id === l.ingredientId)
+    return {
+      ingredientId: l.ingredientId,
+      name: ing?.name || 'Unknown',
+      qty: l.qty,
+      // The BOM quantity is in the base unit (5 butir, not 5 kg).
+      unit: l.unit || ing?.baseUnit || 'pcs'
+    }
+  })
+  await prod.update({ hppPerPorsi: hpp, foodCostPersen, marginPersen, composition }, { transaction })
+}
+
 module.exports = {
+  refreshProductCosting,
   ingredientBaseUnitCost,
   ingredientPurchaseUnitCost,
   recipeYield,

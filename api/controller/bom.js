@@ -1,13 +1,19 @@
 const db = require('../../db/models')
 const { Op } = require('sequelize')
 const { enrichAuditFields } = require('../../utils/auditFields')
-const { recipeCosting, recipeYield } = require('../service/itemCostService')
+const { recipeCosting, recipeYield, refreshProductCosting } = require('../service/itemCostService')
 const { createAudit } = require('../../utils/auditLog')
 const { adoptRecipeMode } = require('../service/recipeModeService')
+const { INVENTORY_ITEM_MODE } = require('../service/inventoryLinkService')
 
 // Thrown inside the authoring transaction to refuse a BOM with a 400 —
 // nothing is written.
-class BomAuthoringError extends Error {}
+class BomAuthoringError extends Error {
+  constructor(message, statusCode = 400) {
+    super(message)
+    this.statusCode = statusCode
+  }
+}
 
 // Authoring validation shared by create and update, run before any write so
 // a refused request leaves the previous, still-valid BOM untouched. Mirrors
@@ -62,38 +68,6 @@ const parseYield = (value) => {
   return n
 }
 
-// HPP / food-cost / composition snapshot onto the product, from the BOM's
-// current lines, yield and the ingredients' current cost per base unit —
-// the same recipeCosting rule the costing endpoint and the sale snapshot
-// use. A recipe with an uncosted line stores 0 (unknown), never a partial
-// sum. BA finding #4: costs are per BASE unit (5 butir, not 5 kg).
-const refreshProductCosting = async (productId, bomLines, ingredients, transaction, yieldQty = 1) => {
-  const prod = await db.product.findByPk(productId, { transaction })
-  if (!prod || bomLines.length === 0) return
-  const costing = recipeCosting({
-    lines: bomLines,
-    ingredientById: new Map(ingredients.map((i) => [i.id, i])),
-    yieldQty
-  })
-  const hpp = costing.status === 'auto' ? Math.round(costing.hppPerPortion) : 0
-  const price = Number(prod.price || 0)
-  const foodCostPersen =
-    hpp > 0 && price > 0 ? Math.min(999.99, parseFloat(((hpp / price) * 100).toFixed(2))) : 0
-  const marginPersen =
-    hpp > 0 && price > 0 ? Math.max(0, parseFloat(((1 - hpp / price) * 100).toFixed(2))) : 0
-  const composition = bomLines.map((l) => {
-    const ing = ingredients.find((i) => i.id === l.ingredientId)
-    return {
-      ingredientId: l.ingredientId,
-      name: ing?.name || 'Unknown',
-      qty: l.qty,
-      // The BOM quantity is in the base unit (5 butir, not 5 kg).
-      unit: l.unit || ing?.baseUnit || 'pcs'
-    }
-  })
-  await prod.update({ hppPerPorsi: hpp, foodCostPersen, marginPersen, composition }, { transaction })
-}
-
 // Live HPP of each BOM (bom_header rows with `lines`), read at the
 // ingredients' current cost — never the snapshot stored on the product,
 // which is global while recipes are per outlet. Returns bomId → costing.
@@ -131,6 +105,19 @@ const costingForBoms = async (boms) => {
 
 const withCosting = (bom, costing) => ({ ...bom.toJSON(), costing: costing.get(bom.id) || null })
 
+// A finished good linked to an inventory item (BRD BR-02) keeps its link
+// as a one-line outlet BOM, owned by the product form — it is not a recipe
+// to edit or delete here.
+const assertNotInventoryLink = async (productId, transaction) => {
+  const product = await db.product.findByPk(productId, { attributes: ['inventoryMode'], transaction })
+  if (product?.inventoryMode === INVENTORY_ITEM_MODE) {
+    throw new BomAuthoringError(
+      'Produk ini tertaut ke item persediaan. Ubah tautannya dari halaman produk.',
+      409
+    )
+  }
+}
+
 // Saving an active BOM moves a 'stocked' product to make_to_order; the
 // rules are in recipeModeService.
 const auditRecipeMode = (req, productId) =>
@@ -162,7 +149,8 @@ const bomController = {
           {
             model: db.product,
             as: 'productData',
-            attributes: ['id', 'nameProduct', 'sku']
+            attributes: ['id', 'nameProduct', 'sku'],
+            where: { inventoryMode: { [Op.ne]: INVENTORY_ITEM_MODE } }
           },
           {
             model: db.bom_line,
@@ -176,6 +164,7 @@ const bomController = {
             ]
           }
         ],
+        distinct: true,
         order: [['updatedAt', 'DESC']],
         limit: parseInt(limit),
         offset
@@ -355,6 +344,7 @@ const bomController = {
       }
 
       const created = await db.sequelize.transaction(async (t) => {
+        await assertNotInventoryLink(productId, t)
         const existing = await db.bom_header.findOne({ where: { productId, store }, transaction: t })
         if (existing) throw new BomAuthoringError('BOM already exists for this product')
 
@@ -394,7 +384,7 @@ const bomController = {
         .json({ success: true, message: 'BOM created', data: result, recipeModeAdopted: created.recipeModeAdopted })
     } catch (error) {
       if (error instanceof BomAuthoringError) {
-        return res.status(400).json({ success: false, message: error.message })
+        return res.status(error.statusCode).json({ success: false, message: error.message })
       }
       console.error('Error =>', error)
       return res
@@ -415,6 +405,7 @@ const bomController = {
       const outcome = await db.sequelize.transaction(async (t) => {
         const bom = await db.bom_header.findOne({ where, transaction: t, lock: t.LOCK.UPDATE })
         if (!bom) return null
+        await assertNotInventoryLink(bom.productId, t)
 
         // Lines are validated against the BOM's OWN store before anything is
         // written; a refused update leaves header and lines untouched.
@@ -469,7 +460,7 @@ const bomController = {
         .json({ success: true, message: 'BOM updated', data: result, recipeModeAdopted: outcome.recipeModeAdopted })
     } catch (error) {
       if (error instanceof BomAuthoringError) {
-        return res.status(400).json({ success: false, message: error.message })
+        return res.status(error.statusCode).json({ success: false, message: error.message })
       }
       console.error('Error =>', error)
       return res
@@ -489,6 +480,7 @@ const bomController = {
         return res
           .status(404)
           .json({ success: false, message: 'BOM not found' })
+      await assertNotInventoryLink(bom.productId)
 
       await db.bom_line.destroy({ where: { bomHeaderId: id } })
       await bom.destroy()
@@ -507,6 +499,9 @@ const bomController = {
       createAudit(req, 'delete', 'bom', bom.id, `Deleted BOM ${bom.id} (product ${bom.productId})`)
       return res.status(200).json({ success: true, message: 'BOM deleted' })
     } catch (error) {
+      if (error instanceof BomAuthoringError) {
+        return res.status(error.statusCode).json({ success: false, message: error.message })
+      }
       console.error('Error =>', error)
       return res
         .status(500)

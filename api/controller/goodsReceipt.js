@@ -21,6 +21,11 @@ const {
   calculatePurchaseOrderFulfillmentStatus
 } = require('../service/purchaseOrderFulfillmentService')
 const { assertQuantityForUnit } = require('../../utils/unit')
+const {
+  assertNoOwnStockWrites,
+  InventoryLinkError,
+  inventoryLinkErrorBody
+} = require('../service/inventoryLinkService')
 
 const generateReceiptNo = () => {
   const date = new Date()
@@ -403,6 +408,8 @@ const voidReceiptBatches = async ({ receiptNumber, items, store, transaction }) 
 }
 
 const applyStock = async (items, receipt, transaction, userId) => {
+  // BRD BR-01: a product linked to an inventory item is received as the item.
+  await assertNoOwnStockWrites(items.map((i) => i.product), transaction)
   for (const item of items) {
     const qty = Number(item.qtyReceived) || 0
     if (!Number.isFinite(qty) || qty <= 0) continue
@@ -736,6 +743,8 @@ const goodsReceiptController = {
           message: `Duplicate item(s) in goods receipt: ${[...new Set(dupes)].join(', ')}`
         })
       }
+      // BRD BR-01: a product linked to an inventory item is received as the item.
+      await assertNoOwnStockWrites(items.map((i) => i.product))
 
       const { idempotencyKey } = req.body
       // T-10 idempotency: same key returns same GR without duplicating stock/journal
@@ -1149,6 +1158,9 @@ const goodsReceiptController = {
         throw err
       }
     } catch (error) {
+      if (error instanceof InventoryLinkError) {
+        return res.status(error.statusCode).json(inventoryLinkErrorBody(error))
+      }
       // Destructured locals (idempotencyKey, items) live inside the try
       // above — re-read them from the request body here.
       const catchKey = req.body?.idempotencyKey
@@ -1724,6 +1736,9 @@ const goodsReceiptController = {
         data: updated
       })
     } catch (error) {
+      if (error instanceof InventoryLinkError) {
+        return res.status(error.statusCode).json(inventoryLinkErrorBody(error))
+      }
       console.error(error)
       return res
         .status(500)
@@ -2100,6 +2115,9 @@ const goodsReceiptController = {
         })
       })
     } catch (error) {
+      if (error instanceof InventoryLinkError) {
+        return res.status(error.statusCode).json(inventoryLinkErrorBody(error))
+      }
       console.error(error)
       return res
         .status(500)
