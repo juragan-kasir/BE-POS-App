@@ -212,7 +212,9 @@ exports.addNewPosition = async (req, res) => {
       if (creadtedPosition.getDataValue) {
         return res.status(200).json({
           success: true,
-          message: 'Position Berhasil Di Buat'
+          message: 'Position Berhasil Di Buat',
+          // The client opens the new record from its success notice.
+          data: creadtedPosition
         })
       }
     }

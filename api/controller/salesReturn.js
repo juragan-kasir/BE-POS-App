@@ -30,8 +30,20 @@ const salesReturnController = {
         startDate,
         endDate,
         store: queryStore,
-        search
+        search,
+        orderId
       } = req.query
+
+      // The order detail page lists the returns made against one sale.
+      const orderFilter = orderId === undefined ? null : Number(orderId)
+      if (
+        orderFilter !== null &&
+        !(Number.isInteger(orderFilter) && orderFilter > 0)
+      ) {
+        return res
+          .status(400)
+          .json({ success: false, message: 'orderId harus berupa angka' })
+      }
 
       // super_admin may optionally filter by a specific store (or see
       // every store when omitted); scalarStoreScope forces everyone else
@@ -41,6 +53,7 @@ const salesReturnController = {
       const where = {}
       if (queryStore) where.store = queryStore
       if (status) where.status = status
+      if (orderFilter) where.order = orderFilter
       if (search) {
         where[Op.or] = [
           { returnNumber: { [Op.iLike]: `%${search}%` } },

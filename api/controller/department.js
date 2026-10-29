@@ -190,7 +190,9 @@ exports.addNewDepartment = async (req, res) => {
       if (creadtedDepartment.getDataValue) {
         return res.status(200).json({
           success: true,
-          message: 'Department Berhasil Di Buat'
+          message: 'Department Berhasil Di Buat',
+          // The client opens the new record from its success notice.
+          data: creadtedDepartment
         })
       }
     }
