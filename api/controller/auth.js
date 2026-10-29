@@ -3,7 +3,7 @@ const User = db.user
 const Location = db.location
 const Position = db.position
 const generateToken = require('../../utils/jwtConvert')
-const { credentialWindow } = require('../../utils/jwtConvert')
+const { credentialWindow, lifetimeFor } = require('../../utils/jwtConvert')
 const {
   createContextSession,
   revokeContextSession,
@@ -487,7 +487,7 @@ exports.getAllUser = async (req, res) => {
 }
 
 exports.login = async (req, res) => {
-  const { userName, password } = req.body
+  const { userName, password, rememberMe } = req.body
 
   if (!userName || !password) {
     return res
@@ -606,7 +606,10 @@ exports.login = async (req, res) => {
     // failure (including session creation) rolls back and reaches the
     // catch below — login fails closed, never with a sessionless JWT.
     const verifiedHash = findUser.password
-    const credential = credentialWindow()
+    const credential = credentialWindow(
+      Date.now(),
+      lifetimeFor(rememberMe === true)
+    )
     const outcome = await db.sequelize.transaction(async (t) => {
       const current = await User.scope('withCredentials').findOne({
         where: { id: findUser.id },
