@@ -39,8 +39,14 @@ const makeUser = async (key, attrs = {}) => {
   return row
 }
 
-const login = (user, password = PASSWORD) =>
-  request(app).post('/auth/login').send({ userName: user.userName, password })
+const login = (user, { password = PASSWORD, rememberMe } = {}) =>
+  request(app)
+    .post('/auth/login')
+    .send({
+      userName: user.userName,
+      password,
+      ...(rememberMe === undefined ? {} : { rememberMe })
+    })
 
 const sessionCountFor = (userId) => db.authorizationContextSession.count({ where: { userId } })
 const presenceOf = async (id) => (await db.user.findByPk(id, { paranoid: false })).status
@@ -140,6 +146,53 @@ describe('P1 single authentication lifetime', () => {
     } finally {
       if (previous === undefined) delete process.env.JWT_EXPIRED_IN
       else process.env.JWT_EXPIRED_IN = previous
+    }
+  })
+})
+
+describe('P1 remember-me lifetime', () => {
+  const defaultLifetime = (iat) =>
+    timespan(process.env.JWT_EXPIRED_IN || '1d', iat) - iat
+  const rememberLifetime = (iat) =>
+    timespan(process.env.JWT_REMEMBER_ME_EXPIRED_IN || '30d', iat) - iat
+
+  test('rememberMe extends the JWT and session lifetime', async () => {
+    const u = await makeUser('remember')
+
+    const res = await login(u, { rememberMe: true })
+
+    expect(res.status).toBe(200)
+    const claims = jwt.decode(res.body.token)
+    expect(claims.exp - claims.iat).toBe(rememberLifetime(claims.iat))
+    const session = await db.authorizationContextSession.findOne({
+      where: { sessionId: claims.sessionId }
+    })
+    expect(new Date(session.expiresAt).getTime()).toBe(claims.exp * 1000)
+  })
+
+  test('rememberMe false keeps the default authentication lifetime', async () => {
+    const u = await makeUser('no-remember')
+
+    const res = await login(u, { rememberMe: false })
+
+    expect(res.status).toBe(200)
+    const claims = jwt.decode(res.body.token)
+    expect(claims.exp - claims.iat).toBe(defaultLifetime(claims.iat))
+  })
+
+  test('JWT_REMEMBER_ME_EXPIRED_IN overrides the remember-me lifetime', async () => {
+    const u = await makeUser('remember-env')
+    const previous = process.env.JWT_REMEMBER_ME_EXPIRED_IN
+    process.env.JWT_REMEMBER_ME_EXPIRED_IN = '7d'
+    try {
+      const res = await login(u, { rememberMe: true })
+
+      expect(res.status).toBe(200)
+      const claims = jwt.decode(res.body.token)
+      expect(claims.exp - claims.iat).toBe(7 * 24 * 60 * 60)
+    } finally {
+      if (previous === undefined) delete process.env.JWT_REMEMBER_ME_EXPIRED_IN
+      else process.env.JWT_REMEMBER_ME_EXPIRED_IN = previous
     }
   })
 })

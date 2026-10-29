@@ -92,7 +92,8 @@ No auth required. Rate limited: 30 attempts / 15 min.
 ```json
 {
   "userName": "string (required)",
-  "password": "string (required)"
+  "password": "string (required)",
+  "rememberMe": "boolean (optional, default false)"
 }
 ```
 

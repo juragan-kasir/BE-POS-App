@@ -142,7 +142,8 @@ const inventoryModeEnum = inventoryModeEnumBase.optional().default('stocked')
 // ===================== Auth =====================
 exports.loginSchema = z.object({
   userName: z.string().min(1, 'Username/email is required'),
-  password: z.string().min(1, 'Password is required')
+  password: z.string().min(1, 'Password is required'),
+  rememberMe: z.boolean().optional().default(false)
 })
 
 // Public self-registration. Caller-controlled tenant/privilege fields
