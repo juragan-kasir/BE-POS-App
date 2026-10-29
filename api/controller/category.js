@@ -497,7 +497,9 @@ exports.addNewCategory = async (req, res) => {
 
       return res.status(200).json({
         success: true,
-        message: 'Category Berhasil Di Buat'
+        message: 'Category Berhasil Di Buat',
+        // The client opens the new record from its success notice.
+        data: createdCategory
       })
     }
     return res.status(500).json({
