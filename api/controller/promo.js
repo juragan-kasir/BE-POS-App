@@ -4,6 +4,7 @@ const { enrichAuditFields } = require('../../utils/auditFields')
 const { emitToStore } = require('../service/socket')
 const { arrayStoreScope } = require('../../utils/tenantScope')
 const { incrementPromoUsage } = require('../service/promoUsageService')
+const { buyXGetYCondition, isActiveOnDay } = require('../../utils/promoRuleCondition')
 const { createAudit } = require('../../utils/auditLog')
 
 // Campaigns shown to diners in the QR app (BISA lists them on the payment page).
@@ -459,7 +460,7 @@ const promoController = {
           continue
         }
 
-        if (campaign.daysOfWeek && !campaign.daysOfWeek.includes(currentDay)) {
+        if (!isActiveOnDay(campaign.daysOfWeek, currentDay)) {
           continue
         }
 
@@ -493,7 +494,7 @@ const promoController = {
         if (campaign.type === 'buy_x_get_y' && cartItems) {
           const rule = campaign.rules.find((r) => r.ruleType === 'buy_x_get_y')
           if (rule) {
-            const { buyProductId, buyQuantity } = rule.condition
+            const { buyProductId, buyQuantity } = buyXGetYCondition(rule.condition)
             const cartItem = cartItems.find(
               (item) => item.productId === buyProductId
             )

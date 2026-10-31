@@ -19,6 +19,7 @@ const { emitItemStatusUpdate, emitNewOrder } = require('../service/socket')
 const batchService = require('../service/batchService')
 const { adjustMemberPoints, maybeUpgradeMemberTier, computeEarnedPoints, awardEarnedPointsOnce, reverseEarnedPoints } = require('../service/loyaltyService')
 const { incrementPromoUsage } = require('../service/promoUsageService')
+const { buyXGetYCondition, spendThreshold } = require('../../utils/promoRuleCondition')
 const {
   enqueueAccountingJob,
   attemptJob,
@@ -533,7 +534,7 @@ const evaluatePromoCampaign = async (items, store, customerId, subtotal) => {
 
       switch (rule.ruleType) {
         case 'buy_x_get_y': {
-          const { buyProductId, buyQuantity } = rule.condition || {}
+          const { buyProductId, buyQuantity } = buyXGetYCondition(rule.condition)
           const cartItem = items.find(
             (item) => (item.product || item.productId) === buyProductId
           )
@@ -543,7 +544,7 @@ const evaluatePromoCampaign = async (items, store, customerId, subtotal) => {
           break
         }
         case 'spend_threshold': {
-          if (subtotal < ((rule.condition && rule.condition.minSpend) || 0)) {
+          if (subtotal < spendThreshold(rule.condition)) {
             isEligible = false
           }
           break
