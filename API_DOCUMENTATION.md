@@ -434,7 +434,7 @@ Auth required. Products for cashier view.
 ### GET `/product/get-product-by-super-admin`
 Auth required.
 
-**Query:** `page`, `limit`, `search`, `store`.
+**Query:** `page`, `limit`, `search`, `store`. `search` matches `nameProduct`, `sku` or `barcode` (case-insensitive, contains), so a scanned or typed EAN finds its product. `GET /product/get-product-all` searches the same three fields.
 
 **Response:** Same as above with pagination. Each product also carries `effectivePrice` (integer): the outlet price for the resolved store when one exists, otherwise the base `price`; `null` when no store is resolved. `price` stays the base price.
 
@@ -539,6 +539,8 @@ Auth required (super_admin/admin). Content-Type: `multipart/form-data`.
 | `composition` | JSON array | No | `[]` |
 | `redeemPoints` | number | No | `0` |
 | `image` | file | No | null |
+
+**Name uniqueness (per tenant).** `nameProduct` must be unique within the business that owns the target `stores`, not across every business: another tenant may use the same name. The name is taken when an existing product with the same name is assigned to a store of the same tenant, or is assigned to no store at all (such a product is listed in every store). A product created without `stores` is checked against every product. Stores without a tenant form one shared group. A clash answers `409 {"success":false,"code":"NAME_TAKEN","field":"nameProduct","message":"Product with this name already exists."}` before any upload or write.
 
 `inventoryMode: hybrid` is retired (BRD phase 4F): a product that already has it keeps it on any edit and may leave it, but a new product, or a switch from another mode, is 400 `INVENTORY_MODE_RETIRED` (`field: inventoryMode`). `npm run report:hybrid-products [--json]` lists the hybrid products read-only with a suggested mode (production orders → `stocked`; an active recipe at every selling outlet → `make_to_order`; else `stocked`).
 
@@ -663,16 +665,18 @@ Auth required (super_admin/admin).
 }
 ```
 
+**Name uniqueness (per tenant).** `name` must be unique within the tenant of the target `store` list; another business may use the same name. The name is taken when a category with the same name is assigned to a store of the same tenant or to no store; a category created without stores is checked against every category. A clash answers `409 {"success":false,"code":"NAME_TAKEN","field":"name","message":"Category Sudah Terdaftar"}` (previously 403 and global).
+
 ---
 
 ### PUT `/category/edit-category/:id`
-Auth required (super_admin/admin). Same fields, all optional.
+Auth required (super_admin/admin). Same fields, all optional. A rename is checked the same way, against the category's stores (the `store` sent, else its current assignment) and excluding itself: `409 NAME_TAKEN` `"Kategori Sudah Tersedia"` (previously 403 and global).
 
 ### DELETE `/category/delete-category/:id`
 Auth required (super_admin/admin).
 
 ### GET `/category/download-template`, GET `/category/download`, POST `/category/upload-excel`
-Auth required (super_admin/admin). Import uses multipart/form-data with `file` field.
+Auth required (super_admin/admin). Import uses multipart/form-data with `file` field. A row whose name is already taken in the import store's tenant is skipped and listed in `skippedNames` (`Kategori "<name>" sudah terdaftar`).
 
 ---
 
@@ -1052,30 +1056,37 @@ Auth required (super_admin/admin).
 }
 ```
 
+**Identity uniqueness (per store bucket).** Name, phone and email are each unique within the member's store; members with `store: null` share one bucket. The same phone or email may therefore belong to members of different stores (e.g. two businesses). Phones are stored as canonical E.164 (`0813…` and `+62813…` are the same number). Clashes answer `409` with `Nama member sudah terdaftar`, `Nomor telepon sudah terdaftar` or `Email sudah terdaftar`. Enforced by the partial unique indexes `uq_member_store_name_ci` / `uq_member_global_name_ci`, `uq_member_store_phone_e164` / `uq_member_global_phone_e164` and `uq_member_store_email_ci` / `uq_member_global_email_ci` (migration `20261031000001`; phone and email were global before).
+
 ---
 
 ### PUT `/member/edit-member/:id`
-Auth required (super_admin/admin). Same fields, all optional.
+Auth required (super_admin/admin). Same fields, all optional. Phone and email are checked inside the member's own store bucket.
 
 ### DELETE `/member/delete-member/:id`
 Auth required (super_admin/admin).
 
 ### PUT `/member/edit-point-member/:phoneNumber`
-Auth required.
+Auth required (super_admin/admin). Adds `points` (negative to redeem) to the member found by `:phoneNumber` (any format, matched on canonical E.164) or by numeric member id, and writes a `member_point_history` row. The lookup stays inside the caller's store (`?store=` for super_admin).
 
 **Request:**
 ```json
-{ "point": "number (required)" }
+{ "points": "number (required; negative subtracts)" }
 ```
 
 **Response:**
 ```json
 {
   "success": true,
-  "message": "Points updated",
-  "data": { "point": 2000 }
+  "message": "Sukses",
+  "data": { "id": 1, "name": "John Doe", "totalPoints": 2000, "lifetimePoints": 2000 }
 }
 ```
+
+Key errors:
+- 400 `Poin tidak cukup untuk diredeem` (the result would go below 0).
+- 403 `Member Tidak Ditemukan` (no match in scope).
+- 409 `{"code":"MEMBER_STORE_REQUIRED","message":"Nomor telepon terdaftar di lebih dari satu toko. Pilih toko terlebih dahulu."}`: a caller without a store matched members of several stores. Pass `?store=`. Nothing is changed.
 
 ---
 

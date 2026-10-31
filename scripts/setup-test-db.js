@@ -32,8 +32,10 @@ const TEST_DB = process.env.DB_TEST_DATABASE || 'cashier_app_test'
 const D05_MEMBER_INDEXES = [
   'uq_member_store_name_ci',
   'uq_member_global_name_ci',
-  'uq_member_phone_e164',
-  'uq_member_email_ci'
+  'uq_member_store_phone_e164',
+  'uq_member_global_phone_e164',
+  'uq_member_store_email_ci',
+  'uq_member_global_email_ci'
 ]
 const D05_OBSOLETE_MEMBER_CONSTRAINTS = [
   'uq_member_name',
@@ -148,15 +150,19 @@ module.exports = async () => {
       END $$;`
     ])
   }
-  run('psql', [
-    '-h', DB_HOST, '-p', DB_PORT, '-U', DB_USER, '-d', TEST_DB,
-    '-c', `DROP INDEX IF EXISTS uq_member_global_name`
-  ])
+  for (const stale of ['uq_member_global_name', 'uq_member_phone_e164', 'uq_member_email_ci']) {
+    run('psql', [
+      '-h', DB_HOST, '-p', DB_PORT, '-U', DB_USER, '-d', TEST_DB,
+      '-c', `DROP INDEX IF EXISTS ${stale}`
+    ])
+  }
   for (const ddl of [
     `CREATE UNIQUE INDEX IF NOT EXISTS uq_member_store_name_ci ON "member" (store, (LOWER(TRIM(name)))) WHERE store IS NOT NULL AND "deletedAt" IS NULL`,
     `CREATE UNIQUE INDEX IF NOT EXISTS uq_member_global_name_ci ON "member" ((LOWER(TRIM(name)))) WHERE store IS NULL AND "deletedAt" IS NULL`,
-    `CREATE UNIQUE INDEX IF NOT EXISTS uq_member_phone_e164 ON "member" ("phoneNumber") WHERE "deletedAt" IS NULL AND "phoneNumber" NOT LIKE 'GUEST-%'`,
-    `CREATE UNIQUE INDEX IF NOT EXISTS uq_member_email_ci ON "member" ((LOWER(TRIM(email)))) WHERE "deletedAt" IS NULL AND email IS NOT NULL`
+    `CREATE UNIQUE INDEX IF NOT EXISTS uq_member_store_phone_e164 ON "member" (store, "phoneNumber") WHERE store IS NOT NULL AND "deletedAt" IS NULL AND "phoneNumber" NOT LIKE 'GUEST-%'`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS uq_member_global_phone_e164 ON "member" ("phoneNumber") WHERE store IS NULL AND "deletedAt" IS NULL AND "phoneNumber" NOT LIKE 'GUEST-%'`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS uq_member_store_email_ci ON "member" (store, (LOWER(TRIM(email)))) WHERE store IS NOT NULL AND "deletedAt" IS NULL AND email IS NOT NULL`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS uq_member_global_email_ci ON "member" ((LOWER(TRIM(email)))) WHERE store IS NULL AND "deletedAt" IS NULL AND email IS NOT NULL`
   ]) {
     run('psql', [
       '-h', DB_HOST, '-p', DB_PORT, '-U', DB_USER, '-d', TEST_DB,

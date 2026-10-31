@@ -28,7 +28,11 @@ const MEMBER_UNIQUE_MESSAGES = {
   uq_member_store_name_ci: 'Nama member sudah terdaftar',
   uq_member_global_name_ci: 'Nama member sudah terdaftar',
   uq_member_phone_e164: 'Nomor telepon sudah terdaftar',
-  uq_member_email_ci: 'Email sudah terdaftar'
+  uq_member_email_ci: 'Email sudah terdaftar',
+  uq_member_store_phone_e164: 'Nomor telepon sudah terdaftar',
+  uq_member_global_phone_e164: 'Nomor telepon sudah terdaftar',
+  uq_member_store_email_ci: 'Email sudah terdaftar',
+  uq_member_global_email_ci: 'Email sudah terdaftar'
 }
 
 const INVALID_PHONE_MESSAGE = 'Nomor telepon tidak valid'
@@ -269,10 +273,11 @@ exports.addNewMember = async (req, res) => {
           .json({ success: false, message: 'Nama member sudah terdaftar' })
       }
     }
-    // D-05: phone identity is global (no store bucket) on canonical E.164.
+    // Phone and email are unique per store bucket, like names (2026-10-31).
+    const storeBucket = store !== null ? { store } : { store: null }
     if (phoneInput.kind === 'phone') {
       const phoneExists = await Member.findOne({
-        where: { phoneNumber: phoneInput.value },
+        where: { phoneNumber: phoneInput.value, ...storeBucket },
         raw: true
       })
       if (phoneExists) {
@@ -281,13 +286,13 @@ exports.addNewMember = async (req, res) => {
           .json({ success: false, message: 'Nomor telepon sudah terdaftar' })
       }
     }
-    // D-05: email identity is global (no store bucket).
     if (body?.email) {
       const emailExists = await Member.findOne({
         where: {
           [Op.and]: [
             sameIdentity('email', body.email),
-            { email: { [Op.ne]: null } }
+            { email: { [Op.ne]: null } },
+            storeBucket
           ]
         },
         raw: true
@@ -417,12 +422,13 @@ exports.editMember = async (req, res) => {
           .json({ success: false, message: 'Nama member sudah terdaftar' })
       }
     }
-    // D-05: phone/email identity is global (no store bucket).
+    const memberBucket = member.store ? { store: member.store } : { store: null }
     if (phoneInput.kind === 'phone') {
       const phoneExists = await Member.findOne({
         where: {
           phoneNumber: phoneInput.value,
-          id: { [Op.ne]: id }
+          id: { [Op.ne]: id },
+          ...memberBucket
         },
         raw: true
       })
@@ -438,7 +444,8 @@ exports.editMember = async (req, res) => {
           [Op.and]: [
             sameIdentity('email', email),
             { id: { [Op.ne]: id } },
-            { email: { [Op.ne]: null } }
+            { email: { [Op.ne]: null } },
+            memberBucket
           ]
         },
         raw: true
@@ -566,15 +573,24 @@ exports.editMemberById = async (req, res) => {
       ...(phoneLookup ? [{ phoneNumber: phoneLookup }] : []),
       ...(Number(phoneNumber) > 0 ? [{ id: Number(phoneNumber) }] : [])
     ]
-    const getMember =
+    const matches =
       lookups.length > 0
-        ? await Member.findOne({
+        ? await Member.findAll({
             where: {
               [Op.or]: lookups,
               ...(store ? { store } : {})
-            }
+            },
+            limit: 2
           })
-        : null
+        : []
+    if (matches.length > 1) {
+      return res.status(409).json({
+        success: false,
+        code: 'MEMBER_STORE_REQUIRED',
+        message: 'Nomor telepon terdaftar di lebih dari satu toko. Pilih toko terlebih dahulu.'
+      })
+    }
+    const getMember = matches[0] || null
 
     if (getMember) {
       const addedPoints = Number(body.points) || 0

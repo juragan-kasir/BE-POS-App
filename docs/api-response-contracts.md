@@ -66,7 +66,7 @@ Endpoint tulis yang menerima `idempotencyKey` (order, sales return, goods receip
 ```json
 { "success": false, "message": "Store is required" }
 ```
-Status yang dipakai: `400` (validasi/bisnis), `403` (role/akses store), `404` (tidak ditemukan), `409` (konflik status), `500` (tak terduga — controller yang menangkap error sendiri mengganti pesan menjadi `"Internal server error"`; fallback global memakai `err.message` atau `"Internal Server Error"`).
+Status yang dipakai: `400` (validasi/bisnis), `403` (role/akses store), `404` (tidak ditemukan), `409` (konflik status, atau data sudah ada — mis. `NAME_TAKEN` untuk nama produk/kategori yang sudah dipakai di tenant yang sama, `MEMBER_STORE_REQUIRED` bila nomor member cocok di lebih dari satu toko), `500` (tak terduga — controller yang menangkap error sendiri mengganti pesan menjadi `"Internal server error"`; fallback global memakai `err.message` atau `"Internal Server Error"`).
 
 ### 2.3 Error validasi Zod (umum di endpoint POST/PUT)
 ```json

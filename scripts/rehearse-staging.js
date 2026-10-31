@@ -66,10 +66,10 @@ const MAINTENANCE_DB = 'postgres'
 
 // Locked accounting model (W-02R.4 discovery): any repository growth forces
 // a manifest review instead of silently changing the rehearsal.
-const EXPECTED_REPO_MIGRATIONS = 244
+const EXPECTED_REPO_MIGRATIONS = 245
 const EXPECTED_MANIFEST_ROWS = 197
 const EXPECTED_LEDGER_ROWS = 26
-const EXPECTED_E2_COUNT = 21
+const EXPECTED_E2_COUNT = 22
 
 // November foundation migrations (part of the 26 production ledger rows).
 // SCHEMA ONLY, additive, safe to execute against the snapshot baseline via
@@ -332,12 +332,28 @@ async function driftDownD05MemberIndexes(sequelize) {
   return dropped
 }
 
+// After every E2 migration has run, D-05 amendment A1 (B7,
+// 20261031000001-member-phone-email-store-scoped.js) has replaced the two
+// global phone/email indexes with per-store ones.
+const MEMBER_INDEXES_AFTER_E2 = [
+  'uq_member_store_name_ci',
+  'uq_member_global_name_ci',
+  'uq_member_store_phone_e164',
+  'uq_member_global_phone_e164',
+  'uq_member_store_email_ci',
+  'uq_member_global_email_ci'
+]
+const MEMBER_INDEXES_REPLACED_BY_A1 = ['uq_member_phone_e164', 'uq_member_email_ci']
+
 async function verifyD05MemberIndexes(sequelize) {
   const present = []
   const missing = []
-  for (const idx of D05_MEMBER_INDEXES) {
+  for (const idx of MEMBER_INDEXES_AFTER_E2) {
     if (await indexExists(sequelize, idx)) present.push(idx)
     else missing.push(idx)
+  }
+  for (const idx of MEMBER_INDEXES_REPLACED_BY_A1) {
+    if (await indexExists(sequelize, idx)) missing.push(`${idx} (should be replaced by A1)`)
   }
   return { present, missing }
 }
@@ -677,10 +693,11 @@ async function main(argv = process.argv.slice(2)) {
     }
     evidence.steps.e2 = await collectE2Evidence(sequelize, e2, e2Results)
     evidence.steps.e2.phaseDurationMs = Date.now() - e2PhaseStart
-    // D-05: the E2 migration must have genuinely created all four indexes.
+    // D-05 + amendment A1: the E2 migrations must have genuinely created the
+    // final member identity indexes (and A1 removed the global phone/email).
     evidence.steps.d05Indexes = await verifyD05MemberIndexes(sequelize)
     if (evidence.steps.d05Indexes.missing.length > 0) {
-      throw new Error(`D-05 E2 did not create: ${evidence.steps.d05Indexes.missing.join(', ')}`)
+      throw new Error(`D-05/A1 E2 did not leave: ${evidence.steps.d05Indexes.missing.join(', ')}`)
     }
 
     // ---- S5/S6 final verification. ----
@@ -861,6 +878,7 @@ module.exports = {
   NOVEMBER_FOUNDATION_MIGRATIONS,
   DRIFT_INTEGER_TARGETS,
   D05_MEMBER_INDEXES,
+  MEMBER_INDEXES_AFTER_E2,
   parseArgs,
   assertRehearsalTarget,
   deriveRehearsalSets,
