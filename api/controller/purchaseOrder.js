@@ -36,6 +36,19 @@ function calculatePoFinancials({ totalAmount, discount = 0, taxRate = 0, additio
   return { safeTaxRate, taxAmount, finalAmount, taxableBase }
 }
 
+// A PO discount is a cut of the item total; more than the total would
+// leave the PO with a negative final amount. (Negative values are already
+// refused by the request schema.)
+function discountErrorFor(discount, totalAmount) {
+  if ((Number(discount) || 0) > (Number(totalAmount) || 0)) {
+    return 'Diskon tidak boleh melebihi total harga'
+  }
+  return null
+}
+
+const itemsTotal = (items) =>
+  items.reduce((sum, item) => sum + (Number(item.quantity) || 0) * (Number(item.price) || 0), 0)
+
 // T-09 Product-store canonical validation: product_store junction table is canonical
 // (see api/controller/product.js:95 syncProductStores / getProductStoreSubQuery).
 // Unassigned products (no product_store rows) are globally valid for any store.
@@ -594,6 +607,11 @@ const purchaseOrderController = {
             }, 0)
           : 0
 
+      const createDiscountError = discountErrorFor(discount, totalAmount)
+      if (createDiscountError) {
+        return res.status(400).json({ success: false, message: createDiscountError })
+      }
+
       // T-02 authoritative tax 0-100, T-12 reuse via helper
       const nTaxRate = Number(taxRate)
       if (Number.isFinite(nTaxRate) && (nTaxRate < 0 || nTaxRate > 100)) {
@@ -831,6 +849,17 @@ const purchaseOrderController = {
             return res.status(400).json({ success: false, message: e.message })
           }
         }
+      }
+
+      // Checked before the items are replaced: this handler has no
+      // transaction, so a rejection after that point would leave new
+      // items under the old totals.
+      const updateDiscountError = discountErrorFor(
+        discount !== undefined ? discount : purchaseOrder.discount,
+        items ? itemsTotal(items) : purchaseOrder.totalAmount
+      )
+      if (updateDiscountError) {
+        return res.status(400).json({ success: false, message: updateDiscountError })
       }
 
       let totalAmount = purchaseOrder.totalAmount
