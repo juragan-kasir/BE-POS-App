@@ -276,7 +276,8 @@ exports.getProductByLocationSuperAdmin = async (req, res) => {
     if (search) {
       const searchOr = [
         { nameProduct: { [Op.iLike]: `%${search}%` } },
-        { sku: { [Op.iLike]: `%${search}%` } }
+        { sku: { [Op.iLike]: `%${search}%` } },
+        { barcode: { [Op.iLike]: `%${search}%` } }
       ]
       if (whereCondition[Op.or]) {
         whereCondition[Op.and] = [{ [Op.or]: searchOr }]
@@ -531,7 +532,8 @@ exports.getAllProductInTable = async (req, res) => {
         {
           [Op.or]: [
             { nameProduct: { [Op.iLike]: `%${search}%` } },
-            { sku: { [Op.iLike]: `%${search}%` } }
+            { sku: { [Op.iLike]: `%${search}%` } },
+            { barcode: { [Op.iLike]: `%${search}%` } }
           ]
         }
       ]
