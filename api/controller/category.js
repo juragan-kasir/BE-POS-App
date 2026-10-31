@@ -12,6 +12,7 @@ const { createAudit } = require('../../utils/auditLog')
 const { enrichAuditFields } = require('../../utils/auditFields')
 const { relatedStoreInclude } = require('../../utils/tenantScope')
 const { authorizedStoreIds } = require('../../utils/storeValidation')
+const { findScopedNameConflict } = require('../service/scopedNameConflict')
 
 // category has no store column of its own — ownership is many-to-many via
 // the category_store junction table (a category can be assigned to several
@@ -386,17 +387,6 @@ exports.addNewCategory = async (req, res) => {
   const body = req.body
 
   try {
-    const findOneCategory = await Category?.findOne({
-      where: { name: body?.name }
-    })
-
-    if (findOneCategory?.getDataValue) {
-      return res.status(403).json({
-        success: false,
-        message: 'Category Sudah Terdaftar'
-      })
-    }
-
     let imageUrl = null
     if (req.file) {
       try {
@@ -468,6 +458,23 @@ exports.addNewCategory = async (req, res) => {
       })
     }
 
+    const duplicate = await findScopedNameConflict({
+      model: Category,
+      nameField: 'name',
+      name: body?.name,
+      linkModel: (await hasCategoryStoreTable()) ? db.category_store : null,
+      linkField: 'category',
+      storeIds: parsedStores
+    })
+    if (duplicate) {
+      return res.status(409).json({
+        success: false,
+        code: 'NAME_TAKEN',
+        field: 'name',
+        message: 'Category Sudah Terdaftar'
+      })
+    }
+
     const createdCategory = await Category.create({
       name: body?.name,
       description: body?.description || null,
@@ -528,15 +535,32 @@ exports.editCategoryById = async (req, res) => {
       })
     }
 
-    const duplicate = await Category.findOne({
-      where: {
-        name: body.name,
-        id: { [Op.ne]: req.params.id }
-      }
+    const hasJunction = await hasCategoryStoreTable()
+    const editStores = body.store
+      ? parseStoreField(body.store)
+      : hasJunction
+        ? (
+            await db.category_store.findAll({
+              where: { category: category.id },
+              attributes: ['store'],
+              raw: true
+            })
+          ).map((r) => r.store)
+        : []
+    const duplicate = await findScopedNameConflict({
+      model: Category,
+      nameField: 'name',
+      name: body.name,
+      linkModel: hasJunction ? db.category_store : null,
+      linkField: 'category',
+      storeIds: editStores,
+      excludeId: category.id
     })
     if (duplicate) {
-      return res.status(403).json({
+      return res.status(409).json({
         success: false,
+        code: 'NAME_TAKEN',
+        field: 'name',
         message: 'Kategori Sudah Tersedia'
       })
     }
@@ -1097,9 +1121,15 @@ exports.importCategory = async (req, res) => {
     let insertedCount = 0
     const duplicateErrors = []
 
+    const importHasJunction = await hasCategoryStoreTable()
     for (const cat of categories) {
-      const existing = await Category.findOne({
-        where: { name: cat.name }
+      const existing = await findScopedNameConflict({
+        model: Category,
+        nameField: 'name',
+        name: cat.name,
+        linkModel: importHasJunction ? db.category_store : null,
+        linkField: 'category',
+        storeIds: cat.storeId ? [cat.storeId] : []
       })
 
       if (existing) {

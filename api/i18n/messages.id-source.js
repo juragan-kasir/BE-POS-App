@@ -133,6 +133,8 @@ module.exports = {
   'Nomor supplier sudah terdaftar': 'Supplier number is already registered',
   'Nomor telepon sudah digunakan': 'Phone number is already in use',
   'Nomor telepon sudah terdaftar': 'Phone number is already registered',
+  'Nomor telepon terdaftar di lebih dari satu toko. Pilih toko terlebih dahulu.':
+    'This phone number is registered in more than one store. Choose a store first.',
   'Order tidak ditemukan': 'Order not found',
   'Parameter shiftId wajib diisi': 'The shiftId parameter is required',
   'Password dan Konfirmasi Password Tidak Cocok': 'Password and confirm password do not match',

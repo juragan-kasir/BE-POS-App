@@ -10,8 +10,9 @@ const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
 // D-05 product-grade member identity (locked contract):
 // - name: store-scoped (own store or global-null bucket), case-insensitive
-// - phone: globally unique on canonical E.164 (ID default region)
-// - email: globally unique, TRIM + lowercase, '' -> NULL
+// - phone: unique per store bucket on canonical E.164 (ID default region)
+// - email: unique per store bucket, TRIM + lowercase, '' -> NULL
+//   (phone and email were global until D-05 amendment A1, 2026-10-31)
 // - soft-deleted rows excluded from every uniqueness object
 // - guests (GUEST-*) exempt from phone uniqueness
 // - DB violations map to 409 on create AND update
@@ -192,19 +193,26 @@ describe('D-05 name identity (HTTP contract)', () => {
 })
 
 describe('D-05 phone identity (HTTP contract)', () => {
-  test('same phone across different stores -> 409 (global)', async () => {
+  // D-05 amendment A1 (2026-10-31): phone is unique per store bucket.
+  test('same phone in the same store -> 409; another store may reuse it', async () => {
     const inA = await addMember(adminAToken, {
       nameMember: 'D05 Phone A',
       phoneNumber: '081500000021'
     })
     expect(inA.status).toBe(201)
 
+    const againA = await addMember(adminAToken, {
+      nameMember: 'D05 Phone A2',
+      phoneNumber: '081500000021'
+    })
+    expect(againA.status).toBe(409)
+    expect(againA.body.message).toBe('Nomor telepon sudah terdaftar')
+
     const inB = await addMember(adminBToken, {
       nameMember: 'D05 Phone B',
       phoneNumber: '081500000021'
     })
-    expect(inB.status).toBe(409)
-    expect(inB.body.message).toBe('Nomor telepon sudah terdaftar')
+    expect(inB.status).toBe(201)
   })
 
   test('national and international forms are the same identity', async () => {
@@ -215,7 +223,7 @@ describe('D-05 phone identity (HTTP contract)', () => {
     expect(national.status).toBe(201)
     expect(national.body.data.phoneNumber).toBe('+6281500000022')
 
-    const intl = await addMember(adminBToken, {
+    const intl = await addMember(adminAToken, {
       nameMember: 'D05 Phone Intl',
       phoneNumber: '+6281500000022'
     })
@@ -280,7 +288,8 @@ describe('D-05 phone identity (HTTP contract)', () => {
 })
 
 describe('D-05 email identity (HTTP contract)', () => {
-  test('case-only duplicate across stores -> 409 (global)', async () => {
+  // D-05 amendment A1 (2026-10-31): email is unique per store bucket.
+  test('case-only duplicate in the same store -> 409; another store may reuse it', async () => {
     const first = await addMember(adminAToken, {
       nameMember: 'D05 Email A',
       phoneNumber: '081500000031',
@@ -288,13 +297,20 @@ describe('D-05 email identity (HTTP contract)', () => {
     })
     expect(first.status).toBe(201)
 
-    const second = await addMember(adminBToken, {
-      nameMember: 'D05 Email B',
+    const second = await addMember(adminAToken, {
+      nameMember: 'D05 Email A2',
       phoneNumber: '081500000032',
       email: 'd05.case@example.com'
     })
     expect(second.status).toBe(409)
     expect(second.body.message).toBe('Email sudah terdaftar')
+
+    const inB = await addMember(adminBToken, {
+      nameMember: 'D05 Email B',
+      phoneNumber: '081500000033',
+      email: 'd05.case@example.com'
+    })
+    expect(inB.status).toBe(201)
   })
 
   // Note: the HTTP boundary validates email shape (zod email), so surrounding
@@ -313,7 +329,7 @@ describe('D-05 email identity (HTTP contract)', () => {
         name: 'D05 DB WS Clash',
         phoneNumber: '081500000052',
         email: '  D05DBWS@Example.COM  ',
-        store: storeB.id
+        store: storeA.id
       })
     ).rejects.toThrow()
   })
@@ -511,7 +527,7 @@ describe('D-05 DB unique race -> 409 with existing vocabulary (create)', () => {
     expect(first.status).toBe(201)
 
     const res = await withBypassedPrechecks(() =>
-      addMember(adminBToken, {
+      addMember(adminAToken, {
         nameMember: 'D05 RaceC Phone B',
         phoneNumber: '+6281500000105'
       })
@@ -529,7 +545,7 @@ describe('D-05 DB unique race -> 409 with existing vocabulary (create)', () => {
     expect(first.status).toBe(201)
 
     const res = await withBypassedPrechecks(() =>
-      addMember(adminBToken, {
+      addMember(adminAToken, {
         nameMember: 'D05 RaceC Email B',
         phoneNumber: '081500000107',
         email: 'D05.RaceC@Example.com'
@@ -633,34 +649,34 @@ describe('D-05 update path validation and self-exclusion', () => {
       nameMember: 'D05 Dup Phone Holder',
       phoneNumber: '081500000123'
     })
-    const b = await addMember(adminBToken, {
+    const b = await addMember(adminAToken, {
       nameMember: 'D05 Dup Phone Mover',
       phoneNumber: '081500000124'
     })
     expect(a.status).toBe(201)
     expect(b.status).toBe(201)
 
-    const res = await editMember(adminBToken, b.body.data.id, {
+    const res = await editMember(adminAToken, b.body.data.id, {
       phoneNumber: '+6281500000123'
     })
     expect(res.status).toBe(409)
     expect(res.body.message).toBe('Nomor telepon sudah terdaftar')
   })
 
-  test('update to a duplicate email across stores (precheck) -> 409', async () => {
+  test('update to a duplicate email in the same store (precheck) -> 409', async () => {
     const a = await addMember(adminAToken, {
       nameMember: 'D05 Dup Email Holder',
       phoneNumber: '081500000125',
       email: 'd05.dupemail@example.com'
     })
-    const b = await addMember(adminBToken, {
+    const b = await addMember(adminAToken, {
       nameMember: 'D05 Dup Email Mover',
       phoneNumber: '081500000126'
     })
     expect(a.status).toBe(201)
     expect(b.status).toBe(201)
 
-    const res = await editMember(adminBToken, b.body.data.id, {
+    const res = await editMember(adminAToken, b.body.data.id, {
       email: 'D05.DupEmail@Example.com'
     })
     expect(res.status).toBe(409)

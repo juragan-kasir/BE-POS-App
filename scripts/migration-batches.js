@@ -127,10 +127,23 @@ const E2_BATCHES = Object.freeze({
     // (nothing is guessed or rewritten); replays safely. No governance gate:
     // the decision is DR-28 (product owner, 2026-10-24).
     openGates: []
+  }),
+  B7: deepFreeze({
+    id: 'B7',
+    title: 'D-05 amendment A1: member phone/email unique per store',
+    expectedCount: 1,
+    migrations: ['20261031000001-member-phone-email-store-scoped.js'],
+    // D-05 amendment A1 (product owner, 2026-10-31; record
+    // docs/superpowers/evidence/d05-member-identity-contract.md §7): the
+    // global phone/email unique indexes become per store bucket, like names.
+    // up only relaxes uniqueness, so existing rows always satisfy it and no
+    // data is rewritten; down aborts before any DDL when rows now share a
+    // phone or email across stores. No governance gate.
+    openGates: []
   })
 })
 
-const BATCH_ORDER = Object.freeze(['B1', 'B2', 'B3', 'B4', 'B5', 'B6'])
+const BATCH_ORDER = Object.freeze(['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7'])
 
 // D-08 B1 resume contracts. A resume finishes a batch whose earlier members
 // were recorded by an interrupted run; it never redefines the batch (the

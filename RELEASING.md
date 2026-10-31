@@ -91,7 +91,7 @@ vocabulary and field rules are in `db/migration-dispositions/README.md`.
    for the same `--env`. Flags that could retarget the runner are refused.
    - **D-08 E2 runs in bounded batches (Option C)**, one separately approved
      batch at a time:
-     `npm run migrate -- --env production --batch B1` (then `B2`, `B3`, `B4`, `B5`, `B6`).
+     `npm run migrate -- --env production --batch B1` (then `B2`, `B3`, `B4`, `B5`, `B6`, `B7`).
      The batches are defined in `scripts/migration-batches.js` and recorded
      in `docs/superpowers/evidence/d08-e2-batch-contract-record.md`:
      - **B1**: the original 13 E2 migrations;
@@ -110,6 +110,15 @@ vocabulary and field rules are in `db/migration-dispositions/README.md`.
      - **B6**: BA DR-28 decision 4 — `supplier_product.minOrderQty` VARCHAR(50)
        → INTEGER (empty → 1). It stops before any DDL when a value is not
        digits only and names the count; fix those rows first. Replays safely.
+     - **B7**: D-05 amendment A1 (product owner, 2026-10-31) — member phone
+       and email become unique per store (`uq_member_store_phone_e164`,
+       `uq_member_global_phone_e164`, `uq_member_store_email_ci`,
+       `uq_member_global_email_ci`) instead of global. Only relaxes
+       uniqueness: no value is rewritten and it replays safely. `down()`
+       stops before any DDL when members now share a phone or email across
+       stores. BE code may ship before or after B7: before it, a same-phone
+       member in another store is still refused by the old global index with
+       the existing "Nomor telepon sudah terdaftar".
     - After the preflight, the runner refuses a batch whose members are
       missing or already recorded, when any pending migration outside the
       batch would run first, or when a governance gate is open (B3: P1

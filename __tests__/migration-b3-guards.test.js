@@ -25,7 +25,8 @@ const ledgerWith = (...ran) => FILES.filter((f) => !ALL_E2.includes(f) || ran.fl
 const POST_INCIDENT_MIGRATIONS = [
   '20261023000001-harden-audit-log.js',
   '20261024000001-dr28-widen-text-columns.js',
-  '20261025000001-dr28-min-order-qty-integer.js'
+  '20261025000001-dr28-min-order-qty-integer.js',
+  '20261031000001-member-phone-email-store-scoped.js'
 ]
 const incidentLedgerWith = (...ran) =>
   ledgerWith(...ran).filter((f) => !POST_INCIDENT_MIGRATIONS.includes(f))

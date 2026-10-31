@@ -1,5 +1,6 @@
 const db = require('../../db/models')
 const { recipeAvailability } = require('../service/recipeAvailabilityService')
+const { findScopedNameConflict } = require('../service/scopedNameConflict')
 const {
   usesOwnStock,
   isInventoryItemMode,
@@ -734,15 +735,30 @@ exports.postAddProduct = async (req, res) => {
   }
 
   try {
-    const existingProduct = await Product.findOne({
-      where: {
-        nameProduct
+    let parsedStores = []
+    if (stores) {
+      try {
+        const raw = typeof stores === 'string' ? JSON.parse(stores) : stores
+        parsedStores = normalizeStores(Array.isArray(raw) ? raw : [raw])
+      } catch {
+        parsedStores = []
       }
+    }
+
+    const existingProduct = await findScopedNameConflict({
+      model: Product,
+      nameField: 'nameProduct',
+      name: nameProduct,
+      linkModel: db.product_store,
+      linkField: 'product',
+      storeIds: parsedStores
     })
 
     if (existingProduct) {
-      return res.status(400).json({
+      return res.status(409).json({
         success: false,
+        code: 'NAME_TAKEN',
+        field: 'nameProduct',
         message: 'Product with this name already exists.'
       })
     }
@@ -768,15 +784,6 @@ exports.postAddProduct = async (req, res) => {
     }
     const imageUrl = gallery[0] || primaryUrl || null
 
-    let parsedStores = []
-    if (stores) {
-      try {
-        const raw = typeof stores === 'string' ? JSON.parse(stores) : stores
-        parsedStores = normalizeStores(Array.isArray(raw) ? raw : [raw])
-      } catch {
-        parsedStores = []
-      }
-    }
     // BA finding #2 (Waroeng Bakso dummy, 2026-10-17): an initial stock with
     // no store assignment has nowhere to live — with per-outlet stock
     // authoritative (DR-14, BA gap 027) every outlet reads its

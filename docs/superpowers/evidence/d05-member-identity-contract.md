@@ -150,3 +150,31 @@ weakened, and the values must not be silently coerced.
 - Accounting: 236 repository migrations = 197 manifest rows + 26 ledger rows +
   13 E2; manifest dispositions include 3 `BLOCKED_DECISION` and 2
   `EXCLUDED_BY_DECISION`.
+
+## 7. Amendment A1 — phone and email per store bucket (2026-10-31)
+
+- Decision: owner instruction 2026-10-31 ("sekalian benerin member phone
+  juga") after the real E2E on development showed that a customer who is a
+  member of one business could not join another business with the same phone
+  or email (`uq_member_phone_e164` / `uq_member_email_ci` were global).
+- Change: phone and email follow the same store bucket rule as names (§3.2).
+  Migration `20261031000001-member-phone-email-store-scoped.js` (E2, runs
+  normally) drops the two global indexes and creates:
+  - `uq_member_store_phone_e164` — `UNIQUE(store, "phoneNumber") WHERE store IS NOT NULL AND "deletedAt" IS NULL AND "phoneNumber" NOT LIKE 'GUEST-%'`
+  - `uq_member_global_phone_e164` — `UNIQUE("phoneNumber") WHERE store IS NULL AND …same predicate`
+  - `uq_member_store_email_ci` — `UNIQUE(store, LOWER(TRIM(email))) WHERE store IS NOT NULL AND "deletedAt" IS NULL AND email IS NOT NULL`
+  - `uq_member_global_email_ci` — `UNIQUE(LOWER(TRIM(email))) WHERE store IS NULL AND …same predicate`
+- `up` only relaxes uniqueness, so existing rows always satisfy it. `down`
+  restores the global indexes and aborts before any DDL when rows share a
+  phone or email across stores.
+- Application: create/update prechecks use the same bucket. The point
+  adjustment by phone (`PUT /member/edit-point-member/:phoneNumber`) answers
+  409 `MEMBER_STORE_REQUIRED` when a caller without a store matches more than
+  one member, instead of changing an arbitrary one.
+- Not changed: canonical E.164 storage (§3.1), guest rules (§3.3),
+  soft-delete rules (§3.4), name uniqueness. A membership shared across the
+  stores of one tenant is a separate product decision.
+- The B1 postcondition verifier (`scripts/migration-batches.js`,
+  `verifyD05MemberIdentity`) records the state right after B1. Re-running it
+  on a database that already applied A1 reports the two replaced indexes as
+  missing; that is expected and not a B1 regression.
