@@ -11,6 +11,8 @@ const {
   unsettledSaleSql,
   approvedReturnExistsSql
 } = require('../../utils/completedSaleSql')
+const { toStoreRangeBound } = require('../../utils/businessDate')
+const { resolveStoreTimezone } = require('../../utils/storeTimezone')
 
 // P1 (DR-PAY-ATTR-06): payment-breakdown bucketing speaks canonical
 // methods. Historical rows whose tender cannot be mapped are summed into
@@ -1826,9 +1828,11 @@ const cashRegisterController = {
       }
 
       if (startDate || endDate) {
+        // A shift's day is the store's calendar day (Z-report history).
+        const timezone = await resolveStoreTimezone(store)
         where.openedAt = {}
-        if (startDate) where.openedAt[Op.gte] = new Date(startDate)
-        if (endDate) where.openedAt[Op.lte] = new Date(endDate + 'T23:59:59')
+        if (startDate) where.openedAt[Op.gte] = toStoreRangeBound(startDate, timezone, 'start')
+        if (endDate) where.openedAt[Op.lte] = toStoreRangeBound(endDate, timezone, 'end')
       }
 
       const offset = (parseInt(page) - 1) * parseInt(limit)

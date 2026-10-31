@@ -2,6 +2,8 @@
 const db = require('../../../db/models')
 const { Op } = require('sequelize')
 const { assertReportStore } = require('./getReportStore')
+const { getStoreFilterRange } = require('../../../utils/businessDate')
+const { resolveStoreTimezone } = require('../../../utils/storeTimezone')
 
 const defaultColumns = [
   { key: 'name', label: 'Toko', type: 'string', width: 18, align: 'left' },
@@ -17,27 +19,17 @@ const getData = async (req) => {
   const store = assertReportStore(req)
   const { startDate, endDate, filter } = req.query
 
-  let dateRange = {}
-  const now = new Date()
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-  if (filter === 'today') {
-    dateRange = { [Op.gte]: todayStart, [Op.lte]: new Date(todayStart.getTime() + 86400000 - 1) }
-  } else if (filter === 'weekly') {
-    const daysSinceMonday = (now.getDay() + 6) % 7
-    const monday = new Date(todayStart)
-    monday.setDate(todayStart.getDate() - daysSinceMonday)
-    dateRange = { [Op.gte]: monday, [Op.lte]: new Date(monday.getTime() + 7 * 86400000 - 1) }
-  } else if (filter === 'monthly') {
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
-    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999)
-    dateRange = { [Op.gte]: monthStart, [Op.lte]: monthEnd }
-  } else if (startDate && endDate) {
-    dateRange = { [Op.gte]: new Date(startDate), [Op.lte]: new Date(endDate) }
-  }
+  const range = getStoreFilterRange(
+    { filter, startDate, endDate },
+    await resolveStoreTimezone(store)
+  )
+  const dateRange = {}
+  if (range?.start) dateRange[Op.gte] = range.start
+  if (range?.end) dateRange[Op.lte] = range.end
 
   const orderWhere = { paymentStatus: 'paid', status: { [Op.notIn]: ['cancelled', 'void'] } }
   if (store) orderWhere.store = store
-  if (dateRange[Op.gte]) orderWhere.createdAt = dateRange
+  if (range) orderWhere.createdAt = dateRange
 
   const storeWhere = store ? { id: store } : {}
   const locations = await db.location.findAll({ where: storeWhere, attributes: ['id', 'name', 'city'] })

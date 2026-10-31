@@ -1,16 +1,18 @@
 const db = require('../../db/models')
 const { Op } = require('sequelize')
+const { getStoreDayBounds, getStoreLocalDate } = require('../../utils/businessDate')
+const { resolveStoreTimezone } = require('../../utils/storeTimezone')
 
 const performanceAggregation = {
   async aggregateKasirPerformance(store, reportDate) {
     try {
+      // reportDate is a store calendar day; its bounds are taken in the
+      // store's timezone, not the server's.
+      const { start, end } = getStoreDayBounds(reportDate, await resolveStoreTimezone(store))
       const where = {
         store: store,
         paymentStatus: 'paid',
-        createdAt: {
-          [Op.gte]: new Date(`${reportDate} 00:00:00`),
-          [Op.lte]: new Date(`${reportDate} 23:59:59`)
-        }
+        createdAt: { [Op.gte]: start, [Op.lte]: end }
       }
 
       const orders = await db.order.findAll({
@@ -89,7 +91,7 @@ const performanceAggregation = {
 
   async triggerDailyAggregation(store) {
     try {
-      const today = new Date().toISOString().split('T')[0]
+      const today = getStoreLocalDate(await resolveStoreTimezone(store))
       await this.aggregateKasirPerformance(store, today)
     } catch (error) {
       console.error('Error in daily aggregation:', error)

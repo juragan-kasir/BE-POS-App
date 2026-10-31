@@ -61,8 +61,10 @@ const corsOptions = {
     'Authorization',
     'X-Requested-With',
     'Accept',
+    'Accept-Language',
     'Origin'
   ],
+  exposedHeaders: ['Content-Language'],
   credentials: true,
   preflightContinue: false,
   optionsSuccessStatus: 204

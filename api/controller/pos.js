@@ -15,6 +15,15 @@ const { canonicalPhone } = require('../../utils/memberIdentity')
 const { listTableReleaseStatus, releaseTable } = require('../service/tableRelease')
 const { computeOrderFinancials } = require('../service/orderFinancials')
 const {
+  getStoreFilterRange,
+  getStorePeriodBounds,
+  getStoreLocalDate,
+  toStoreRangeBound
+} = require('../../utils/businessDate')
+const { resolveStoreTimezone } = require('../../utils/storeTimezone')
+
+const DASHBOARD_FILTERS = { daily: 'today', weekly: 'weekly', monthly: 'monthly' }
+const {
   reportingBucket,
   CANONICAL_METHOD_ORDER
 } = require('../service/canonicalPayment')
@@ -1817,39 +1826,16 @@ const posController = {
       page = Math.max(parseInt(page) || 1, 1)
       pageSize = Math.min(Math.max(parseInt(pageSize) || 5, 1), 50)
 
-      // Auto-compute date range based on filter preset
-      if (filter && !startDate && !endDate) {
-        const now = new Date()
-        const todayStart = new Date(
-          now.getFullYear(),
-          now.getMonth(),
-          now.getDate()
-        )
-
-        if (filter === 'daily') {
-          startDate = todayStart.toISOString()
-          endDate = new Date(todayStart.getTime() + 86400000 - 1).toISOString()
-        } else if (filter === 'monthly') {
-          const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
-          const monthEnd = new Date(
-            now.getFullYear(),
-            now.getMonth() + 1,
-            0,
-            23,
-            59,
-            59,
-            999
-          )
-          startDate = monthStart.toISOString()
-          endDate = monthEnd.toISOString()
-        } else {
-          // weekly — Mon to Sun of current week
-          const daysSinceMonday = (now.getDay() + 6) % 7
-          const monday = new Date(todayStart)
-          monday.setDate(todayStart.getDate() - daysSinceMonday)
-          startDate = monday.toISOString()
-          endDate = new Date(monday.getTime() + 7 * 86400000 - 1).toISOString()
-        }
+      // Presets and plain YYYY-MM-DD bounds are store calendar days, not
+      // the server's (UTC on Vercel).
+      const presetFilter = !startDate && !endDate ? DASHBOARD_FILTERS[filter] : undefined
+      const range = getStoreFilterRange(
+        { filter: presetFilter, startDate, endDate },
+        await resolveStoreTimezone(store)
+      )
+      if (range) {
+        startDate = range.start ? range.start.toISOString() : undefined
+        endDate = range.end ? range.end.toISOString() : undefined
       }
 
       const orderWhere = { paymentStatus: 'paid' }
@@ -2152,22 +2138,13 @@ order: [['updatedAt', 'DESC']],
       const store = req.storeId || null
       let { startDate, endDate } = req.query
 
-      // Default: current month
-      const now = new Date()
-      if (!startDate) {
-        startDate = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
-      }
-      if (!endDate) {
-        endDate = new Date(
-          now.getFullYear(),
-          now.getMonth() + 1,
-          0,
-          23,
-          59,
-          59,
-          999
-        ).toISOString()
-      }
+      // Default: the current month on the store's calendar.
+      const timezone = await resolveStoreTimezone(store)
+      const monthRange = getStorePeriodBounds('month', timezone)
+      const rangeStart = toStoreRangeBound(startDate, timezone, 'start') || monthRange.start
+      const rangeEnd = toStoreRangeBound(endDate, timezone, 'end') || monthRange.end
+      startDate = rangeStart.toISOString()
+      endDate = rangeEnd.toISOString()
 
       const storeCond = store ? ' AND "store" = :store' : ''
       const storeCondAlias = store ? ' AND o."store" = :store' : ''
@@ -2176,10 +2153,9 @@ order: [['updatedAt', 'DESC']],
       const replacements = { startDate, endDate }
       if (store) replacements.store = store
 
-      const startDay = startDate.slice(0, 10)
-      const endDay = endDate.slice(0, 10)
-      const today = new Date()
-      const todayStr = today.toISOString().slice(0, 10)
+      const startDay = getStoreLocalDate(timezone, rangeStart)
+      const endDay = getStoreLocalDate(timezone, rangeEnd)
+      const todayStr = getStoreLocalDate(timezone)
 
       const stores = await db.location.findAll({
         where: { status: 'active' },

@@ -132,6 +132,7 @@ const server = http.createServer(app)
 
 // ponytail: kebijakan CORS bersama (Express + Socket.IO) di utils/corsOptions
 const { corsOptions } = require('./utils/corsOptions')
+const { localizeErrors } = require('./middleware/localizeErrors')
 
 // Rate limit only anonymous traffic; a request is exempt only when it carries
 // a cryptographically valid bearer credential, so a busy POS terminal is not
@@ -172,6 +173,7 @@ app.set('trust proxy', 1)
 app.use(helmet())
 app.use(compression())
 app.use(cors(corsOptions))
+app.use(localizeErrors)
 
 // ponytail: health sebelum rate-limiter — probe monitoring tidak boleh kena throttle
 app.get('/health', async (_, res) => {

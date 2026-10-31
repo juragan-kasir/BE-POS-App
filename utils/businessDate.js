@@ -203,6 +203,85 @@ const getStoreTodayBounds = (timezone, now = new Date()) => {
   return getStoreDayBounds(localDateStr, timezone)
 }
 
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/
+
+const shiftDateString = (dateStr, days) => {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  const shifted = new Date(Date.UTC(y, m - 1, d + days))
+  return shifted.toISOString().slice(0, 10)
+}
+
+/**
+ * Day of week (0 = Sunday) and "HH:mm:ss" at `instant`, as seen on the
+ * store's wall clock. Promo active days and happy-hour windows are
+ * defined in store time, not in the server's timezone (UTC on Vercel).
+ */
+const getStoreClock = (timezone, instant = new Date()) => {
+  const offsetMs = getTimezoneOffsetMs(timezone, instant)
+  const local = new Date((instant instanceof Date ? instant : new Date(instant)).getTime() + offsetMs)
+  const pad = (n) => String(n).padStart(2, '0')
+  return {
+    day: local.getUTCDay(),
+    time: `${pad(local.getUTCHours())}:${pad(local.getUTCMinutes())}:${pad(local.getUTCSeconds())}`
+  }
+}
+
+/**
+ * Instant for a date-range bound sent by a client. A plain "YYYY-MM-DD"
+ * means that whole calendar day in the store's timezone (start of day for
+ * `startDate`, end of day for `endDate`); anything else (a full ISO
+ * instant) is used as-is.
+ */
+const toStoreRangeBound = (value, timezone, edge) => {
+  if (value === undefined || value === null || value === '') return null
+  const str = String(value)
+  if (!DATE_ONLY.test(str)) return new Date(str)
+  const bounds = getStoreDayBounds(str, timezone)
+  return edge === 'end' ? bounds.end : bounds.start
+}
+
+/**
+ * Start/end instants of "today", "this week" (Monday-Sunday) or "this
+ * month" on the store's calendar.
+ */
+const getStorePeriodBounds = (period, timezone, now = new Date()) => {
+  const today = getStoreLocalDate(timezone, now)
+  if (period === 'week') {
+    const daysSinceMonday = (getStoreClock(timezone, now).day + 6) % 7
+    const monday = shiftDateString(today, -daysSinceMonday)
+    return {
+      start: getStoreDayBounds(monday, timezone).start,
+      end: getStoreDayBounds(shiftDateString(monday, 6), timezone).end
+    }
+  }
+  if (period === 'month') {
+    const [y, m] = today.split('-').map(Number)
+    const first = `${today.slice(0, 7)}-01`
+    const last = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10)
+    return {
+      start: getStoreDayBounds(first, timezone).start,
+      end: getStoreDayBounds(last, timezone).end
+    }
+  }
+  return getStoreDayBounds(today, timezone)
+}
+
+const FILTER_PERIODS = { today: 'today', weekly: 'week', monthly: 'month' }
+
+/**
+ * The { start, end } instants a report's `filter` (today | weekly |
+ * monthly) or `startDate`/`endDate` pair covers on the store's calendar,
+ * or null when neither is given.
+ */
+const getStoreFilterRange = ({ filter, startDate, endDate }, timezone, now = new Date()) => {
+  if (FILTER_PERIODS[filter]) return getStorePeriodBounds(FILTER_PERIODS[filter], timezone, now)
+  if (!startDate && !endDate) return null
+  return {
+    start: toStoreRangeBound(startDate, timezone, 'start'),
+    end: toStoreRangeBound(endDate, timezone, 'end')
+  }
+}
+
 module.exports = {
   DEFAULT_TIMEZONE,
   DUE_DATE_CLASSIFICATIONS,
@@ -215,5 +294,9 @@ module.exports = {
   getTimezoneOffset,
   getTimezoneOffsetMs,
   getStoreDayBounds,
-  getStoreTodayBounds
+  getStoreTodayBounds,
+  getStoreClock,
+  toStoreRangeBound,
+  getStorePeriodBounds,
+  getStoreFilterRange
 }

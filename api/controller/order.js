@@ -20,6 +20,8 @@ const batchService = require('../service/batchService')
 const { adjustMemberPoints, maybeUpgradeMemberTier, computeEarnedPoints, awardEarnedPointsOnce, reverseEarnedPoints } = require('../service/loyaltyService')
 const { incrementPromoUsage } = require('../service/promoUsageService')
 const { buyXGetYCondition, spendThreshold } = require('../../utils/promoRuleCondition')
+const { getStoreClock } = require('../../utils/businessDate')
+const { resolveStoreTimezone } = require('../../utils/storeTimezone')
 const {
   enqueueAccountingJob,
   attemptJob,
@@ -461,8 +463,12 @@ const getServiceChargeRate = async (store) => {
 
 const evaluatePromoCampaign = async (items, store, customerId, subtotal) => {
   const now = new Date()
-  const currentDay = now.getDay()
-  const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
+  // Active days and happy-hour windows are store wall-clock time, not the
+  // server's (UTC on Vercel).
+  const { day: currentDay, time: currentTime } = getStoreClock(
+    await resolveStoreTimezone(store),
+    now
+  )
 
   const campaigns = await db.promo_campaign.findAll({
     where: {
