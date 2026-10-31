@@ -5,6 +5,8 @@ const { emitToStore } = require('../service/socket')
 const { arrayStoreScope } = require('../../utils/tenantScope')
 const { incrementPromoUsage } = require('../service/promoUsageService')
 const { buyXGetYCondition, isActiveOnDay } = require('../../utils/promoRuleCondition')
+const { getStoreClock } = require('../../utils/businessDate')
+const { resolveStoreTimezone } = require('../../utils/storeTimezone')
 const { createAudit } = require('../../utils/auditLog')
 
 // Campaigns shown to diners in the QR app (BISA lists them on the payment page).
@@ -418,8 +420,10 @@ const promoController = {
       const { store, _orderId, memberId, code, cartItems, subtotal } = req.body
 
       const now = new Date()
-      const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
-      const currentDay = now.getDay()
+      const { day: currentDay, time: currentTime } = getStoreClock(
+        await resolveStoreTimezone(req.user?.store || store),
+        now
+      )
 
       const where = {
         status: 'active',
@@ -736,8 +740,10 @@ const promoController = {
       // daysOfWeek is stored as 0–6 (validation schema), the same numbers
       // evaluatePromoCampaign compares — a day name never matched, so every
       // day-restricted campaign was hidden from diners.
-      const currentDay = now.getDay()
-      const currentTime = now.toTimeString().slice(0, 8)
+      const { day: currentDay, time: currentTime } = getStoreClock(
+        await resolveStoreTimezone(store),
+        now
+      )
 
       const where = {
         status: 'active',
