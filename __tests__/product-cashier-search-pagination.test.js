@@ -21,6 +21,7 @@ beforeAll(async () => {
   for (let i = 0; i < 5; i++) {
     const p = await db.product.create({
       nameProduct: `PROD_PAGE_ITEM_${i}`,
+      barcode: i === 3 ? '8997788990013' : null,
       category: category.id,
       price: 1000,
       stock: 10,
@@ -92,6 +93,18 @@ describe('GET /product/get-product-by-super-admin — bounded, paginated cashier
     const page1Ids = page1.body.data.map((p) => p.id)
     const page2Ids = page2.body.data.map((p) => p.id)
     expect(page1Ids.some((id) => page2Ids.includes(id))).toBe(false)
+  })
+
+  test('search finds a product by its manufacturer barcode', async () => {
+    const res = await request(app)
+      .get('/product/get-product-by-super-admin')
+      .set('Authorization', `Bearer ${cashierToken}`)
+      .set('Cookie', [`store=${location.id}`])
+      .query({ search: '8997788990013' })
+
+    expect(res.status).toBe(200)
+    expect(res.body.data.map((p) => p.nameProduct)).toEqual(['PROD_PAGE_ITEM_3'])
+    expect(res.body.data[0].barcode).toBe('8997788990013')
   })
 
   test('limit is capped at 500 even if a caller asks for more', async () => {
