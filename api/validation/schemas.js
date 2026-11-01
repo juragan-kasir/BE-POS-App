@@ -311,6 +311,7 @@ exports.createOrderSchema = z.object({
   taxRate: z.any().optional(),
   serviceChargeRate: z.any().optional(),
   paymentMethod: z.string().max(50).optional(),
+  typePaymentId: strToNumNullable().optional(),
   // P1: optional client reference for non-cash settlement, persisted on
   // the immutable ledger row (never trusted for cash math).
   referenceNumber: z.string().max(255).optional().nullable(),
@@ -387,6 +388,7 @@ exports.updateOrderStatusSchema = z.object({
   // canonicalizer maps locked aliases and refuses unknown tenders with
   // 422 (a Zod enum would reject them with 400 at the shape boundary).
   paymentMethod: z.string().max(50).optional(),
+  typePaymentId: strToNumNullable().optional(),
   cashAmount: z.any().transform((v) =>
     v === '' || v === null || v === undefined ? null : Number(v)
   ).optional(),

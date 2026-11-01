@@ -101,6 +101,10 @@ module.exports = (sequelize, DataTypes) => {
       paymentMethod: {
         type: DataTypes.STRING
       },
+      paymentMethodName: {
+        type: DataTypes.STRING(255),
+        allowNull: true
+      },
       paymentStatus: {
         type: DataTypes.ENUM('unpaid', 'partial', 'paid', 'refunded'),
         defaultValue: 'unpaid'

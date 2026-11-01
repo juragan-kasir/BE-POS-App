@@ -106,6 +106,7 @@ answered `409 IDEMPOTENCY_MISMATCH` (`fields: ["expectedTotal"]`, with
 | 400 | `PPN_MISSING` | Required PPN configuration missing (unchanged) |
 | 403 / 404 | `MEMBER_OUT_OF_SCOPE` / `MEMBER_NOT_FOUND` | Member not of this store / unknown (unchanged) |
 | 422 | `REGISTER_REQUIRED`, `INVALID_PAYMENT_METHOD` | Unchanged |
+| 422 | `PAYMENT_TYPE_NOT_FOUND`, `PAYMENT_TYPE_MISMATCH`, `INVALID_PAYMENT_TYPE` | New (B8): optional `typePaymentId` must be an active store payment type of the same tender |
 | 500 | `INTERNAL_ERROR` | Unexpected error; body never contains internal detail |
 
 A `500 INTERNAL_ERROR` is almost always a rolled-back request, but a

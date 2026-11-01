@@ -51,7 +51,9 @@ const KNOWN_E2 = [
   // BA DR-28 decision 4: supplier_product.minOrderQty as a whole number.
   '20261025000001-dr28-min-order-qty-integer.js',
   // D-05 amendment A1: member phone/email unique per store.
-  '20261031000001-member-phone-email-store-scoped.js'
+  '20261031000001-member-phone-email-store-scoped.js',
+  // E2E audit #6: payment method name on order and ledger.
+  '20261101000001-payment-method-name.js'
 ]
 
 // Locked intentional staging/production divergence (D-06 manifest
@@ -240,7 +242,7 @@ describe('W-02R.4 staging manifest (locked rehearsal contract)', () => {
     expect(r.approved).toBe(false)
   })
 
-  test('derived E2 set equals the locked 22 and partitions 245 = 197 + 26 + 22', () => {
+  test('derived E2 set equals the locked 23 and partitions 246 = 197 + 26 + 23', () => {
     const staging = STAGING_MANIFEST()
     const ledger = harness.fixtureLedgerNames(FILES)
     expect(ledger).toHaveLength(26)
@@ -795,9 +797,9 @@ describe('W-02R.4 full rehearsal integration (disposable database)', () => {
     expect(ev.result).toBe('rehearsal-pass-blocked')
     expect(ev.target).toBe('staging')
     expect(ev.stagingDb).toBe(DB)
-    expect(ev.steps.plan.e2Candidates).toHaveLength(22)
+    expect(ev.steps.plan.e2Candidates).toHaveLength(23)
     expect(ev.steps.stamp.inserted).toHaveLength(197)
-    expect(ev.steps.e2.executed).toHaveLength(22)
+    expect(ev.steps.e2.executed).toHaveLength(23)
     expect(ev.steps.e2.missingAfterRun).toEqual([])
     // D-05: the snapshot's target indexes are dropped before E2 (production
     // has member_pkey only), so the D-05 migration genuinely creates them.
@@ -818,7 +820,7 @@ describe('W-02R.4 full rehearsal integration (disposable database)', () => {
     }
     expect(ev.steps.d05Indexes.present.sort()).toEqual([...harness.MEMBER_INDEXES_AFTER_E2].sort())
     expect(ev.steps.d05Indexes.missing).toEqual([])
-    expect(ev.steps.verify.metaCount).toBe(245)
+    expect(ev.steps.verify.metaCount).toBe(246)
     expect(ev.steps.verify.failures).toEqual([])
     expect(ev.steps.verify.status).toBe('BLOCKED')
     expect(ev.steps.verify.blocked).toHaveLength(3)

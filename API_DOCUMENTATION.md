@@ -1223,7 +1223,8 @@ Auth required.
   "shiftId": "number (optional)",
   "paymentMethod": "cash | qris | debit | credit | transfer | e-wallet | points | other (required)",
   "idempotencyKey": "string (required — retries with the same key never create a second sale)",
-  "referenceNumber": "string (optional; required by some tenders)"
+  "referenceNumber": "string (optional; required by some tenders)",
+  "typePaymentId": "number (optional) — the store payment type used (e.g. GoPay vs QRIS); its name is stored as paymentMethodName"
 }
 ```
 
@@ -1244,6 +1245,17 @@ Auth required.
 ```
 
 Key errors: 422 `{"error":"An idempotencyKey is required for a counter sale","code":"IDEMPOTENCY_KEY_REQUIRED"}`; 422 `{"error":"A payment method is required for a counter sale","code":"PAYMENT_METHOD_REQUIRED"}`.
+
+**Payment method name (batch B8):** with `typePaymentId`, the order and its
+ledger row store `paymentMethodName` — the payment type's name at the time of
+payment (`"GoPay"`, `"Debit BCA"`), beside the canonical `paymentMethod`
+(`E_WALLET`, `CARD`). Without it the name stays `null`. The type must be
+active and belong to the store (or be global), else 422 `PAYMENT_TYPE_NOT_FOUND`;
+its tender must equal `paymentMethod`, else 422 `PAYMENT_TYPE_MISMATCH`; a
+non-integer id is 422 `INVALID_PAYMENT_TYPE`. All three refuse before any write.
+The same field and rules apply to `PUT /order/update-status` (paid settlement)
+and `PUT /split-bill/pay/:id`; a void refund row copies the name of the
+settlement it reverses.
 
 ---
 
@@ -1339,6 +1351,7 @@ Auth required.
   "changedByName": "string (optional)",
   "notes": "string (default: '')",
   "paymentMethod": "cash | qris | debit | credit | transfer | e-wallet | points | other (settlement, see below)",
+  "typePaymentId": "number (optional, settlement) — see POST /order/create, payment method name",
   "cashAmount": "number (cash settlement only)",
   "changeAmount": "number (cash settlement only)",
   "reason": "string (required when cancelling a paid order)"
@@ -5005,7 +5018,7 @@ Auth required. **Query:** `store` (number).
     "totalOrders": 50,
     "totalProducts": 120,
     "totalMembers": 200,
-    "paymentMethods": [],
+    "paymentMethods": [{ "method": "E_WALLET", "name": "GoPay", "orders": 12, "sales": "1200000" }],
     "storeInfo": { "id": 1, "name": "Toko A" },
     "salesChart": [],
     "bestSellers": [],
@@ -5138,7 +5151,7 @@ Auth required (super_admin; other roles receive 403). Global multi-store dashboa
     },
     "kpiTrend": [{ "date": "2026-10-01", "revenue": 5000000, "orders": 20, "itemsSold": 45, "expense": 0, "inflow": 5000000, "outflow": 0 }],
     "storePerformance": [{ "storeId": 1, "storeName": "Toko A", "city": "Jakarta", "province": "DKI", "managerName": "Budi", "revenue": 90000000, "orders": 300, "avgOrderValue": 300000, "itemsSold": 800, "discount": 0, "tax": 0, "expense": 30000000, "net": 60000000, "members": null, "lowStock": null, "target": 5000000, "targetPercent": 999, "sharePercent": 60 }],
-    "paymentBreakdown": { "byMethod": [{ "method": "cash", "count": 200, "amount": 60000000, "bucket": "CASH" }], "byType": [{ "type": "CASH", "count": 200, "amount": 60000000 }], "totalPayments": 150000000 },
+    "paymentBreakdown": { "byMethod": [{ "method": "CASH", "name": "Tunai", "count": 200, "amount": 60000000, "bucket": "CASH" }], "byType": [{ "type": "CASH", "count": 200, "amount": 60000000 }], "totalPayments": 150000000 },
     "finance": {
       "revenue": 150000000, "grossRevenue": 152000000, "refunds": 2000000,
       "netSales": 133000000, "cogs": 60000000, "grossProfit": 73000000, "netProfit": 33000000, "profitMargin": 24.8,
@@ -5712,6 +5725,17 @@ Auth required.
 
 ### PUT `/split-bill/pay/:id`
 Auth required (super_admin/admin).
+
+**Request:**
+```json
+{
+  "paymentMethod": "cash | qris | debit | credit | transfer | e-wallet | points | other (required)",
+  "typePaymentId": "number (optional) — see POST /order/create, payment method name",
+  "cashAmount": "number (cash only)",
+  "changeAmount": "number (cash only)",
+  "referenceNumber": "string (required for every tender but cash)"
+}
+```
 
 ### DELETE `/split-bill/cancel/:id`
 Auth required (super_admin/admin).

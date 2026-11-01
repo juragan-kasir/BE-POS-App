@@ -1958,13 +1958,14 @@ order: [['updatedAt', 'DESC']],
         db.sequelize.query(
           `
           SELECT COALESCE("paymentMethod", 'cash') AS method,
+                 "paymentMethodName" AS name,
                  COUNT(*)::int AS orders,
                  SUM("totalPrice") AS sales
           FROM "order"
           WHERE ${completedSaleSql()}
           ${startDate && endDate ? 'AND "createdAt" >= :startDate AND "createdAt" <= :endDate' : ''}
           ${store ? 'AND "store" = :store' : ''}
-          GROUP BY 1
+          GROUP BY 1, 2
           ORDER BY sales DESC
         `,
           {
@@ -2280,6 +2281,7 @@ order: [['updatedAt', 'DESC']],
         // 4. Payment method breakdown (from transaction records)
         db.sequelize.query(
           `SELECT t."typePayment" as method,
+             t."paymentMethodName" as name,
              COUNT(*)::int as count,
              COALESCE(SUM(t.amount),0)::int as amount
            FROM "transaction" t
@@ -2289,7 +2291,7 @@ order: [['updatedAt', 'DESC']],
              AND t."deletedAt" IS NULL
              AND o."createdAt" >= :startDate AND o."createdAt" <= :endDate
              ${storeCondAlias}
-           GROUP BY t."typePayment"
+           GROUP BY t."typePayment", t."paymentMethodName"
            ORDER BY amount DESC`,
           { replacements, type: db.sequelize.QueryTypes.SELECT }
         ),
@@ -2727,6 +2729,7 @@ order: [['updatedAt', 'DESC']],
       // Canonical reporting bucket per stored tender (+ UNRECONCILED).
       const byMethod = (paymentMethodRows || []).map((r) => ({
         method: r.method,
+        name: r.name || null,
         count: r.count,
         amount: Number(r.amount || 0),
         bucket: reportingBucket(r.method)

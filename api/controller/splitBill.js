@@ -18,6 +18,7 @@ const {
   retirePendingSplits
 } = require('../service/orderFinancials')
 const { normalizePaymentMethod } = require('../service/canonicalPayment')
+const { resolvePaymentMethodName } = require('../service/paymentTypeName')
 const { resolveAttributedRegister } = require('../service/settlementAttribution')
 const { assertSettlementReferenceUnused } = require('../service/settlementReference')
 const { awardEarnedPointsOnce } = require('../service/loyaltyService')
@@ -275,7 +276,13 @@ const splitBillController = {
       const result = await withDeadlockRetry(() =>
         db.sequelize.transaction(async (t) => {
           const { id } = req.params
-          const { paymentMethod: bodyMethod, cashAmount, changeAmount, referenceNumber } = req.body
+          const {
+            paymentMethod: bodyMethod,
+            typePaymentId,
+            cashAmount,
+            changeAmount,
+            referenceNumber
+          } = req.body
 
           // P1 (DR-PAY-ATTR-06): the persisted tender is always canonical.
           // DR-24 C-10 / DR-23 §O: the tender is stated explicitly — an
@@ -399,6 +406,12 @@ const splitBillController = {
             })
           }
           const splitRegister = await resolveAttributedRegister(order.store, t)
+          const paymentMethodName = await resolvePaymentMethodName({
+            typePaymentId,
+            method,
+            store: order.store,
+            transaction: t
+          })
 
           await split.update({ status: 'paid', paymentMethod: method }, { transaction: t })
 
@@ -409,6 +422,7 @@ const splitBillController = {
               order: split.order,
               splitBillId: split.id,
               typePayment: method,
+              paymentMethodName,
               amount: Number(split.amount) || 0,
               cashReceived: splitCashReceived,
               changeGiven: splitChangeGiven,
