@@ -18,7 +18,7 @@ const {
   ShiftAssignmentError
 } = require('../../utils/shiftChain')
 const { scalarStoreScope } = require('../../utils/tenantScope')
-const { authorizedWriteStore } = require('../../utils/storeValidation')
+const { authorizedWriteStore, normalizeStoreIds } = require('../../utils/storeValidation')
 const { revokeAllUserSessions } = require('../../utils/authorizationContextMiddleware')
 const { disconnectUser } = require('../service/socket')
 
@@ -60,10 +60,47 @@ const asStoreConfined = (req) =>
 // from body.store. It runs in the controller, after multer and validate(), so
 // it also covers multipart and `data`-wrapped bodies: the route-level
 // validateStoreAccess runs before both and never sees their store.
-const employeeWriteStore = (req) => {
+const employeeWriteStore = async (req) => {
   if (isGlobalSuperAdmin(req)) return authorizedWriteStore(req)
-  if (ownStoreOf(req) == null) return { ok: false }
-  return authorizedWriteStore(asStoreConfined(req))
+  const ownStore = ownStoreOf(req)
+  if (ownStore == null) return { ok: false }
+
+  // A tenant owner/admin may place staff at any outlet of ITS tenant, not
+  // only at the outlet on its own user row. The writable set comes from the
+  // persisted tenant roster (req.storeIds when validateStoreAccess resolved
+  // it), never from client input.
+  let scope = Array.isArray(req.storeIds)
+    ? req.storeIds.map(Number).filter((n) => Number.isInteger(n) && n > 0)
+    : []
+  if (scope.length === 0) {
+    const home = await Location.findByPk(ownStore, { attributes: ['id', 'tenantId'] })
+    if (home?.tenantId != null) {
+      const rows = await Location.findAll({
+        where: { tenantId: home.tenantId },
+        attributes: ['id']
+      })
+      scope = rows.map((r) => Number(r.id))
+    }
+  }
+  if (scope.length === 0) scope = [ownStore]
+  if (!scope.includes(ownStore)) scope.push(ownStore)
+
+  const raw =
+    req.body?.store !== undefined
+      ? req.body.store
+      : req.body?.storeId !== undefined
+        ? req.body.storeId
+        : req.body?.location !== undefined
+          ? req.body.location
+          : req.query?.store
+  if (raw === undefined || raw === null || raw === '' || raw === 'all') {
+    return { ok: true, storeId: ownStore }
+  }
+  const requested = normalizeStoreIds(raw)
+  if (requested.length === 0 || requested.some((id) => !scope.includes(id))) {
+    return { ok: false }
+  }
+  return { ok: true, storeId: requested[0] }
 }
 
 const STORE_DENIED = 'Anda hanya dapat menetapkan karyawan ke toko Anda sendiri'
@@ -118,7 +155,7 @@ exports.addEmployee = async (req, res) => {
 
     // P0-2: authorize the destination store and the role before any lookup,
     // upload or write.
-    const destination = employeeWriteStore(req)
+    const destination = await employeeWriteStore(req)
     if (!destination.ok) {
       return res.status(403).json({ success: false, message: STORE_DENIED })
     }
@@ -586,7 +623,7 @@ exports.updateEmployee = async (req, res) => {
       })
     }
 
-    const destination = employeeWriteStore(req)
+    const destination = await employeeWriteStore(req)
     if (!destination.ok) {
       return res.status(403).json({ success: false, message: STORE_DENIED })
     }

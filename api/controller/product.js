@@ -174,9 +174,13 @@ const assertProductStoresAssignable = async (
   return result
 }
 
-const getProductStoreSubQuery = (storeId) => {
+const getProductStoreSubQuery = (storeIds) => {
+  const ids = (Array.isArray(storeIds) ? storeIds : [storeIds])
+    .map(Number)
+    .filter((n) => Number.isInteger(n) && n > 0)
+  if (ids.length === 0) return db.sequelize.literal('1 = 0')
   return db.sequelize.literal(
-    `EXISTS (SELECT 1 FROM product_store WHERE product = "product".id AND store = ${Number(storeId)} AND "deletedAt" IS NULL)`
+    `EXISTS (SELECT 1 FROM product_store WHERE product = "product".id AND store IN (${ids.join(',')}) AND "deletedAt" IS NULL)`
   )
 }
 
@@ -201,18 +205,22 @@ const getUnassignedProductSubQuery = () => {
 // before landing this version.) Only scoped when the junction table
 // actually exists, matching this file's existing graceful-degrade.
 const findProductInScope = async (req, id, options = {}) => {
-  if (isSuperAdmin(req) || !(await hasProductStoreTable())) {
+  const scopeIds = Array.isArray(req.storeIds) && req.storeIds.length > 0
+    ? req.storeIds.map(Number).filter((n) => Number.isInteger(n) && n > 0)
+    : (isSuperAdmin(req) ? [] : [Number(req.user?.store)].filter((n) => Number.isFinite(n)))
+  if (scopeIds.length === 0 && isSuperAdmin(req)) {
     return Product.findByPk(id, options)
   }
-  const userStore = Number(req.user?.store)
-  const storeId = Number.isFinite(userStore) ? userStore : -1
+  if (!(await hasProductStoreTable())) {
+    return Product.findByPk(id, options)
+  }
   return Product.findOne({
     ...options,
     where: {
       ...(options.where || {}),
       id,
       [Op.or]: [
-        getProductStoreSubQuery(storeId),
+        getProductStoreSubQuery(scopeIds.length > 0 ? scopeIds : -1),
         getUnassignedProductSubQuery()
       ]
     }
@@ -419,7 +427,9 @@ exports.getAllProduct = async (req, res) => {
 
   try {
     const store = req.storeId
-    const userRole = req.user?.roleType
+    const scopeIds = Array.isArray(req.storeIds) && req.storeIds.length > 0
+      ? req.storeIds.map(Number).filter((n) => Number.isInteger(n) && n > 0)
+      : (store ? [Number(store)] : [])
     const filters = {}
 
     if (nameProduct) {
@@ -442,8 +452,8 @@ exports.getAllProduct = async (req, res) => {
       { model: Category, as: 'categoryData', attributes: ['value', 'name'] }
     ]
 
-    if (store && userRole !== 'super_admin' && (await hasProductStoreTable())) {
-      filters[Op.and] = [getProductStoreSubQuery(store)]
+    if (scopeIds.length > 0 && (await hasProductStoreTable())) {
+      filters[Op.and] = [getProductStoreSubQuery(scopeIds)]
     }
 
     if (store) {

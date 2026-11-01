@@ -245,7 +245,20 @@ const validateStoreAccess = (req, res, next) => {
         code: scope.code
       })
     }
-    req.storeId = scope.stores[0] ?? req.authContext.activeStoreId ?? null
+    // A tenant-wide actor (store-bound super_admin or tenant_admin) with no
+    // explicit ?store= used to fall through as req.storeId = null, which
+    // controllers treat as "all stores in the deployment" — a cross-tenant
+    // leak. The canonical tenant roster is the safe default scope; an empty
+    // roster means no accessible store (fail closed), never global.
+    const tenantWide =
+      scope.stores.length === 0 && req.authContext.activeTenantId != null
+    const allowedStores = tenantWide
+      ? (req.authContext.tenantStoreIds || [])
+          .map(Number)
+          .filter((n) => Number.isInteger(n) && n > 0)
+      : scope.stores
+    req.storeIds = allowedStores
+    req.storeId = allowedStores[0] ?? req.authContext.activeStoreId ?? null
     return next()
   }
 
@@ -272,19 +285,28 @@ const validateStoreAccess = (req, res, next) => {
   
   if (userRole === 'super_admin') {
     req.storeId = uniqueCandidates[0] ?? null
+    req.storeIds = uniqueCandidates
     // A store-bound super_admin is subordinate to its own store's tenant
     // (DR-02): every requested store must belong to that tenant. A global
-    // super_admin, a request without a store, and a store without a tenant
-    // pass unchanged (superAdminStoreIds returns null for those).
-    if (uniqueCandidates.length === 0 || req.user.store == null) return next()
+    // super_admin and a store without a tenant remain unrestricted
+    // (superAdminStoreIds returns null for those).
+    if (req.user.store == null) return next()
     const { superAdminStoreIds } = require('./tenantScope')
     return superAdminStoreIds(req)
       .then((scope) => {
-        if (scope && uniqueCandidates.some((id) => !scope.includes(id))) {
+        if (!scope) return next()
+        if (uniqueCandidates.some((id) => !scope.includes(id))) {
           return res.status(403).json({
             message: 'Anda hanya dapat mengakses data di toko Anda',
             code: 'FOREIGN_STORE'
           })
+        }
+        // No explicit store: default to the caller's whole tenant, never
+        // null (which aggregate controllers interpret as deployment-wide).
+        if (uniqueCandidates.length === 0) {
+          req.storeIds = scope
+          const own = Number(req.user.store)
+          req.storeId = scope.includes(own) ? own : scope[0] ?? null
         }
         return next()
       })

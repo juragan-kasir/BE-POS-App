@@ -2161,6 +2161,10 @@ order: [['updatedAt', 'DESC']],
       }
 
       const store = req.storeId || null
+      const storeScope = Array.isArray(req.storeIds) && req.storeIds.length > 0
+        ? req.storeIds.map(Number).filter((n) => Number.isInteger(n) && n > 0)
+        : (store ? [Number(store)] : [])
+      const hasStoreScope = storeScope.length > 0
       let { startDate, endDate } = req.query
 
       // Default: the current month on the store's calendar.
@@ -2171,19 +2175,22 @@ order: [['updatedAt', 'DESC']],
       startDate = rangeStart.toISOString()
       endDate = rangeEnd.toISOString()
 
-      const storeCond = store ? ' AND "store" = :store' : ''
-      const storeCondAlias = store ? ' AND o."store" = :store' : ''
-      const storeCondPP = store ? ' AND pp."store" = :store' : ''
-      const storeCondE = store ? ' AND e."store" = :store' : ''
+      const storeCond = hasStoreScope ? ' AND "store" IN (:storeIds)' : ''
+      const storeCondAlias = hasStoreScope ? ' AND o."store" IN (:storeIds)' : ''
+      const storeCondPP = hasStoreScope ? ' AND pp."store" IN (:storeIds)' : ''
+      const storeCondE = hasStoreScope ? ' AND e."store" IN (:storeIds)' : ''
       const replacements = { startDate, endDate }
-      if (store) replacements.store = store
+      if (hasStoreScope) replacements.storeIds = storeScope
 
       const startDay = getStoreLocalDate(timezone, rangeStart)
       const endDay = getStoreLocalDate(timezone, rangeEnd)
       const todayStr = getStoreLocalDate(timezone)
 
       const stores = await db.location.findAll({
-        where: { status: 'active' },
+        where: {
+          status: 'active',
+          ...(hasStoreScope ? { id: { [Op.in]: storeScope } } : {})
+        },
         attributes: [
           'id',
           'name',

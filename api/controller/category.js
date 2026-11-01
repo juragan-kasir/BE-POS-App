@@ -124,9 +124,13 @@ const assertCategoryStoresAssignable = async (categoryId, storeIds, transaction)
   return result
 }
 
-const getCategoryStoreSubQuery = (storeId) => {
+const getCategoryStoreSubQuery = (storeIds) => {
+  const ids = (Array.isArray(storeIds) ? storeIds : [storeIds])
+    .map(Number)
+    .filter((n) => Number.isInteger(n) && n > 0)
+  if (ids.length === 0) return db.sequelize.literal('1 = 0')
   return db.sequelize.literal(
-    `EXISTS (SELECT 1 FROM category_store WHERE category = "category".id AND store = ${Number(storeId)} AND "deletedAt" IS NULL)`
+    `EXISTS (SELECT 1 FROM category_store WHERE category = "category".id AND store IN (${ids.join(',')}) AND "deletedAt" IS NULL)`
   )
 }
 
@@ -210,9 +214,13 @@ exports.getAllCategoryInTable = async (req, res) => {
     search
   } = req.query
 
-  if (!store && req.user?.roleType !== 'super_admin' && req.user?.store) {
-    store = req.user.store
-  }
+  const pinnedStore = Number(req.storeId ?? req.user?.store)
+  const scopeIds = Array.isArray(req.storeIds) && req.storeIds.length > 0
+    ? req.storeIds.map(Number).filter((n) => Number.isInteger(n) && n > 0)
+    : (store
+        ? [Number(store)]
+        : (Number.isInteger(pinnedStore) && pinnedStore > 0 ? [pinnedStore] : []))
+  if (!store && scopeIds.length > 0) store = scopeIds[0]
 
   try {
     const offset = (page - 1) * pageSize
@@ -225,22 +233,21 @@ exports.getAllCategoryInTable = async (req, res) => {
       whereClause.status = 'inactive'
     }
 
-    if (store) {
-      const storeId = parseInt(store)
+    if (scopeIds.length > 0) {
       if (await hasCategoryStoreTable()) {
-        // SuperAdmin: show assigned to store OR unassigned
-        // Admin/Cashier: show assigned to store only
+        // Store-bound super_admin: assigned to ANY own-tenant store OR
+        // unassigned. Global super_admin (empty scope) is unrestricted.
         const isSuperAdmin = req.user?.roleType === 'super_admin'
         if (isSuperAdmin) {
           const storeOr = [
-            getCategoryStoreSubQuery(storeId),
+            getCategoryStoreSubQuery(scopeIds),
             getUnassignedCategorySubQuery()
           ]
           whereClause[Op.or] = storeOr
           statsWhere = { [Op.or]: storeOr }
         } else {
-          whereClause[Op.and] = [getCategoryStoreSubQuery(storeId)]
-          statsWhere = { [Op.and]: [getCategoryStoreSubQuery(storeId)] }
+          whereClause[Op.and] = [getCategoryStoreSubQuery(scopeIds)]
+          statsWhere = { [Op.and]: [getCategoryStoreSubQuery(scopeIds)] }
         }
       }
     }

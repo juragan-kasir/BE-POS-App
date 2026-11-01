@@ -9,15 +9,16 @@ const { enrichAuditFields } = require('../../utils/auditFields')
 const { scalarStoreScope } = require('../../utils/tenantScope')
 
 exports.getTablesByStore = async (req, res) => {
-  const store = req.query.store ||
-      (req.user?.roleType !== 'super_admin' ? req.user?.store : null)
+  const storeScope = Array.isArray(req.storeIds) && req.storeIds.length > 0
+    ? req.storeIds.map(Number).filter((n) => Number.isInteger(n) && n > 0)
+    : (req.storeId ? [Number(req.storeId)] : [])
   const page = parseInt(req.query.page) || 1
   const limit = parseInt(req.query.limit) || 10
   const search = req.query.search || ''
   const offset = (page - 1) * limit
 
   try {
-    const whereClause = store ? { store } : {}
+    const whereClause = scalarStoreScope(req, {})
     if (search) {
       whereClause.name = { [Op.iLike]: `%${search}%` }
     }
@@ -32,9 +33,13 @@ exports.getTablesByStore = async (req, res) => {
     await enrichAuditFields(db, rows)
 
     const [locations, activeReservations] = await Promise.all([
-      Location.findAll({ attributes: ['id', 'name'], paranoid: false }),
+      Location.findAll({
+        attributes: ['id', 'name'],
+        paranoid: false,
+        where: storeScope.length > 0 ? { id: { [Op.in]: storeScope } } : {}
+      }),
       Reservation.findAll({
-        where: { store, status: ['pending', 'confirmed'] },
+        where: scalarStoreScope(req, { status: ['pending', 'confirmed'] }),
         attributes: [
           'id',
           'tableId',
