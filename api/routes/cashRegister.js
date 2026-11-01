@@ -18,11 +18,15 @@ const {
   decideVarianceSchema
 } = require('../validation/schemas')
 
+// Q-FIN-05 (product owner, 2026-11-01): a cashier opens and closes their
+// own store's register; Role Management (menuWriteGate above) still decides
+// which cashier roles may. Cash movements and variance decisions stay with
+// admins.
 router.post(
   '/open',
   authorization,
   validateStoreAccess,
-  requireRole('super_admin', 'admin'),
+  requireRole('super_admin', 'admin', 'kasir'),
   validate(createCashRegisterSchema),
   cashRegisterController.open
 )
@@ -30,7 +34,7 @@ router.put(
   '/close/:id',
   authorization,
   validateStoreAccess,
-  requireRole('super_admin', 'admin'),
+  requireRole('super_admin', 'admin', 'kasir'),
   validate(updateCashRegisterSchema),
   cashRegisterController.close
 )
