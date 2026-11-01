@@ -1,31 +1,25 @@
 const { Op } = require('sequelize')
 const db = require('../../db/models')
+const { scalarStoreScope, isSuperAdmin } = require('../../utils/tenantScope')
 const Notification = db.notification
+
+// E2E audit (2026-10-31): only `admin` and `user` were filtered by store, so a
+// kasir listed, counted and marked-all-read every tenant's notifications.
+// Every role now reads its own scope: its store (or assigned stores), a
+// tenant super_admin its tenant's stores, and a super_admin who picked a
+// store (validated by validateStoreAccess) that store only.
+const notificationScope = (req, where = {}) => {
+  const scoped = scalarStoreScope(req, where)
+  if (isSuperAdmin(req) && req.storeId != null) return { ...scoped, store: req.storeId }
+  return scoped
+}
 
 exports.getAllNotifications = async (req, res) => {
   try {
     const { page = 1, limit = 20, isRead, search } = req.query
     const offset = (page - 1) * limit
 
-    const userRole = req.user?.roleType
-    // Authoritative target store: set by validateStoreAccess. For non-super-
-    // admin req.storeId is pinned to the caller's own store (a foreign
-    // ?store= is rejected 403 at the middleware), so the client query value
-    // is never trusted here. super_admin filters via the client ?store= when
-    // provided, otherwise sees all/global notifications.
-    const userStore = req.storeId ?? req.user?.store
-    // A super_admin narrows only by an explicitly requested store. Its own
-    // store must not be substituted for an absent/empty filter, or the
-    // "All Stores" control silently becomes "my store".
-    const requestedStore = req.storeId
-
-    let whereCondition = {}
-
-    if (userRole === 'admin' || userRole === 'user') {
-      whereCondition.store = userStore
-    } else if (userRole === 'super_admin' && requestedStore !== undefined && requestedStore !== null) {
-      whereCondition.store = requestedStore
-    }
+    const whereCondition = notificationScope(req)
 
     if (isRead !== undefined && isRead !== '') {
       whereCondition.isRead = isRead === 'true'
@@ -34,7 +28,7 @@ exports.getAllNotifications = async (req, res) => {
     if (search) {
       whereCondition[Op.or] = [
         { title: { [Op.iLike]: `%${search}%` } },
-        { message: { [Op.iLike]: `%${search}%` } }
+        { description: { [Op.iLike]: `%${search}%` } }
       ]
     }
 
@@ -74,15 +68,7 @@ exports.getAllNotifications = async (req, res) => {
 
 exports.getUnreadCount = async (req, res) => {
   try {
-    const userRole = req.user?.roleType
-    const userStore = req.user?.store
-
-    let whereCondition = { isRead: false }
-    if (userRole === 'admin' || userRole === 'user') {
-      whereCondition.store = userStore
-    }
-
-    const count = await Notification.count({ where: whereCondition })
+    const count = await Notification.count({ where: notificationScope(req, { isRead: false }) })
 
     return res.status(200).json({
       success: true,
@@ -143,15 +129,10 @@ exports.markAsRead = async (req, res) => {
 
 exports.markAllAsRead = async (req, res) => {
   try {
-    const userRole = req.user?.roleType
-    const userStore = req.user?.store
-
-    let whereCondition = { isRead: false }
-    if (userRole === 'admin' || userRole === 'user') {
-      whereCondition.store = userStore
-    }
-
-    await Notification.update({ isRead: true }, { where: whereCondition })
+    await Notification.update(
+      { isRead: true },
+      { where: notificationScope(req, { isRead: false }) }
+    )
 
     return res
       .status(200)
