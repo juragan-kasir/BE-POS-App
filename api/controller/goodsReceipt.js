@@ -27,6 +27,13 @@ const {
   inventoryLinkErrorBody
 } = require('../service/inventoryLinkService')
 
+// A receipt edit or delete moves the PO lines' receivedQuantity; the PO's
+// ordered/received status must follow, as create() and changeStatus() do.
+const syncPurchaseOrderStatus = (purchaseOrderId, transaction) =>
+  purchaseOrderId
+    ? calculatePurchaseOrderFulfillmentStatus({ purchaseOrderId, transaction })
+    : null
+
 const generateReceiptNo = () => {
   const date = new Date()
   const year = date.getFullYear()
@@ -1431,6 +1438,7 @@ const goodsReceiptController = {
             },
             { transaction }
           )
+          await syncPurchaseOrderStatus(receipt.purchaseOrderId, transaction)
           await transaction.commit()
           const untouched = await db.goodsReceipt.findByPk(locked.id, {
             include: [{ model: db.goodsReceiptItem, as: 'items' }]
@@ -1493,6 +1501,7 @@ const goodsReceiptController = {
             },
             { transaction }
           )
+          await syncPurchaseOrderStatus(receipt.purchaseOrderId, transaction)
           await transaction.commit()
           const cancelled = await db.goodsReceipt.findByPk(locked.id, {
             include: [{ model: db.goodsReceiptItem, as: 'items' }]
@@ -1704,6 +1713,7 @@ const goodsReceiptController = {
           }
         }
 
+        await syncPurchaseOrderStatus(receipt.purchaseOrderId, transaction)
         await transaction.commit()
       } catch (err) {
         await transaction.rollback()
@@ -1854,6 +1864,7 @@ const goodsReceiptController = {
           transaction
         })
         await receipt.destroy({ transaction })
+        await syncPurchaseOrderStatus(receipt.purchaseOrderId, transaction)
         await transaction.commit()
       } catch (err) {
         await transaction.rollback()
