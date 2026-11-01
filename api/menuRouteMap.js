@@ -55,14 +55,14 @@ const MENU_WRITE_GATED_ROUTES = Object.freeze({
   'purchaseReturn.js': gate('/purchase-return', ['view']),
   'reportConfig.js': gate('/report/settings', ['view']),
   'reservation.js': gate('/reservation', CRUD),
-  'role.js': gate('/role-management', ALL6, { exclude: ['/update-user-role'] }),
+  'role.js': gate('/role-management', ALL6, { exclude: ['/update-user-role'], tenantAdmin: true }),
   'stockOpname.js': gate('/stock-opname', ['add', 'view']),
   'supplier.js': gate('/supplier', ALL6),
   'supplierBankAccount.js': gate('/supplier', ALL6),
   'supplierCategory.js': gate('/supplier-category', CRUD),
   'supplierContact.js': gate('/supplier', ALL6),
   'table.js': gate('/table-list', [...CRUD, 'update-status'], { aliases: ['/table'] }),
-  'taxConfig.js': gate('/tax-list', CRUD),
+  'taxConfig.js': gate('/tax-list', CRUD, { tenantAdmin: true }),
   'type-payment.js': gate('/type-payment-list', CRUD),
 
   // Wave 3 (FG-SEC-01): the remaining back-office writes. Cashier, floor and

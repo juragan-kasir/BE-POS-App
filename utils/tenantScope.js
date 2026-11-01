@@ -98,7 +98,13 @@ function resolveStoreId(req) {
 function scalarStoreScope(req, where = {}) {
   // F5: canonical context wins whenever it is attached.
   if (req?.authContext) return canonicalTenantFilter(req, where)
-  if (isSuperAdmin(req)) return { ...where }
+  if (isSuperAdmin(req)) {
+    const ids = Array.isArray(req.storeIds)
+      ? req.storeIds.map(Number).filter((n) => Number.isInteger(n) && n > 0)
+      : []
+    if (ids.length === 0) return { ...where }
+    return { ...where, store: ids.length === 1 ? ids[0] : { [Op.in]: ids } }
+  }
   const userStore = Number(req.user?.store)
   return { ...where, store: Number.isFinite(userStore) ? userStore : -1 }
 }
@@ -210,7 +216,22 @@ function relatedStoreInclude(req, { model, as, attributes, parentShape = 'scalar
     }
   }
   if (isSuperAdmin(req)) {
-    return { model, as, required: false, ...(attributes ? { attributes } : {}) }
+    // A store-bound super_admin carries its tenant roster in req.storeIds
+    // (set by validateStoreAccess); only a truly global super_admin is
+    // unrestricted.
+    const ids = Array.isArray(req.storeIds)
+      ? req.storeIds.map(Number).filter((n) => Number.isInteger(n) && n > 0)
+      : []
+    if (ids.length === 0) {
+      return { model, as, required: false, ...(attributes ? { attributes } : {}) }
+    }
+    return {
+      model,
+      as,
+      required: true,
+      where: { store: ids.length === 1 ? ids[0] : { [Op.in]: ids } },
+      ...(attributes ? { attributes } : {})
+    }
   }
   const userStore = Number(req.user?.store)
   const storeId = Number.isFinite(userStore) ? userStore : -1

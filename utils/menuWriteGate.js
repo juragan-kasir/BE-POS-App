@@ -37,10 +37,11 @@ const pathMatches = (pattern, path) => path === pattern || path.startsWith(`${pa
 // One gate section: the menu a group of paths belongs to. A file maps to one
 // section, or to several (`pos.js`: stock adjust, transfer, outlet price …),
 // each confined to its own `only` prefixes.
-const buildSection = ({ menu, aliases = [], offered, only = [], exclude = [] }) => {
+const buildSection = ({ menu, aliases = [], offered, only = [], exclude = [], tenantAdmin = false }) => {
   const keys = [menu, ...aliases]
   return {
     menu,
+    tenantAdmin,
     applies: (path) =>
       (only.length === 0 || only.some((p) => pathMatches(p, path))) &&
       !exclude.some((p) => pathMatches(p, path)),
@@ -58,6 +59,30 @@ const menuWriteGate = (file) => {
 
   const check = async (req, res, next, section) => {
     try {
+      // Tenant ownership surfaces (role management, tax setup) are already
+      // confined by the route's canonical tenant gate. A tenant_admin of the
+      // active tenant must not be locked out by a stale built-in role menu
+      // that predates those pages; the tenant membership is the authority.
+      if (section.tenantAdmin && req.user) {
+        const { resolveAuthorizationContext } = require('./authContext')
+        const session = req.authSession
+        const ctx =
+          req.authContext ||
+          (await resolveAuthorizationContext(db, {
+            userId: req.user.id,
+            activeTenantId: session?.activeTenantId,
+            activeStoreId: session?.activeStoreId,
+            authenticatedAt: session?.createdAt
+          }))
+        if (
+          ctx?.eligible === true &&
+          ctx.activeRole === 'tenant_admin' &&
+          ctx.activeTenantId != null
+        ) {
+          req.authContext = ctx
+          return next()
+        }
+      }
       const account = await db.user.findByPk(req.user.id, {
         attributes: ['id', 'accessMenu', 'roleId', 'roleType']
       })

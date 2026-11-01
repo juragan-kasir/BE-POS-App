@@ -2624,8 +2624,12 @@ exports.getOrdersByStore = async (req, res) => {
         message: 'Store assignment required'
       })
     }
+    const storeScope = Array.isArray(req.storeIds) && req.storeIds.length > 0
+      ? req.storeIds.map(Number).filter((n) => Number.isInteger(n) && n > 0)
+      : (reqStore ? [Number(reqStore)] : [])
     const where = {}
-    if (reqStore) where.store = reqStore
+    if (storeScope.length === 1) where.store = storeScope[0]
+    else if (storeScope.length > 1) where.store = { [Op.in]: storeScope }
     if (status) where.status = status
     if (req.query.source) where.source = req.query.source
     if (req.query.paymentStatus) where.paymentStatus = req.query.paymentStatus
@@ -2649,11 +2653,7 @@ exports.getOrdersByStore = async (req, res) => {
           message: 'Cash register not found'
         })
       }
-      if (
-        req.user?.roleType !== 'super_admin' &&
-        reqStore &&
-        Number(register.store) !== Number(reqStore)
-      ) {
+      if (storeScope.length > 0 && !storeScope.includes(Number(register.store))) {
         return res.status(403).json({
           message: 'Anda hanya dapat mengakses data di toko Anda'
         })
@@ -4589,6 +4589,7 @@ exports.createCustomerOrder = async (req, res) => {
       ['occupied', 'reserved', 'maintenance'].includes(currentTable.status)
     ) {
       return res.status(400).json({
+        code: currentTable.status === 'occupied' ? 'TABLE_OCCUPIED' : 'TABLE_NOT_AVAILABLE',
         message:
           currentTable.status === 'occupied'
             ? 'Table is already occupied'
@@ -4884,6 +4885,7 @@ exports.createCustomerOrder = async (req, res) => {
             : 'Table is not available'
         )
         err.statusCode = 400
+        err.code = lockedTable.status === 'occupied' ? 'TABLE_OCCUPIED' : 'TABLE_NOT_AVAILABLE'
         throw err
       }
 
