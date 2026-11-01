@@ -10,7 +10,10 @@ const { validate } = require('../middleware/validate')
 const {
   createOrderSchema,
   updateOrderStatusSchema,
-  updateOrderItemStatusSchema
+  updateOrderItemStatusSchema,
+  openBillSchema,
+  addOrderItemsSchema,
+  addCustomerOrderItemsSchema
 } = require('../validation/schemas')
 
 // FND-002 (security) — dedicated rate limiter for the anonymous QR order
@@ -85,6 +88,24 @@ router.post(
   validate(createOrderSchema),
   orderController.createOrder
 )
+// E2E audit #8 open bill (batch B9): save a dine-in order unpaid, and add
+// rounds of items to it until it is paid (same sellers as /create).
+router.post(
+  '/open-bill',
+  authorization,
+  validateStoreAccess,
+  requireCapability('payment.collect', { entity: 'order' }),
+  validate(openBillSchema),
+  orderController.createOpenBill
+)
+router.post(
+  '/:id/items',
+  authorization,
+  validateStoreAccess,
+  requireCapability('payment.collect', { entity: 'order', entityIdFrom: (req) => req.params.id }),
+  validate(addOrderItemsSchema),
+  orderController.addOrderItems
+)
 // DR-11 / DR-17: read-only server quote for the counter checkout — the
 // same resolver as /create, so the displayed total is the charged total.
 router.post(
@@ -134,6 +155,12 @@ router.get('/customer-orders', orderController.getCustomerOrders)
 // other stores' orders. See api/controller/order.js: getCustomerOrder.
 router.get('/customer-order/:token', orderController.getCustomerOrder)
 router.post('/customer-create', customerCreateLimiter, orderController.createCustomerOrder)
+router.post(
+  '/customer-order/:token/items',
+  customerCreateLimiter,
+  validate(addCustomerOrderItemsSchema),
+  orderController.addCustomerOrderItems
+)
 router.post('/customer-quote', customerQuoteLimiter, orderController.quoteCustomerOrder)
 router.get('/receipt-html/:token', orderController.getReceiptHTML)
 router.get('/customer-tax-rate', orderController.getCustomerTaxRate)

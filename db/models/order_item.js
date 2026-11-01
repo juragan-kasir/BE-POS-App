@@ -86,6 +86,12 @@ module.exports = (sequelize, DataTypes) => {
       bundleName: {
         type: DataTypes.STRING,
         allowNull: true
+      },
+      // Batch B9: the round that added this item to an open bill; NULL for
+      // the order's first items.
+      roundId: {
+        type: DataTypes.INTEGER,
+        allowNull: true
       }
     },
     {

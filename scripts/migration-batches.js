@@ -152,10 +152,22 @@ const E2_BATCHES = Object.freeze({
     // before any DDL while a row holds a name. No governance gate. The BE
     // code reads these columns, so B8 must be recorded before it deploys.
     openGates: []
+  }),
+  B9: deepFreeze({
+    id: 'B9',
+    title: 'E2E audit #8: open bill rounds',
+    expectedCount: 1,
+    migrations: ['20261101000002-order-rounds.js'],
+    // Product owner, 2026-11-01: items are added to an unpaid order in
+    // rounds. up creates order_round (unique order + idempotencyKey) and the
+    // nullable order_item.roundId, add-if-missing, rewriting nothing; down
+    // stops before any DDL while a round exists. No governance gate. The BE
+    // code reads order_item.roundId, so B9 must be recorded before it deploys.
+    openGates: []
   })
 })
 
-const BATCH_ORDER = Object.freeze(['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8'])
+const BATCH_ORDER = Object.freeze(['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B9'])
 
 // D-08 B1 resume contracts. A resume finishes a batch whose earlier members
 // were recorded by an interrupted run; it never redefines the batch (the

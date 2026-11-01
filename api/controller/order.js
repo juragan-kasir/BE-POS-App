@@ -15,7 +15,7 @@ const {
   auditCapabilityDenial,
   denialBody
 } = require('../../utils/financialCapabilities')
-const { emitItemStatusUpdate, emitNewOrder } = require('../service/socket')
+const { emitItemStatusUpdate, emitNewOrder, emitOrderUpdate } = require('../service/socket')
 const batchService = require('../service/batchService')
 const { adjustMemberPoints, maybeUpgradeMemberTier, computeEarnedPoints, awardEarnedPointsOnce, reverseEarnedPoints } = require('../service/loyaltyService')
 const { incrementPromoUsage } = require('../service/promoUsageService')
@@ -54,8 +54,15 @@ const {
   counterOrderMismatches,
   customerOrderMismatches,
   idempotencyMismatchBody,
-  existingOrderSummary
+  existingOrderSummary,
+  linesMatch
 } = require('../service/orderIdempotency')
+const {
+  assertOpenForRounds,
+  assertNothingCollected,
+  addRoundTotals,
+  normalizeOrderLines
+} = require('../service/openBill')
 const { resolveAttributedRegister } = require('../service/settlementAttribution')
 const { FIELD_MAX } = require('../validation/fieldLimits')
 const { bodyFor, firstTooLong } = require('../../utils/valueTooLong')
@@ -1277,6 +1284,58 @@ const resolveCounterStore = (req) => {
 // Read-only — it never writes. Refusals come back as { ok: false,
 // status, body } for the caller to send unchanged; thrown errors carry
 // their own statusCode/code.
+// Phase 39 — POS dine-in table claim, shared by the counter sale and the
+// open bill: lock the table row, re-check it, and occupy it in the caller's
+// transaction so the claim commits or rolls back with the order. A
+// concurrent same-key retry that lost this lock to its own winner replays
+// that order instead of being refused.
+const claimTableForOrder = async ({ tableId, store, idempotencyKey, t }) => {
+  const lockedTable = await Table.findOne({
+    where: { id: tableId, store },
+    transaction: t,
+    lock: t.LOCK.UPDATE
+  })
+  if (!lockedTable) {
+    const err = new Error('Table not found')
+    err.statusCode = 400
+    err.code = 'TABLE_NOT_FOUND'
+    throw err
+  }
+  if (lockedTable.status !== 'available') {
+    if (idempotencyKey) {
+      const existingOrder = await Order.findOne({
+        where: { store, idempotencyKey },
+        transaction: t
+      })
+      if (existingOrder) {
+        const replayErr = new Error('Order already exists for this idempotency key')
+        replayErr.idempotencyReplayOrderId = existingOrder.id
+        throw replayErr
+      }
+    }
+    const err = new Error(
+      lockedTable.status === 'occupied' ? 'Table is already occupied' : 'Table is not available'
+    )
+    err.statusCode = 400
+    err.code = lockedTable.status === 'occupied' ? 'TABLE_OCCUPIED' : 'TABLE_NOT_AVAILABLE'
+    throw err
+  }
+  await lockedTable.update({ status: 'occupied' }, { transaction: t })
+}
+
+// The refusal for a line set loadAndPriceOrderItems could not price. W3-2:
+// the price-mismatch conflict keeps its exact locked body and must never
+// collapse into the generic error shape.
+const pricingRefusal = (pricing) => {
+  if (pricing.statusCode === 409 && pricing.mismatches) {
+    return { status: 409, body: buildPriceMismatchBody(pricing.mismatches) }
+  }
+  return {
+    status: pricing.statusCode || 400,
+    body: { message: pricing.message, ...(pricing.code ? { code: pricing.code } : {}) }
+  }
+}
+
 const priceCounterOrder = async ({
   items,
   store,
@@ -1295,18 +1354,7 @@ const priceCounterOrder = async ({
   })
 
   const pricing = await loadAndPriceOrderItems(items, store, user)
-  if (!pricing.ok) {
-    // W3-2: the price-mismatch conflict keeps its exact locked body and
-    // must never collapse into the generic error shape.
-    if (pricing.statusCode === 409 && pricing.mismatches) {
-      return { ok: false, status: 409, body: buildPriceMismatchBody(pricing.mismatches) }
-    }
-    return {
-      ok: false,
-      status: pricing.statusCode || 400,
-      body: { message: pricing.message, ...(pricing.code ? { code: pricing.code } : {}) }
-    }
-  }
+  if (!pricing.ok) return { ok: false, ...pricingRefusal(pricing) }
 
   // DR-24 D-01: the cashier tax toggle is removed — the resolved outlet PPN
   // (DR-17) is always the rate charged; a tax-free outlet configures 0 %
@@ -1657,41 +1705,7 @@ exports.createOrder = async (req, res) => {
       // rolls back with the order. Released only by the Table Management
       // "Set Available" action — never by this order's own status changes.
       if (tableId) {
-         const lockedTable = await Table.findOne({
-           where: { id: tableId, store: authorizedStore },
-           transaction: t,
-          lock: t.LOCK.UPDATE
-        })
-        if (!lockedTable) {
-          const err = new Error('Table not found')
-          err.statusCode = 400
-          err.code = 'TABLE_NOT_FOUND'
-          throw err
-        }
-        if (lockedTable.status !== 'available') {
-          // A concurrent same-key retry can lose this lock to its own
-          // winner — replay that order instead of rejecting it.
-          if (idempotencyKey) {
-             const existingOrder = await Order.findOne({
-               where: { store: authorizedStore, idempotencyKey },
-               transaction: t
-             })
-            if (existingOrder) {
-              const replayErr = new Error('Order already exists for this idempotency key')
-              replayErr.idempotencyReplayOrderId = existingOrder.id
-              throw replayErr
-            }
-          }
-          const err = new Error(
-            lockedTable.status === 'occupied'
-              ? 'Table is already occupied'
-              : 'Table is not available'
-          )
-          err.statusCode = 400
-          err.code = lockedTable.status === 'occupied' ? 'TABLE_OCCUPIED' : 'TABLE_NOT_AVAILABLE'
-          throw err
-        }
-        await lockedTable.update({ status: 'occupied' }, { transaction: t })
+        await claimTableForOrder({ tableId, store: authorizedStore, idempotencyKey, t })
       }
 
       // P1 (DR-PAY-ATTR-02/03): every counter collection requires an open
@@ -1909,7 +1923,8 @@ const createOrderItems = async (
   productById,
   discountType,
   discountValue,
-  t
+  t,
+  roundId = null
 ) => {
   // HPP per unit at sale time (itemCostService): recipe or purchase cost,
   // null when unknown — never the selling price.
@@ -1942,7 +1957,8 @@ const createOrderItems = async (
           modifiers: item.modifiers || [],
           notes: item.notes,
           hppSnapshot: bundleUnitCost(bundle, unitCosts),
-          status: 'pending'
+          status: 'pending',
+          roundId
         },
         { transaction: t }
       )
@@ -1967,7 +1983,8 @@ const createOrderItems = async (
         modifiers: item.modifiers || [],
         notes: item.notes,
         hppSnapshot: unitCosts.get(Number(item.product || item.productId)) ?? null,
-        status: 'pending'
+        status: 'pending',
+        roundId
       },
       { transaction: t }
     )
@@ -5672,3 +5689,269 @@ exports.getCustomerTaxRate = async (req, res) => {
     return res.status(500).json({ error: 'Internal Server Error' })
   }
 }
+
+// ---- Open bill (E2E audit #8, batch B9) --------------------------------
+// Product owner, 2026-11-01: the cashier saves a dine-in order unpaid; it goes
+// to the kitchen and is paid at the end. More rounds can be added by the
+// cashier or by the QR diner while nothing is collected. Stock and BOM are
+// deducted once, by the existing paid transition (deductStockForPaidOrder).
+// Phase 1 carries no discount: a new open bill is priced without one, and a
+// round keeps whatever discount the order already has.
+
+const OPEN_BILL_SOURCE = 'pos'
+const ROUND_SOURCE = Object.freeze({ cashier: 'cashier', customer: 'customer' })
+
+const refuseWith = (res, status, code, message) =>
+  res.status(status).json({ error: message, code })
+
+const replayOpenBill = async (res, existing, body) => {
+  const stored = await OrderItem.findAll({ where: { order: existing.id, roundId: null } })
+  const sameTable = Number(existing.tableId) === Number(body.tableId)
+  const sameLines = linesMatch(stored, normalizeOrderLines(body.items))
+  if (!sameTable || !sameLines) {
+    const fields = [...(sameTable ? [] : ['tableId']), ...(sameLines ? [] : ['items'])]
+    return res.status(409).json(idempotencyMismatchBody(fields))
+  }
+  return res.status(200).json({ message: 'Open bill already saved', data: await fetchFullOrder(existing.id) })
+}
+
+// POST /order/open-bill — a dine-in order saved unpaid: table claimed, sent to
+// the kitchen, no payment, no stock movement, no ledger row.
+exports.createOpenBill = async (req, res) => {
+  const scope = resolveCounterStore(req)
+  if (!scope.store) return res.status(scope.status).json(scope.body)
+  const store = scope.store
+  const { tableId, cashierId, cashierName, customerName, customerPhone, notes, idempotencyKey } =
+    req.body
+  const items = normalizeOrderLines(req.body.items)
+
+  if (typeof idempotencyKey !== 'string' || idempotencyKey.trim() === '') {
+    return refuseWith(res, 422, 'IDEMPOTENCY_KEY_REQUIRED', 'An idempotencyKey is required for an open bill')
+  }
+  if (!tableId) {
+    return refuseWith(res, 422, 'TABLE_REQUIRED', 'An open bill needs a table')
+  }
+
+  try {
+    const archived = await db.location.findOne({ where: { id: store, status: 'archived' }, attributes: ['id'] })
+    if (archived) {
+      return refuseWith(res, 409, 'STORE_ARCHIVED', 'This outlet is archived and cannot take new orders')
+    }
+    const existing = await Order.findOne({ where: { store, idempotencyKey } })
+    if (existing) return replayOpenBill(res, existing, req.body)
+
+    const tableCheck = await checkTableAvailable(tableId, store)
+    if (!tableCheck.ok) return res.status(400).json({ message: tableCheck.message, code: tableCheck.code })
+
+    const pricing = await loadAndPriceOrderItems(items, store, req.user)
+    if (!pricing.ok) {
+      const refusal = pricingRefusal(pricing)
+      return res.status(refusal.status).json(refusal.body)
+    }
+    const taxRate = await getActiveTaxRate(store)
+    const serviceChargeRate = await getServiceChargeRate(store)
+    const totals = calculateOrderTotals(items, 0, 'none', taxRate, serviceChargeRate)
+    const orderNumber = generateOrderNumber()
+
+    const order = await withDeadlockRetry(() =>
+      db.sequelize.transaction(async (t) => {
+        await claimTableForOrder({ tableId, store, idempotencyKey, t })
+        const created = await Order.create(
+          {
+            orderNumber,
+            store,
+            tableId,
+            cashierId,
+            cashierName,
+            customerName,
+            customerPhone,
+            notes,
+            paymentMethod: null,
+            source: OPEN_BILL_SOURCE,
+            status: 'pending',
+            paymentStatus: 'unpaid',
+            subTotal: totals.subTotal,
+            totalQuantity: totals.totalQuantity,
+            discountType: 'none',
+            discountValue: 0,
+            discountAmount: 0,
+            taxRate,
+            taxAmount: totals.taxAmount,
+            serviceChargeRate,
+            serviceChargeAmount: totals.serviceChargeAmount,
+            totalPrice: totals.totalPrice,
+            idempotencyKey,
+            publicToken: crypto.randomBytes(24).toString('hex'),
+            customerNumber: await generateCustomerNumber(store, t),
+            createdBy: req.user?.id
+          },
+          { transaction: t }
+        )
+        await createOrderItems(created, items, pricing.bundleMap, pricing.productById, 'none', 0, t)
+        await OrderStatus.create(
+          {
+            order: created.id,
+            status: 'pending',
+            createdBy: req.user?.id,
+            notes: `Open bill by ${cashierName || 'cashier'}`
+          },
+          { transaction: t }
+        )
+        return created
+      })
+    )
+
+    const fullOrder = await fetchFullOrder(order.id).catch((error) => {
+      console.error(`createOpenBill: re-read failed for committed order ${order.id}:`, error)
+      return null
+    })
+    try {
+      createAudit(req, 'create', 'order', order.id, `Opened bill: ${orderNumber}`)
+      emitNewOrder(store, fullOrder || order)
+    } catch (error) {
+      console.error(`createOpenBill: post-commit side effect failed for order ${order.id}:`, error)
+    }
+    return res.status(201).json({ message: 'Open bill saved', data: fullOrder || order })
+  } catch (error) {
+    if (error.idempotencyReplayOrderId) {
+      return replayOpenBill(res, await Order.findByPk(error.idempotencyReplayOrderId), req.body)
+    }
+    if (isOrderReplayRelevantUniqueError(error)) {
+      const existing = await Order.findOne({ where: { store, idempotencyKey } })
+      if (existing) return replayOpenBill(res, existing, req.body)
+    }
+    console.error('createOpenBill:', error)
+    if (!error.statusCode) return refuseWith(res, 500, 'INTERNAL_ERROR', 'Internal Server Error')
+    return refuseWith(res, error.statusCode, error.code, error.message)
+  }
+}
+
+const replayRound = async (res, round, items, present) => {
+  const stored = await OrderItem.findAll({ where: { roundId: round.id } })
+  if (!linesMatch(stored, items)) return res.status(409).json(idempotencyMismatchBody(['items']))
+  return res.status(200).json({ message: 'Items already added', data: await present(round.order) })
+}
+
+const findRound = (orderId, idempotencyKey) =>
+  db.order_round.findOne({ where: { order: orderId, idempotencyKey } })
+
+// What the anonymous QR diner gets back: the bill, never staff or ledger data.
+const CUSTOMER_ROUND_ATTRIBUTES = [
+  'orderNumber',
+  'status',
+  'paymentStatus',
+  'subTotal',
+  'discountAmount',
+  'taxAmount',
+  'serviceChargeAmount',
+  'totalPrice',
+  'totalQuantity'
+]
+const presentCustomerOrder = (orderId) =>
+  Order.findByPk(orderId, { attributes: CUSTOMER_ROUND_ATTRIBUTES })
+
+const countActiveSplits = (orderId, t) =>
+  db.split_bill.count({ where: { order: orderId, status: 'pending' }, transaction: t })
+
+// Adds one round of items to an open order. `findOrder` resolves the order
+// the caller may touch (store-scoped for the cashier, publicToken for the
+// diner) and `present` what the caller gets back; everything else is shared.
+const addOrderRound = async ({ req, res, findOrder, present, source, user }) => {
+  const { idempotencyKey } = req.body
+  const items = normalizeOrderLines(req.body.items)
+  if (typeof idempotencyKey !== 'string' || idempotencyKey.trim() === '') {
+    return refuseWith(res, 422, 'IDEMPOTENCY_KEY_REQUIRED', 'An idempotencyKey is required to add items')
+  }
+  if (items.length === 0) {
+    return refuseWith(res, 422, 'ITEMS_REQUIRED', 'Add at least one item')
+  }
+
+  try {
+    const order = await findOrder()
+    if (!order) return res.status(404).json({ message: 'Order not found' })
+    const priorRound = await findRound(order.id, idempotencyKey)
+    if (priorRound) return replayRound(res, priorRound, items, present)
+    assertOpenForRounds(order)
+
+    const pricing = await loadAndPriceOrderItems(items, order.store, user)
+    if (!pricing.ok) {
+      const refusal = pricingRefusal(pricing)
+      return res.status(refusal.status).json(refusal.body)
+    }
+
+    await withDeadlockRetry(() =>
+      db.sequelize.transaction(async (t) => {
+        const locked = await Order.findByPk(order.id, { transaction: t, lock: t.LOCK.UPDATE })
+        assertOpenForRounds(locked)
+        const financials = await computeOrderFinancials(locked, t)
+        assertNothingCollected({
+          collected: financials.C,
+          activeSplits: await countActiveSplits(locked.id, t)
+        })
+        const round = await db.order_round.create(
+          { order: locked.id, idempotencyKey, source, itemCount: items.length, createdBy: user?.id || null },
+          { transaction: t }
+        )
+        await createOrderItems(locked, items, pricing.bundleMap, pricing.productById, 'none', 0, t, round.id)
+        await locked.update(addRoundTotals(locked, items), { transaction: t })
+        await OrderStatus.create(
+          {
+            order: locked.id,
+            status: locked.status,
+            createdBy: user?.id || null,
+            notes: `Added ${items.length} item(s) (${source})`
+          },
+          { transaction: t }
+        )
+      })
+    )
+
+    try {
+      emitOrderUpdate(order.store, await fetchFullOrder(order.id))
+    } catch (error) {
+      console.error(`addOrderRound: realtime emit failed for order ${order.id}:`, error)
+    }
+    return res.status(201).json({ message: 'Items added', data: await present(order.id) })
+  } catch (error) {
+    if (isOrderRoundReplayError(error)) {
+      const order = await findOrder()
+      const round = order && (await findRound(order.id, idempotencyKey))
+      if (round) return replayRound(res, round, items, present)
+    }
+    console.error('addOrderRound:', error)
+    if (!error.statusCode) return refuseWith(res, 500, 'INTERNAL_ERROR', 'Internal Server Error')
+    return refuseWith(res, error.statusCode, error.code, error.message)
+  }
+}
+
+const isOrderRoundReplayError = (error) =>
+  error?.name === 'SequelizeUniqueConstraintError' &&
+  (error?.parent?.constraint === 'uq_order_round_order_idempotency' ||
+    error?.original?.constraint === 'uq_order_round_order_idempotency')
+
+// POST /order/:id/items — the cashier adds a round to an open order of the
+// store in scope.
+exports.addOrderItems = (req, res) => {
+  const scope = resolveCounterStore(req)
+  if (!scope.store) return res.status(scope.status).json(scope.body)
+  return addOrderRound({
+    req,
+    res,
+    source: ROUND_SOURCE.cashier,
+    user: req.user,
+    present: fetchFullOrder,
+    findOrder: () => Order.findOne({ where: { id: req.params.id, store: scope.store } })
+  })
+}
+
+// POST /order/customer-order/:token/items — the QR diner adds a round to
+// their own unpaid QR order (opaque publicToken, like getCustomerOrder).
+exports.addCustomerOrderItems = (req, res) =>
+  addOrderRound({
+    req,
+    res,
+    source: ROUND_SOURCE.customer,
+    user: null,
+    present: presentCustomerOrder,
+    findOrder: () => Order.findOne({ where: { publicToken: req.params.token, source: 'qr' } })
+  })

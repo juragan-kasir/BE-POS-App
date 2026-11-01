@@ -341,6 +341,16 @@ module.exports = {
   'This payment type is not active for the store': 'Jenis pembayaran ini tidak aktif untuk toko',
   'Count the cash in the drawer and enter it to close the register':
     'Hitung uang di laci lalu masukkan jumlahnya untuk menutup kasir',
+  'An idempotencyKey is required for an open bill': 'idempotencyKey wajib diisi untuk tagihan terbuka',
+  'An open bill needs a table': 'Tagihan terbuka harus memakai meja',
+  'Items can only be added to an unpaid order that is still open':
+    'Item hanya bisa ditambahkan ke pesanan yang belum dibayar dan masih terbuka',
+  'This bill has been split; cancel the split before adding items':
+    'Tagihan ini sudah dipisah; batalkan pemisahan dulu sebelum menambah item',
+  'Part of this bill is already paid; items can no longer be added':
+    'Sebagian tagihan ini sudah dibayar; item tidak bisa ditambahkan lagi',
+  'An idempotencyKey is required to add items': 'idempotencyKey wajib diisi untuk menambah item',
+  'Add at least one item': 'Tambahkan minimal satu item',
   'This payment type does not match the payment method':
     'Jenis pembayaran ini tidak sesuai dengan metode pembayaran'
 }
