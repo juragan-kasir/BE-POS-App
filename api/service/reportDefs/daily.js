@@ -20,7 +20,7 @@ const defaultColumns = [
   { key: 'totalCovers', label: 'Jumlah Tamu', type: 'number', width: 12, align: 'right' }
 ]
 
-const totals = ['totalTransaksi', 'totalPenjualanBersih', 'totalHpp', 'qtyTanpaHpp', 'grossProfit', 'netProfit', 'totalCovers']
+const totals = ['totalTransaksi', 'totalPenjualanKotor', 'diskon', 'pajak', 'serviceCharge', 'totalPenjualanBersih', 'totalHpp', 'qtyTanpaHpp', 'grossProfit', 'operationalExpense', 'netProfit', 'totalCovers']
 
 const filename = () => 'laporan-harian'
 
@@ -71,6 +71,8 @@ const getData = async (req) => {
             COUNT(*) as "totalTransaksi",
             COALESCE(SUM(o."subTotal"), 0) as "totalPenjualan",
             COALESCE(SUM(o."discountAmount"), 0) as "totalDiscount",
+            COALESCE(SUM(o."taxAmount"), 0) as "totalTax",
+            COALESCE(SUM(o."serviceChargeAmount"), 0) as "totalServiceCharge",
             COALESCE(SUM(o."totalQuantity"), 0) as "totalQty",
             COALESCE(SUM(o."totalCovers"), 0) as "totalCovers"
      FROM "order" o
@@ -134,7 +136,7 @@ const getData = async (req) => {
     // figures, not January's — matches this report's pre-existing
     // convention).
     let refundConditions = `sr.status = 'approved' AND sr."approvedAt" IS NOT NULL`
-    const refundReplacements = {}
+    const refundReplacements = { storeTimezone }
     if (store) { refundConditions += ` AND sr."store" = :store`; refundReplacements.store = store }
     if (startDate) { refundConditions += ` AND sr."approvedAt" >= :startDate`; refundReplacements.startDate = replacements.startDate }
     if (endDate) { refundConditions += ` AND sr."approvedAt" <= :endDate`; refundReplacements.endDate = replacements.endDate }
@@ -147,14 +149,14 @@ const getData = async (req) => {
     // order_item simply add more (already-1:1) rows here, correctly
     // summed once each by GROUP BY.
     const dailyRefunds = await db.sequelize.query(
-      `SELECT DATE(sr."approvedAt") as tanggal,
+      `SELECT DATE(sr."approvedAt" AT TIME ZONE :storeTimezone) as tanggal,
               COALESCE(SUM(sri."qty" * sri."price"), 0) as "totalRefund",
               COALESCE(SUM(sri."qty" * COALESCE(oi."hppSnapshot", 0)), 0) as "totalReturnedHpp"
        FROM sales_return_item sri
        JOIN sales_return sr ON sr.id = sri."salesReturn"
        JOIN order_item oi ON oi.id = sri."orderItem"
        WHERE ${refundConditions}
-       GROUP BY DATE(sr."approvedAt")`,
+       GROUP BY DATE(sr."approvedAt" AT TIME ZONE :storeTimezone)`,
       { replacements: refundReplacements, type: db.sequelize.QueryTypes.SELECT }
     )
     const refundMap = {}
@@ -180,7 +182,13 @@ const getData = async (req) => {
       const foodCostPersen = totalPenjualan > 0 ? Math.round((totalHpp / totalPenjualan) * 10000) / 100 : 0
       rows.push({
         tanggal,
+        date: tanggal,
         totalTransaksi: Number(row.totalTransaksi || 0),
+        totalPenjualanKotor: totalPenjualan,
+        diskon: totalDiscount,
+        pajak: Number(row.totalTax || 0),
+        serviceCharge: Number(row.totalServiceCharge || 0),
+        operationalExpense: totalExpense,
         totalPenjualanBersih: netRevenue,
         totalRefund,
         totalHpp,
