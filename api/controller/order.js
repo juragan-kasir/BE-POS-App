@@ -1913,6 +1913,18 @@ exports.createOrder = async (req, res) => {
   }
 }
 
+// E2E audit (2026-10-31): a QR order was created with the diner's name as its
+// cashier, so receipts and per-cashier figures credited the customer. A QR
+// order now has no cashier until staff settle it; the staff member who
+// collects the payment becomes its cashier (an existing cashier is kept).
+const settlingCashier = (lockedOrder, req) => {
+  if (lockedOrder.cashierId != null || !req.user?.id) return {}
+  return {
+    cashierId: req.user.id,
+    cashierName: req.body?.changedByName || req.user.fullName || req.user.userName || null
+  }
+}
+
 // ---- createOrder helpers: persistence phase -----------------------------
 // Order/pricing is decided above; everything here writes what was decided.
 
@@ -3634,7 +3646,8 @@ exports.updateOrderStatus = async (req, res) => {
             ? {
                 paymentMethod: paidTender.method,
                 paymentMethodName: paidTender.paymentMethodName,
-                cashRegisterId: paidTender.registerId
+                cashRegisterId: paidTender.registerId,
+                ...settlingCashier(lockedOrder, req)
               }
             : {}),
           ...(sentCustomerId !== undefined && lockedOrder.customerId === null
@@ -4768,7 +4781,7 @@ exports.createCustomerOrder = async (req, res) => {
       tableId: tableId || null,
       customerId: null,
       cashierId: null,
-      cashierName: customerName || 'Customer',
+      cashierName: null,
       customerName: customerName || null,
       notes,
       source: 'qr',
