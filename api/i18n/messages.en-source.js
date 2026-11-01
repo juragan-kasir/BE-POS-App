@@ -339,6 +339,8 @@ module.exports = {
   'No receipt data': 'Data struk tidak ada',
   'typePaymentId must be a positive integer': 'typePaymentId harus bilangan bulat positif',
   'This payment type is not active for the store': 'Jenis pembayaran ini tidak aktif untuk toko',
+  'Count the cash in the drawer and enter it to close the register':
+    'Hitung uang di laci lalu masukkan jumlahnya untuk menutup kasir',
   'This payment type does not match the payment method':
     'Jenis pembayaran ini tidak sesuai dengan metode pembayaran'
 }

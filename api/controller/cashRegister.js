@@ -40,6 +40,11 @@ function bucketPaymentsByCanonical(rows) {
 // createCustomerOrder (source 'qr', no createdBy); every other order is POS.
 const isQrChannelOrder = (order) => order?.source === 'qr' && order?.createdBy == null
 
+// A cashier closes with a blind count: the counted cash must be stated, so
+// a missing amount is never recorded as an empty drawer.
+const isUncountedCashierClose = (user, closingBalance) =>
+  user?.roleType === 'kasir' && (closingBalance === undefined || closingBalance === null)
+
 const DEFAULT_CASH_OUT_APPROVAL_THRESHOLD = 500000
 const DEFAULT_CASH_VARIANCE_THRESHOLD = 25000
 
@@ -1006,6 +1011,13 @@ const cashRegisterController = {
         return res.status(400).json({
           success: false,
           message: 'Store not selected'
+        })
+      }
+      if (isUncountedCashierClose(req.user, closingBalance)) {
+        return res.status(422).json({
+          success: false,
+          code: 'CLOSING_BALANCE_REQUIRED',
+          message: 'Count the cash in the drawer and enter it to close the register'
         })
       }
 

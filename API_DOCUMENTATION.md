@@ -2973,7 +2973,7 @@ Auth required (super_admin/admin).
 ## Cash Register
 
 ### POST `/cash-register/open`
-Auth required (super_admin/admin). The store comes from the resolved store context (`req.storeId`) — an explicit selection is required, otherwise 400 `Store not selected`.
+Auth required (super_admin/admin/kasir). A cashier opens only their own store's register, and only when their role grants "Tambah" on Kas Register (`/cash-register/current`), else 403 `MENU_ACTION_DENIED` (Q-FIN-05, 2026-11-01). The store comes from the resolved store context (`req.storeId`) — an explicit selection is required, otherwise 400 `Store not selected`.
 
 **Body:**
 | Field | Type | Description |
@@ -2996,12 +2996,12 @@ Auth required (super_admin/admin). The store comes from the resolved store conte
 ---
 
 ### PUT `/cash-register/close/:id`
-Auth required (super_admin/admin). Closes the register and returns the full closing report (same shape as a frozen Z report).
+Auth required (super_admin/admin/kasir). Closes the register and returns the full closing report (same shape as a frozen Z report). A cashier closes with a blind count: without `closingBalance` the close is refused with 422 `CLOSING_BALANCE_REQUIRED` and the register stays open (`0` is a valid count). Cash movements and variance decisions stay admin/super_admin only.
 
 **Body:**
 | Field | Type | Description |
 |-------|------|-------------|
-| `closingBalance` | number | Optional, nullable |
+| `closingBalance` | number | Optional, nullable for admins; required for a cashier (counted cash) |
 | `notes` | string | Optional |
 
 **Response:**
