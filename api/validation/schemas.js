@@ -284,6 +284,40 @@ const orderItemSchema = z
   })
   .passthrough()
 
+// E2E audit #8 open bill (batch B9): a dine-in order saved unpaid, and a
+// later round of items added to it. Discounts and tender are not part of an
+// open bill; they belong to the settlement.
+exports.openBillSchema = z.object({
+  store: strToNum().optional(),
+  tableId: strToNum().optional(),
+  items: z.array(orderItemSchema).min(1, 'At least one item is required'),
+  cashierId: strToNum().optional().nullable(),
+  cashierName: z.string().max(FIELD_MAX.PERSON_NAME, tooLong(FIELD_MAX.PERSON_NAME)).optional().nullable(),
+  customerName: z.string().max(FIELD_MAX.PERSON_NAME, tooLong(FIELD_MAX.PERSON_NAME)).optional().nullable(),
+  customerPhone: z.string().max(FIELD_MAX.PHONE, tooLong(FIELD_MAX.PHONE)).optional().nullable(),
+  notes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().default(''),
+  idempotencyKey: z.string().max(255).optional().nullable()
+})
+
+exports.addOrderItemsSchema = z.object({
+  store: strToNum().optional(),
+  items: z.array(orderItemSchema).min(1, 'At least one item is required'),
+  idempotencyKey: z.string().max(255).optional().nullable()
+})
+
+// The QR app names a product line by `productId` (or a bundle by `bundleId`).
+exports.addCustomerOrderItemsSchema = z.object({
+  items: z
+    .array(
+      orderItemSchema.extend({
+        product: strToNum().optional(),
+        bundleId: strToNum().optional().nullable()
+      })
+    )
+    .min(1, 'At least one item is required'),
+  idempotencyKey: z.string().max(255).optional().nullable()
+})
+
 exports.createOrderSchema = z.object({
   store: strToNum().optional(),
   tableId: strToNum().optional().nullable(),

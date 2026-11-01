@@ -1259,6 +1259,49 @@ settlement it reverses.
 
 ---
 
+### POST `/order/open-bill`
+Auth required (same sellers as `/order/create`: `payment.collect`). E2E audit #8 open bill (product owner, 2026-11-01; batch **B9**).
+Saves a dine-in order **unpaid**: the table is claimed (`occupied`), the items go to the kitchen (`status: pending`), and nothing is charged — no tender, no ledger row, no stock movement. Stock and BOM are deducted once, when the bill is paid through `PUT /order/update-status` (`status: paid` + tender), exactly like a QR order. Phase 1 carries no discount, promo or points.
+
+**Request:**
+```json
+{
+  "store": "number (super_admin)",
+  "tableId": "number (required)",
+  "items": "[{ product, quantity, options?, modifiers?, notes?, expectedPrice?, priceOverride? }] (required, ≥ 1)",
+  "cashierId": "number (optional)",
+  "cashierName": "string (optional)",
+  "customerName": "string (optional)",
+  "customerPhone": "string (optional)",
+  "notes": "string (optional)",
+  "idempotencyKey": "string (required)"
+}
+```
+
+**Response:** `201 { message, data: <order with items> }`; a retry with the same key and the same table + lines → `200` with the same order.
+
+Key errors: 422 `TABLE_REQUIRED`, 422 `IDEMPOTENCY_KEY_REQUIRED`, 400 `TABLE_OCCUPIED` / `TABLE_NOT_AVAILABLE`, 409 `IDEMPOTENCY_MISMATCH` (same key, other table or lines), 409 `PRICE_CHANGED`, 409 `STORE_ARCHIVED`.
+
+---
+
+### POST `/order/:id/items`
+Auth required (`payment.collect`). Adds one **round** of items to an open order of the store in scope (an open bill or an unpaid QR order).
+
+**Request:** `{ "items": [...] (required, ≥ 1), "idempotencyKey": "string (required)" }`
+
+The new items are created with `status: pending` (they reach the kitchen) and `roundId` set. The order's `subTotal`, `totalQuantity`, `taxAmount`, `serviceChargeAmount` and `totalPrice` are recomputed with the order's **stored** tax and service-charge rates; the discount already on the order is kept. The same key with the same lines replays (`200`, nothing added); with other lines → 409 `IDEMPOTENCY_MISMATCH`.
+
+**Response:** `201 { message, data: <order with items> }`.
+
+Key errors: 404 (order not in this store), 409 `ORDER_NOT_OPEN` (paid, refunded, cancelled or void), 409 `ORDER_PARTIALLY_PAID` (anything already collected), 409 `ORDER_HAS_SPLITS` (pending split bills), 422 `ITEMS_REQUIRED`, 422 `IDEMPOTENCY_KEY_REQUIRED`, 409 `PRICE_CHANGED`, 400 `INSUFFICIENT_STOCK`.
+
+---
+
+### POST `/order/customer-order/:token/items`
+Public (QR diner; rate-limited like `/order/customer-create`). Same rules as `POST /order/:id/items` for the diner's own unpaid **QR** order, found by its opaque `publicToken`; a counter order's token answers 404. Price overrides are refused. Lines may name the product by `productId` (the QR app's field) or `product`; bundles by `bundleId`. The response carries only the bill: `orderNumber`, `status`, `paymentStatus`, `subTotal`, `discountAmount`, `taxAmount`, `serviceChargeAmount`, `totalPrice`, `totalQuantity`.
+
+---
+
 ### GET `/order/get-orders`
 Auth required.
 

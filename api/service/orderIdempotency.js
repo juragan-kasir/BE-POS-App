@@ -313,5 +313,6 @@ module.exports = {
   customerOrderMismatches,
   idempotencyMismatchBody,
   existingOrderSummary,
-  lineKey
+  lineKey,
+  linesMatch
 }

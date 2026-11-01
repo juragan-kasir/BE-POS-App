@@ -272,6 +272,17 @@ module.exports = async () => {
       "revokedAt" timestamp with time zone,
       "createdAt" timestamp with time zone NOT NULL,
       "updatedAt" timestamp with time zone NOT NULL
+    )`,
+    // E2E audit #8 open bill (migration 20261101000002, batch B9).
+    `CREATE TABLE IF NOT EXISTS order_round (
+      id SERIAL PRIMARY KEY,
+      "order" integer NOT NULL REFERENCES "order"(id) ON UPDATE CASCADE ON DELETE CASCADE,
+      "idempotencyKey" varchar(255) NOT NULL,
+      source varchar(20) NOT NULL,
+      "itemCount" integer NOT NULL DEFAULT 0,
+      "createdBy" integer,
+      "createdAt" timestamp with time zone NOT NULL DEFAULT NOW(),
+      "updatedAt" timestamp with time zone NOT NULL DEFAULT NOW()
     )`
   ]
 
@@ -358,6 +369,8 @@ module.exports = async () => {
     // name snapshot on the order and its ledger rows.
     ['order', 'paymentMethodName', 'VARCHAR(255)'],
     ['transaction', 'paymentMethodName', 'VARCHAR(255)'],
+    // E2E audit #8 open bill (migration 20261101000002, batch B9).
+    ['order_item', 'roundId', 'INTEGER REFERENCES "order_round"(id) ON UPDATE CASCADE ON DELETE SET NULL'],
   ]
 
   // Phase 34: stock_opname_item's quantity columns are migration-owned
@@ -392,6 +405,8 @@ module.exports = async () => {
   ]
 
   const R4_INDEXES = [
+    // E2E audit #8 open bill (migration 20261101000002, batch B9).
+    `CREATE UNIQUE INDEX IF NOT EXISTS uq_order_round_order_idempotency ON "order_round" ("order", "idempotencyKey")`,
     `CREATE UNIQUE INDEX IF NOT EXISTS uq_product_review_device ON "product_review" ("productId", "deviceId") WHERE "deviceId" IS NOT NULL`,
     // goods_receipt.idempotencyKey's partial unique index (migration
     // 20261001000003) is likewise absent from the committed dev-schema.sql
@@ -587,7 +602,9 @@ module.exports = async () => {
     'tenant_membership',
     'store_assignment',
     // F5 session table (migration 20261009000001).
-    'authorization_context_session'
+    'authorization_context_session',
+    // E2E audit #8 open bill (migration 20261101000002, batch B9).
+    'order_round'
   ]
   const missingTables = []
   for (const table of R4_REQUIRED_TABLES) {
