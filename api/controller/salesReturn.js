@@ -611,6 +611,15 @@ const salesReturnController = {
           }
         }
 
+        // Batch B10 (product owner, 2026-11-01): a return recorded as not
+        // restocked (damaged/expired goods, a cooked dish) is refund-only —
+        // no product or ingredient stock comes back.
+        const restocks = ret.restock !== false
+        if (!restocks) {
+          fgRestoreLines.length = 0
+          bomRestoreItems.length = 0
+        }
+
         // Every distinct product locked once, sorted by id, before any
         // mutation — the same convention as deductStockForOrder (products)
         // and adjustIngredientStockBatch (ingredients, locked sorted
@@ -701,7 +710,7 @@ const salesReturnController = {
         // cannot change what is restored. Positive quantities restore (the
         // sale path negates them). Legacy pre-history orders keep the
         // pre-fix current-BOM resolution shape.
-        const bomRestoreSource = useLegacyHistory
+        const bomRestoreSource = useLegacyHistory && restocks
           ? legacyBomFlatItems
           : null
         const legacyBomRequirements = bomRestoreSource
@@ -844,6 +853,7 @@ const salesReturnController = {
             orderId: ret.order,
             refundAmount: ret.refundAmount,
             refundMethod: ret.refundMethod,
+            restock: ret.restock !== false,
             items: ret.items || [],
             date: new Date().toISOString(),
             createdBy: req.user?.id

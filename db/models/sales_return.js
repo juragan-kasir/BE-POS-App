@@ -69,6 +69,14 @@ module.exports = (sequelize, DataTypes) => {
       idempotencyKey: {
         type: DataTypes.STRING,
         allowNull: true
+      },
+      // Batch B10: false = refund only — approval restores no product or
+      // ingredient stock and reverses no COGS (damaged/expired goods, a
+      // cooked dish). Set at create, never edited.
+      restock: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: true
       }
     },
     {

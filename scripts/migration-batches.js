@@ -162,12 +162,25 @@ const E2_BATCHES = Object.freeze({
     // rounds. up creates order_round (unique order + idempotencyKey) and the
     // nullable order_item.roundId, add-if-missing, rewriting nothing; down
     // stops before any DDL while a round exists. No governance gate. The BE
-    // code reads order_item.roundId, so B9 must be recorded before it deploys.
+    // reads order_item.roundId, so B9 must be recorded before it deploys.
+    openGates: []
+  }),
+  B10: deepFreeze({
+    id: 'B10',
+    title: 'Sales return restock choice',
+    expectedCount: 1,
+    migrations: ['20261101000003-sales-return-restock.js'],
+    // Product owner, 2026-11-01: a return states whether the goods go back
+    // into stock. up adds sales_return.restock BOOLEAN NOT NULL DEFAULT TRUE
+    // (add-if-missing; every existing return was restocked, so nothing is
+    // rewritten); down stops before any DDL while a return is recorded as not
+    // restocked. No governance gate. The BE code reads the column, so B10
+    // must be recorded before it deploys.
     openGates: []
   })
 })
 
-const BATCH_ORDER = Object.freeze(['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B9'])
+const BATCH_ORDER = Object.freeze(['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B9', 'B10'])
 
 // D-08 B1 resume contracts. A resume finishes a batch whose earlier members
 // were recorded by an interrupted run; it never redefines the batch (the

@@ -112,7 +112,7 @@ const getData = async (req) => {
     `SELECT sri."product" as "productId",
             COALESCE(MAX(oi."productName"), 'Unknown') as "productName",
             COALESCE(SUM(sri."qty" * sri."price"), 0) as "returnedRevenue",
-            COALESCE(SUM(sri."qty" * COALESCE(oi."hppSnapshot", 0)), 0) as "returnedHpp"
+            COALESCE(SUM(sri."qty" * COALESCE(oi."hppSnapshot", 0)) FILTER (WHERE sr."restock"), 0) as "returnedHpp"
      FROM sales_return_item sri
      JOIN sales_return sr ON sr.id = sri."salesReturn"
      JOIN order_item oi ON oi.id = sri."orderItem"

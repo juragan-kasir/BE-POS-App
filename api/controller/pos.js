@@ -1397,7 +1397,7 @@ const posController = {
   async returnSalesOrder(req, res) {
     try {
       const { id } = req.params
-      const { items, reason, returnedBy, refundMethod, idempotencyKey } = req.body
+      const { items, reason, returnedBy, refundMethod, idempotencyKey, restock } = req.body
 
       if (!items || items.length === 0) {
         return res.status(422).json({
@@ -1689,7 +1689,8 @@ const posController = {
                 refundMethod: refundMethod || order.paymentMethod || 'cash',
                 returnedBy: returnedBy || req.user?.id || null,
                 createdBy: req.user?.id || null,
-                idempotencyKey: idempotencyKey || null
+                idempotencyKey: idempotencyKey || null,
+                restock: restock !== false
               },
               { transaction: t }
             )

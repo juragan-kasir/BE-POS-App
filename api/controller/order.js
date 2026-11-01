@@ -2777,7 +2777,7 @@ exports.getOrderById = async (req, res) => {
 
     return res.status(200).json({
       message: 'Success',
-      data: order
+      data: await withItemInventoryModes(order)
     })
   } catch (error) {
     console.error('Error:', error)
@@ -2785,6 +2785,23 @@ exports.getOrderById = async (req, res) => {
       error: 'Internal Server Error'
     })
   }
+}
+
+// Each line carries its product's inventory mode, so the return form can tell
+// a cooked recipe dish (make_to_order) from resellable stock (batch B10
+// restock default). Read-only, one query; a deleted product reads null.
+const withItemInventoryModes = async (order) => {
+  const data = order.toJSON()
+  const productIds = [...new Set((data.items || []).map((item) => item.product).filter(Boolean))]
+  if (productIds.length === 0) return data
+  const products = await db.product.findAll({
+    where: { id: productIds },
+    attributes: ['id', 'inventoryMode'],
+    paranoid: false
+  })
+  const modeById = new Map(products.map((product) => [product.id, product.inventoryMode]))
+  data.items = data.items.map((item) => ({ ...item, inventoryMode: modeById.get(item.product) ?? null }))
+  return data
 }
 
 // Reduce stock exactly once when an order transitions to paid. Shared by
