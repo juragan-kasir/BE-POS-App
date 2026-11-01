@@ -371,6 +371,8 @@ module.exports = async () => {
     ['transaction', 'paymentMethodName', 'VARCHAR(255)'],
     // E2E audit #8 open bill (migration 20261101000002, batch B9).
     ['order_item', 'roundId', 'INTEGER REFERENCES "order_round"(id) ON UPDATE CASCADE ON DELETE SET NULL'],
+    // Sales return restock choice (migration 20261101000003, batch B10).
+    ['sales_return', 'restock', 'BOOLEAN NOT NULL DEFAULT TRUE'],
   ]
 
   // Phase 34: stock_opname_item's quantity columns are migration-owned

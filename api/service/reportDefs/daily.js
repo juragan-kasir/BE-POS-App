@@ -151,7 +151,7 @@ const getData = async (req) => {
     const dailyRefunds = await db.sequelize.query(
       `SELECT DATE(sr."approvedAt" AT TIME ZONE :storeTimezone) as tanggal,
               COALESCE(SUM(sri."qty" * sri."price"), 0) as "totalRefund",
-              COALESCE(SUM(sri."qty" * COALESCE(oi."hppSnapshot", 0)), 0) as "totalReturnedHpp"
+              COALESCE(SUM(sri."qty" * COALESCE(oi."hppSnapshot", 0)) FILTER (WHERE sr."restock"), 0) as "totalReturnedHpp"
        FROM sales_return_item sri
        JOIN sales_return sr ON sr.id = sri."salesReturn"
        JOIN order_item oi ON oi.id = sri."orderItem"

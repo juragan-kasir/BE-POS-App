@@ -34,7 +34,8 @@ const POST_INCIDENT_MIGRATIONS = [
   '20261025000001-dr28-min-order-qty-integer.js',
   '20261031000001-member-phone-email-store-scoped.js',
   '20261101000001-payment-method-name.js',
-  '20261101000002-order-rounds.js'
+  '20261101000002-order-rounds.js',
+  '20261101000003-sales-return-restock.js'
 ]
 
 // Production-like ledger: every non-E2 file recorded, plus the given E2 names.

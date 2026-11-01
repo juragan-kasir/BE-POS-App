@@ -761,14 +761,17 @@ async function postSalesReturnJournal({
   orderId,
   refundAmount,
   refundMethod,
+  restock = true,
   items,
   date,
   createdBy
 }) {
   const refund = toNumber(refundAmount)
 
+  // Batch B10: goods not put back into stock keep their cost as a loss — no
+  // inventory debit, no COGS reversal.
   let cogsReturned = 0
-  for (const it of items || []) {
+  for (const it of restock ? items || [] : []) {
     const qty = Math.floor(Number(it.qty)) || 0
     if (qty <= 0) continue
     let hpp = 0

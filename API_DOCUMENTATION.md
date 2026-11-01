@@ -5018,6 +5018,10 @@ Auth required (super_admin/admin).
 ### POST `/pos/order/:id/return`
 Auth required (super_admin/admin). Same structure as PO return.
 
+**Body:** `{ items: [{ productId, orderItemId, qty, unit?, conversionToBase?, notes? }], reason, returnedBy?, refundMethod?, idempotencyKey?, restock? }`
+
+`restock` (boolean, default `true`, batch **B10**): whether the returned goods go back into sellable stock. `false` = refund only — on approval no product or BOM ingredient stock is restored, the returned units' cost stays in HPP (dashboard, daily report, profit per product) and the return journal posts no inventory/COGS reversal. Stored on the return (`sales_return.restock`), never edited. The FE defaults it to `false` for Rusak / Cacat / Kedaluwarsa / Masalah kualitas and for recipe dishes.
+
 ### GET `/pos/member/:id/point-history`
 Auth required. **Query:** `page`, `limit`.
 

@@ -2388,7 +2388,9 @@ exports.createSalesReturnSchema = z.object({
   reason: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).min(1, 'Reason is required'),
   returnedBy: z.union([strToNum(), z.string().max(FIELD_MAX.PERSON_NAME, tooLong(FIELD_MAX.PERSON_NAME))]).optional(),
   refundMethod: z.string().max(50).optional(),
-  idempotencyKey: z.string().max(255).optional().nullable()
+  idempotencyKey: z.string().max(255).optional().nullable(),
+  // Batch B10: whether the returned goods go back into sellable stock.
+  restock: z.boolean().optional().default(true)
 })
 
 // The return id is the :id route param (the controllers read req.params.id);

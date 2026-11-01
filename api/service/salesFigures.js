@@ -78,7 +78,7 @@ const profitFigures = async (opts) => {
     ),
     select(
       `SELECT COALESCE(SUM(sri."qty" * sri."price"), 0)::bigint AS lines,
-              COALESCE(SUM(sri."qty" * COALESCE(oi."hppSnapshot", 0)), 0)::bigint AS hpp
+              COALESCE(SUM(sri."qty" * COALESCE(oi."hppSnapshot", 0)) FILTER (WHERE sr."restock"), 0)::bigint AS hpp
          FROM sales_return_item sri
          JOIN sales_return sr ON sr.id = sri."salesReturn"
          JOIN order_item oi ON oi.id = sri."orderItem"
