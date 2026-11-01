@@ -131,7 +131,7 @@ Gagal → `{ "error": "...", "code"?: "..." }` dengan status `error.statusCode`.
   "existingOrder": { "id": 812, "orderNumber": "ORD-…", "totalPrice": 11100, "paymentStatus": "paid" }
 }
 ```
-- Kode error order lainnya: `422 PAYMENT_METHOD_REQUIRED` (tender tidak boleh diasumsikan cash), `422 INVALID_PAYMENT_METHOD` (metode tak dikenal), `422 REFERENCE_REQUIRED` (metode non-cash wajib `referenceNumber`), `409 STORE_ARCHIVED`, `500 INTERNAL_ERROR` (`{ "error": "Internal Server Error", "code": "INTERNAL_ERROR" }`).
+- Kode error order lainnya: `422 PAYMENT_METHOD_REQUIRED` (tender tidak boleh diasumsikan cash), `422 INVALID_PAYMENT_METHOD` (metode tak dikenal), `422 REFERENCE_REQUIRED` (metode non-cash wajib `referenceNumber`), `422 PAYMENT_TYPE_NOT_FOUND` / `422 PAYMENT_TYPE_MISMATCH` / `422 INVALID_PAYMENT_TYPE` (`typePaymentId` opsional: jenis pembayaran toko yang aktif dan tender-nya sama; namanya disimpan di `paymentMethodName`), `409 STORE_ARCHIVED`, `500 INTERNAL_ERROR` (`{ "error": "Internal Server Error", "code": "INTERNAL_ERROR" }`).
 - **Aturan tender cash** (semua `422`, tanpa `code`, pesan eksak dari server):
   - `cashAmount`/`changeAmount` hanya valid untuk CASH.
   - Kirim keduanya atau tidak sama sekali (fallback exact-tender).
@@ -392,6 +392,9 @@ Body: `{ id }` (+ `refundReference` bila perlu).
 | 409 | `STORE_ARCHIVED` | Store diarsipkan; hentikan transaksi. |
 | 422 | `PAYMENT_METHOD_REQUIRED` | Tender tidak dikirim; kirim metode eksplisit. |
 | 422 | `INVALID_PAYMENT_METHOD` | Metode tak dikenal; pakai daftar kanonik §3.3. |
+| 422 | `PAYMENT_TYPE_NOT_FOUND` | `typePaymentId` bukan jenis pembayaran aktif milik toko (atau global). |
+| 422 | `PAYMENT_TYPE_MISMATCH` | Tender jenis pembayaran ≠ `paymentMethod`. |
+| 422 | `INVALID_PAYMENT_TYPE` | `typePaymentId` bukan bilangan bulat positif. |
 | 422 | `REFERENCE_REQUIRED` | Metode non-cash tanpa `referenceNumber`. |
 | 422 | — (tanpa code) | Pelanggaran aturan tender cash (§3.2); tampilkan `error`. |
 | 500 | `INTERNAL_ERROR` | Outcome tak diketahui — retry dengan `idempotencyKey` **sama**. |

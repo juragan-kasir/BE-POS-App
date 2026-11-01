@@ -140,10 +140,22 @@ const E2_BATCHES = Object.freeze({
     // data is rewritten; down aborts before any DDL when rows now share a
     // phone or email across stores. No governance gate.
     openGates: []
+  }),
+  B8: deepFreeze({
+    id: 'B8',
+    title: 'E2E audit #6: payment method name on order and ledger',
+    expectedCount: 1,
+    migrations: ['20261101000001-payment-method-name.js'],
+    // Product owner, 2026-11-01: a payment records the store payment type's
+    // name ("GoPay", "Debit BCA") next to its canonical tender. up adds two
+    // nullable columns (add-if-missing) and rewrites nothing; down stops
+    // before any DDL while a row holds a name. No governance gate. The BE
+    // code reads these columns, so B8 must be recorded before it deploys.
+    openGates: []
   })
 })
 
-const BATCH_ORDER = Object.freeze(['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7'])
+const BATCH_ORDER = Object.freeze(['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8'])
 
 // D-08 B1 resume contracts. A resume finishes a batch whose earlier members
 // were recorded by an interrupted run; it never redefines the batch (the

@@ -47,6 +47,7 @@ const {
   retirePendingSplits
 } = require('../service/orderFinancials')
 const { normalizePaymentMethod, requireTenderReference } = require('../service/canonicalPayment')
+const { resolvePaymentMethodName } = require('../service/paymentTypeName')
 const { assertSettlementReferenceUnused } = require('../service/settlementReference')
 const { expireStaleQrOrders, expiredOrderIds } = require('../service/qrOrderExpiry')
 const {
@@ -1577,6 +1578,11 @@ exports.createOrder = async (req, res) => {
       })
     }
     const counterReference = requireTenderReference(effectivePaymentMethod, referenceNumber)
+    const paymentMethodName = await resolvePaymentMethodName({
+      typePaymentId: req.body.typePaymentId,
+      method: effectivePaymentMethod,
+      store: authorizedStore
+    })
 
     // Fails fast, before any DB write is attempted, if the cash tender
     // is physically impossible or malformed.
@@ -1598,6 +1604,7 @@ exports.createOrder = async (req, res) => {
       customerPhone,
       notes,
       paymentMethod: effectivePaymentMethod,
+      paymentMethodName,
       source: source || 'pos',
       status: 'paid',
       paymentStatus: 'paid',
@@ -1734,7 +1741,8 @@ exports.createOrder = async (req, res) => {
         changeGiven,
         {
           cashRegisterId: openRegister.id,
-          referenceNumber: counterReference
+          referenceNumber: counterReference,
+          paymentMethodName
         }
       )
       await createInitialOrderStatus(
@@ -2272,7 +2280,8 @@ const recordOrderPayment = async (
       createdBy: userId,
       cashRegisterId: attribution.cashRegisterId ?? null,
       splitBillId: attribution.splitBillId ?? null,
-      referenceNumber: attribution.referenceNumber ?? null
+      referenceNumber: attribution.referenceNumber ?? null,
+      paymentMethodName: attribution.paymentMethodName ?? null
     },
     { transaction }
   )
@@ -2293,6 +2302,7 @@ const recordOrderPayment = async (
 // from the ledger under the order lock — never the order's gross total.
 const resolvePaidSettlement = async ({
   bodyMethod,
+  typePaymentId,
   cashAmount,
   changeAmount,
   referenceNumber,
@@ -2323,9 +2333,16 @@ const resolvePaidSettlement = async ({
   // reference is trimmed. Thrown inside the settlement transaction, so the
   // refusal writes nothing.
   const reference = requireTenderReference(method, referenceNumber)
+  const paymentMethodName = await resolvePaymentMethodName({
+    typePaymentId,
+    method,
+    store: effectiveStore,
+    transaction: t
+  })
 
   return {
     method,
+    paymentMethodName,
     cashReceived,
     changeGiven,
     registerId: register.id,
@@ -3361,6 +3378,7 @@ exports.updateOrderStatus = async (req, res) => {
           // against the outstanding amount, and drawer attribution.
           paidTender = await resolvePaidSettlement({
             bodyMethod: req.body.paymentMethod,
+            typePaymentId: req.body.typePaymentId,
             cashAmount: req.body.cashAmount,
             changeAmount: req.body.changeAmount,
             referenceNumber: req.body.referenceNumber,
@@ -3579,7 +3597,11 @@ exports.updateOrderStatus = async (req, res) => {
         {
           status,
           ...(paidTender
-            ? { paymentMethod: paidTender.method, cashRegisterId: paidTender.registerId }
+            ? {
+                paymentMethod: paidTender.method,
+                paymentMethodName: paidTender.paymentMethodName,
+                cashRegisterId: paidTender.registerId
+              }
             : {}),
           ...(sentCustomerId !== undefined && lockedOrder.customerId === null
             ? { customerId: sentCustomerId }
@@ -3640,7 +3662,8 @@ exports.updateOrderStatus = async (req, res) => {
             paidTender.changeGiven,
             {
               cashRegisterId: paidTender.registerId,
-              referenceNumber: paidTender.referenceNumber
+              referenceNumber: paidTender.referenceNumber,
+              paymentMethodName: paidTender.paymentMethodName
             }
           )
         }
@@ -3696,6 +3719,7 @@ exports.updateOrderStatus = async (req, res) => {
               {
                 order: id,
                 typePayment: part.method,
+                paymentMethodName: part.row.paymentMethodName ?? null,
                 amount: -Math.abs(part.amount),
                 referenceNumber: part.reference,
                 notes: `Void refund of settlement #${part.row.id} for order ${order.orderNumber}`,
@@ -5051,6 +5075,7 @@ exports.getCustomerOrder = async (req, res) => {
         'createdAt',
         'tableId',
         'paymentMethod',
+        'paymentMethodName',
         'paymentStatus',
         'splitCount'
       ],
@@ -5303,6 +5328,7 @@ exports.getCustomerOrders = async (req, res) => {
         'totalQuantity',
         'customerName',
         'paymentMethod',
+        'paymentMethodName',
         'paymentStatus',
         'notes',
         'source',

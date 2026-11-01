@@ -35,6 +35,10 @@ module.exports = (sequelize, DataTypes) => {
       referenceNumber: {
         type: DataTypes.STRING
       },
+      paymentMethodName: {
+        type: DataTypes.STRING(255),
+        allowNull: true
+      },
       notes: {
         type: DataTypes.TEXT
       },

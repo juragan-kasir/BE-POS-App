@@ -336,5 +336,9 @@ module.exports = {
   'Invalid JSON format in data field': 'Format JSON pada data tidak valid',
   'Invalid JSON in body.data': 'Format JSON pada data tidak valid',
   'No performance data found': 'Data kinerja tidak ditemukan',
-  'No receipt data': 'Data struk tidak ada'
+  'No receipt data': 'Data struk tidak ada',
+  'typePaymentId must be a positive integer': 'typePaymentId harus bilangan bulat positif',
+  'This payment type is not active for the store': 'Jenis pembayaran ini tidak aktif untuk toko',
+  'This payment type does not match the payment method':
+    'Jenis pembayaran ini tidak sesuai dengan metode pembayaran'
 }

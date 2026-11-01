@@ -110,7 +110,7 @@ const thermalPrinterController = {
           discount: Number(order.discountAmount) || 0,
           tax: Number(order.taxAmount) || 0,
           total,
-          paymentMethod: order.paymentMethod || 'Tunai',
+          paymentMethod: order.paymentMethodName || order.paymentMethod || 'Tunai',
           amountPaid: total,
           change: 0,
           customerName: order.customerName,

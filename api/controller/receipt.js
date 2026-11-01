@@ -57,7 +57,7 @@ const receiptController = {
         discount: order.discountAmount || 0,
         tax: order.taxAmount || 0,
         total: order.totalPrice || order.finalAmount || 0,
-        paymentMethod: order.paymentMethod || order.typePayment || 'Tunai',
+        paymentMethod: order.paymentMethodName || order.paymentMethod || order.typePayment || 'Tunai',
         cashAmount: order.cashAmount || order.total || 0,
         changeAmount: order.changeAmount || 0,
         footer: 'Terima kasih atas kunjungan Anda'

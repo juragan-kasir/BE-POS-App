@@ -354,6 +354,10 @@ module.exports = async () => {
     // CI clones converge, no-op when the migration already ran.
     // TRUE default = pre-existing rows posted at create (old behavior).
     ['goods_receipt', 'stockPosted', 'BOOLEAN NOT NULL DEFAULT TRUE'],
+    // E2E audit #6 (migration 20261101000001, batch B8): the payment type
+    // name snapshot on the order and its ledger rows.
+    ['order', 'paymentMethodName', 'VARCHAR(255)'],
+    ['transaction', 'paymentMethodName', 'VARCHAR(255)'],
   ]
 
   // Phase 34: stock_opname_item's quantity columns are migration-owned
