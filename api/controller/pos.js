@@ -21,6 +21,13 @@ const {
   toStoreRangeBound
 } = require('../../utils/businessDate')
 const { resolveStoreTimezone } = require('../../utils/storeTimezone')
+const { completedSaleSql } = require('../../utils/completedSaleSql')
+const {
+  completedOrderWhere,
+  refundTotals,
+  profitFigures,
+  marginPercent
+} = require('../service/salesFigures')
 
 const DASHBOARD_FILTERS = { daily: 'today', weekly: 'weekly', monthly: 'monthly' }
 const {
@@ -1838,7 +1845,7 @@ const posController = {
         endDate = range.end ? range.end.toISOString() : undefined
       }
 
-      const orderWhere = { paymentStatus: 'paid' }
+      const orderWhere = completedOrderWhere()
       if (store) orderWhere.store = store
       if (startDate || endDate) {
         orderWhere.createdAt = {}
@@ -1886,7 +1893,7 @@ const posController = {
           `
           SELECT ${chartGroupBy} as date, SUM("totalPrice") as sales
           FROM "order"
-          WHERE "paymentStatus" = 'paid'
+          WHERE ${completedSaleSql()}
           ${startDate && endDate ? 'AND "createdAt" >= :startDate AND "createdAt" <= :endDate' : ''}
           ${store ? 'AND "store" = :store' : ''}
           GROUP BY date
@@ -1954,7 +1961,7 @@ order: [['updatedAt', 'DESC']],
                  COUNT(*)::int AS orders,
                  SUM("totalPrice") AS sales
           FROM "order"
-          WHERE "paymentStatus" = 'paid'
+          WHERE ${completedSaleSql()}
           ${startDate && endDate ? 'AND "createdAt" >= :startDate AND "createdAt" <= :endDate' : ''}
           ${store ? 'AND "store" = :store' : ''}
           GROUP BY 1
@@ -2093,17 +2100,33 @@ order: [['updatedAt', 'DESC']],
         }
       }
 
+      const figureRange = { start: startDate, end: endDate, store }
+      const [refunds, profit] = await Promise.all([
+        refundTotals(figureRange),
+        profitFigures(figureRange)
+      ])
+      const salesAfterRefunds = (totalSales || 0) - refunds.total
+      const netProfit = profit.grossProfit - (totalExpense || 0)
+
       return res.status(200).json({
         success: true,
         message: 'Success',
         data: {
-          totalSales: totalSales || 0,
+          totalSales: salesAfterRefunds,
+          grossSales: totalSales || 0,
+          refunds: refunds.total,
           dailyTarget,
           averageOrderValue:
             totalOrders > 0
-              ? Math.round((totalSales || 0) / totalOrders)
+              ? Math.round(salesAfterRefunds / totalOrders)
               : 0,
-          netSales: (totalSales || 0) - (totalExpense || 0),
+          netSales: salesAfterRefunds - (totalExpense || 0),
+          salesExcludingTax: profit.netSales,
+          cogs: profit.cogs,
+          qtyWithoutCost: profit.qtyWithoutCost,
+          grossProfit: profit.grossProfit,
+          netProfit,
+          profitMargin: marginPercent(netProfit, profit.netSales),
           paymentMethods: paymentMethods || [],
           storeInfo,
           totalOrders: totalOrders || 0,
@@ -2217,7 +2240,7 @@ order: [['updatedAt', 'DESC']],
              COALESCE(SUM("taxAmount"),0)::int as tax,
              COALESCE(SUM("serviceChargeAmount"),0)::int as "serviceCharge"
            FROM "order"
-           WHERE "paymentStatus" = 'paid'
+           WHERE ${completedSaleSql()}
              AND "deletedAt" IS NULL
              AND "createdAt" >= :startDate AND "createdAt" <= :endDate
              ${storeCond}`,
@@ -2232,7 +2255,7 @@ order: [['updatedAt', 'DESC']],
              COALESCE(SUM(o."discountAmount"),0)::int as discount,
              COALESCE(SUM(o."taxAmount"),0)::int as tax
            FROM "order" o
-           WHERE o."paymentStatus" = 'paid'
+           WHERE ${completedSaleSql('o.')}
              AND o."deletedAt" IS NULL
              AND o."createdAt" >= :startDate AND o."createdAt" <= :endDate
              ${storeCondAlias}
@@ -2246,7 +2269,7 @@ order: [['updatedAt', 'DESC']],
              COUNT(DISTINCT o.id)::int as orders,
              COALESCE(SUM(o."totalQuantity"),0)::int as "itemsSold"
            FROM "order" o
-           WHERE o."paymentStatus" = 'paid'
+           WHERE ${completedSaleSql('o.')}
              AND o."deletedAt" IS NULL
              AND o."createdAt" >= :startDate AND o."createdAt" <= :endDate
              ${storeCondAlias}
@@ -2261,7 +2284,7 @@ order: [['updatedAt', 'DESC']],
              COALESCE(SUM(t.amount),0)::int as amount
            FROM "transaction" t
            JOIN "order" o ON o.id = t."order"
-           WHERE o."paymentStatus" = 'paid'
+           WHERE ${completedSaleSql('o.')}
              AND o."deletedAt" IS NULL
              AND t."deletedAt" IS NULL
              AND o."createdAt" >= :startDate AND o."createdAt" <= :endDate
@@ -2276,7 +2299,7 @@ order: [['updatedAt', 'DESC']],
              COALESCE(SUM(t.amount),0)::int as inflow
            FROM "transaction" t
            JOIN "order" o ON o.id = t."order"
-           WHERE o."paymentStatus" = 'paid'
+           WHERE ${completedSaleSql('o.')}
              AND o."deletedAt" IS NULL
              AND t."deletedAt" IS NULL
              AND o."createdAt" >= :startDate AND o."createdAt" <= :endDate
@@ -2439,7 +2462,7 @@ order: [['updatedAt', 'DESC']],
              COUNT(DISTINCT o.id)::int as "orderCount"
            FROM "order" o
            JOIN "member" m ON m.id = o."customerId" AND m."deletedAt" IS NULL
-           WHERE o."paymentStatus" = 'paid'
+           WHERE ${completedSaleSql('o.')}
              AND o."deletedAt" IS NULL
              AND o."customerId" IS NOT NULL
              AND o."createdAt" >= :startDate AND o."createdAt" <= :endDate
@@ -2603,16 +2626,16 @@ order: [['updatedAt', 'DESC']],
             pStart: prevStart.toISOString(),
             pEnd: prevEnd.toISOString()
           }
-          const [sales, orders, expense, members] = await Promise.all([
+          const [sales, orders, expense, members, prevRefunds] = await Promise.all([
             db.sequelize.query(
               `SELECT COALESCE(SUM("totalPrice"),0)::int as revenue
-               FROM "order" WHERE "paymentStatus"='paid' AND "deletedAt" IS NULL
+               FROM "order" WHERE ${completedSaleSql()} AND "deletedAt" IS NULL
                  AND "createdAt" >= :pStart AND "createdAt" <= :pEnd ${storeCond}`,
               { replacements: prevRepl, type: db.sequelize.QueryTypes.SELECT }
             ),
             db.sequelize.query(
               `SELECT COUNT(*)::int as orders
-               FROM "order" WHERE "paymentStatus"='paid' AND "deletedAt" IS NULL
+               FROM "order" WHERE ${completedSaleSql()} AND "deletedAt" IS NULL
                  AND "createdAt" >= :pStart AND "createdAt" <= :pEnd ${storeCond}`,
               { replacements: prevRepl, type: db.sequelize.QueryTypes.SELECT }
             ),
@@ -2627,10 +2650,11 @@ order: [['updatedAt', 'DESC']],
                FROM "member" WHERE "deletedAt" IS NULL
                  AND "createdAt" >= :pStart AND "createdAt" <= :pEnd ${storeCond}`,
               { replacements: prevRepl, type: db.sequelize.QueryTypes.SELECT }
-            )
+            ),
+            refundTotals({ start: prevRepl.pStart, end: prevRepl.pEnd, store })
           ])
           return {
-            prevRevenue: sales[0]?.revenue || 0,
+            prevRevenue: (sales[0]?.revenue || 0) - prevRefunds.total,
             prevOrders: orders[0]?.orders || 0,
             prevExpense: expense[0]?.amount || 0,
             prevNewMembers: members[0]?.total || 0
@@ -2639,8 +2663,14 @@ order: [['updatedAt', 'DESC']],
       ])
 
       // ---- Assemble ----
+      const figureRange = { start: startDate, end: endDate, store }
+      const [refunds, profit] = await Promise.all([
+        refundTotals(figureRange),
+        profitFigures(figureRange)
+      ])
       const kpi = kpiRow[0] || {}
-      const revenue = Number(kpi.revenue || 0)
+      const grossRevenue = Number(kpi.revenue || 0)
+      const revenue = grossRevenue - refunds.total
       const orders = Number(kpi.orders || 0)
       const totalExpense = Number(totalExpenseRow[0]?.amount || 0)
       const totalMembers = Number(memberRow[0]?.total || 0)
@@ -2662,7 +2692,7 @@ order: [['updatedAt', 'DESC']],
         .map((s) => {
           const sales = storeSalesMap[s.id] || {}
           const exp = expenseStoreMap[s.id] || { expense: 0, count: 0 }
-          const storeRevenue = Number(sales.revenue || 0)
+          const storeRevenue = Number(sales.revenue || 0) - (refunds.byStore[s.id] || 0)
           const storeOrders = Number(sales.orders || 0)
           const storeExpense = Number(exp.expense || 0)
           const target = Number(s.dailyTarget || 0)
@@ -2759,6 +2789,18 @@ order: [['updatedAt', 'DESC']],
         }
         dateMap[key].inflow = Number(r.inflow || 0)
       })
+      Object.entries(refunds.byDay).forEach(([key, amount]) => {
+        dateMap[key] = dateMap[key] || {
+          date: key,
+          revenue: 0,
+          orders: 0,
+          itemsSold: 0,
+          expense: 0,
+          inflow: 0,
+          outflow: 0
+        }
+        dateMap[key].revenue -= amount
+      })
       const apPaymentsInRange = apPaymentsRow.reduce(
         (s, r) => s + Number(r.amount || 0),
         0
@@ -2842,6 +2884,8 @@ order: [['updatedAt', 'DESC']],
           },
           summary: {
             revenue,
+            grossRevenue,
+            refunds: refunds.total,
             orders,
             avgOrderValue: orders > 0 ? Math.round(revenue / orders) : 0,
             itemsSold: Number(kpi.itemsSold || 0),
@@ -2854,6 +2898,12 @@ order: [['updatedAt', 'DESC']],
               revenue > 0
                 ? Math.round(((revenue - totalExpense) / revenue) * 1000) / 10
                 : 0,
+            netSales: profit.netSales,
+            cogs: profit.cogs,
+            qtyWithoutCost: profit.qtyWithoutCost,
+            grossProfit: profit.grossProfit,
+            netProfit: profit.grossProfit - totalExpense,
+            profitMargin: marginPercent(profit.grossProfit - totalExpense, profit.netSales),
             totalMembers,
             newMembers,
             activeProducts: 0,
@@ -2877,6 +2927,13 @@ order: [['updatedAt', 'DESC']],
           },
           finance: {
             revenue,
+            grossRevenue,
+            refunds: refunds.total,
+            netSales: profit.netSales,
+            cogs: profit.cogs,
+            grossProfit: profit.grossProfit,
+            netProfit: profit.grossProfit - totalExpense,
+            profitMargin: marginPercent(profit.grossProfit - totalExpense, profit.netSales),
             totalExpense,
             netRevenue: revenue - totalExpense,
             netMargin:

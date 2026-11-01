@@ -3,6 +3,8 @@ const { Op } = require('sequelize')
 const db = require('../../db/models')
 const reportDefs = require('../service/reportDefs')
 const { bucketCashFlowTenders } = require('../service/canonicalPayment')
+const { completedSaleSql } = require('../../utils/completedSaleSql')
+const { completedOrderWhere, refundTotals, dayKey } = require('../service/salesFigures')
 const { getStoreTodayBounds, getStoreDayBounds, DEFAULT_TIMEZONE } = require('../../utils/businessDate')
 const Order = db.order
 
@@ -92,27 +94,34 @@ exports.getSalesSummary = async (req, res) => {
       }
     }
 
-    const orderWhere = { paymentStatus: 'paid', status: { [Op.notIn]: ['cancelled', 'void'] } }
+    const orderWhere = completedOrderWhere()
     if (store) orderWhere.store = store
     if (dateRange[Op.gte]) orderWhere.createdAt = dateRange
 
-    const [totalSales, totalOrders, activeLocations, totalMembers] =
+    const [totalSales, totalOrders, activeLocations, totalMembers, refunds] =
       await Promise.all([
         Order.sum('totalPrice', { where: orderWhere }),
         Order.count({ where: orderWhere }),
         db.location.count({
           where: { status: 'active', ...(store ? { id: store } : {}) }
         }),
-        db.member.count({ where: store ? { store } : {} })
+        db.member.count({ where: store ? { store } : {} }),
+        refundTotals({
+          start: dateRange[Op.gte],
+          end: dateRange[Op.lte],
+          store,
+          timezone: storeTimezone
+        })
       ])
 
-    const totalSalesNum = Number(totalSales || 0)
+    const grossSalesNum = Number(totalSales || 0)
+    const totalSalesNum = grossSalesNum - refunds.total
     const totalOrdersNum = Number(totalOrders || 0)
     const avgTransaction =
       totalOrdersNum > 0 ? totalSalesNum / totalOrdersNum : 0
 
     const chartReplacements = { ...(store && { store }), storeTimezone }
-    let chartWhere = `WHERE "paymentStatus" = 'paid' AND "status" NOT IN ('cancelled','void')`
+    let chartWhere = `WHERE ${completedSaleSql()}`
     if (store) chartWhere += ` AND "store" = :store`
     if (dateRange[Op.gte]) {
       chartWhere += ` AND "createdAt" >= :startDate AND "createdAt" <= :endDate`
@@ -128,7 +137,7 @@ exports.getSalesSummary = async (req, res) => {
     )
 
     const storeChartReplacements = { ...(store && { store }), storeTimezone }
-    let storeChartWhere = `WHERE "paymentStatus" = 'paid' AND "status" NOT IN ('cancelled','void')`
+    let storeChartWhere = `WHERE ${completedSaleSql()}`
     if (store) storeChartWhere += ` AND "store" = :store`
     if (dateRange[Op.gte]) {
       storeChartWhere += ` AND "createdAt" >= :startDate AND "createdAt" <= :endDate`
@@ -175,7 +184,7 @@ exports.getSalesSummary = async (req, res) => {
       id: loc.id,
       name: loc.name,
       city: loc.city,
-      sales: storeTotals[loc.id]?.sales || 0,
+      sales: (storeTotals[loc.id]?.sales || 0) - (refunds.byStore[loc.id] || 0),
       transactions: storeTotals[loc.id]?.orders || 0
     }))
 
@@ -203,6 +212,14 @@ exports.getSalesSummary = async (req, res) => {
       }
       return result
     }
+    const chartByDay = new Map(salesChart.map((r) => [dayKey(r.date), r]))
+    for (const [day, amount] of Object.entries(refunds.byDay)) {
+      const row = chartByDay.get(day)
+      if (row) row.sales = Number(row.sales || 0) - amount
+      else salesChart.push({ date: day, sales: -amount, orders: 0 })
+    }
+    salesChart.sort((a, b) => (dayKey(a.date) < dayKey(b.date) ? -1 : 1))
+
     if (dateRange[Op.gte] && dateRange[Op.lte]) {
       salesChart = padChartData(
         salesChart,
@@ -217,6 +234,8 @@ exports.getSalesSummary = async (req, res) => {
       success: true,
       data: {
         totalSales: totalSalesNum,
+        grossSales: grossSalesNum,
+        refunds: refunds.total,
         totalOrders: totalOrdersNum,
         avgTransaction: Math.round(avgTransaction),
         totalCustomers: Number(totalMembers || 0),

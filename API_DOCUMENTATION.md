@@ -4107,6 +4107,8 @@ Auth required (super_admin).
 ### GET `/report/daily`
 Auth required. **Query:** `store` (number), `startDate` (ISO date), `endDate` (ISO date).
 
+The on-screen and exported daily report is `GET /report/data/daily` (columns Tanggal, Transaksi, Penjualan Kotor, Diskon, Pajak, Service Charge, Penjualan Bersih, HPP, Qty tanpa HPP, Laba Kotor, Biaya Operasional, Laba Bersih, Jumlah Tamu). Each row carries every column key (`date`, `totalTransaksi`, `totalPenjualanKotor` = subtotal, `diskon`, `pajak`, `serviceCharge`, `totalPenjualanBersih`, `totalHpp`, `qtyTanpaHpp`, `grossProfit`, `operationalExpense`, `netProfit`, `totalCovers`); until 2026-11-01 `date`, the gross/discount/tax/service-charge and expense columns were empty. Days are store-local for sales and refunds alike.
+
 **Response:**
 ```json
 {
@@ -4151,12 +4153,16 @@ Auth required. **Query:** `store`, `startDate`, `endDate`.
 ### GET `/report/sales-summary`
 Auth required. **Query:** `store`, `startDate`, `endDate`, `filter` (today|weekly|monthly).
 
+Completed sales (see the definitions under `GET /pos/dashboard/summary`; a partially refunded sale counts, an unfinished split bill does not). `totalSales`, `stores[].sales` and `salesChart[].sales` are net of refunds approved in the range (chart days in store time); `grossSales` and `refunds` show the two parts. The `sales` export (`/report/export/sales`, `/report/data/sales`) uses the same rule per store.
+
 **Response:**
 ```json
 {
   "success": true,
   "data": {
     "totalSales": 50000000,
+    "grossSales": 50500000,
+    "refunds": 500000,
     "totalOrders": 500,
     "avgTransaction": 100000,
     "totalCustomers": 200,
@@ -4976,6 +4982,8 @@ Auth required. **Query:** `page`, `limit`.
 ### GET `/pos/dashboard/summary`
 Auth required. **Query:** `store` (number).
 
+**Sales definitions (shared by every dashboard and sales report, 2026-11-01).** A sale counts when it is completed (`utils/completedSaleSql.js`): not cancelled/void, and `paymentStatus` `paid`/`refunded`, or `partial` explained by an approved sales return (a partially refunded sale). `partial` without an approved return is an unfinished split bill and is not a sale. Refunds of approved sales returns are subtracted on their approval date (`api/service/salesFigures.js`). Profit uses the daily report's definitions: net sales = subtotal − discount − refunded lines (tax and service charge excluded); HPP (`cogs`) = Σ `hppSnapshot` × qty − HPP of returned units (lines without a cost snapshot add nothing and are counted in `qtyWithoutCost`); `grossProfit` = net sales − HPP; `netProfit` = gross profit − approved expenses; `profitMargin` = net profit / net sales (%). `totalSales` = completed sales (tax included) − refunds; `grossSales` = before refunds; `netSales` keeps its old meaning (`totalSales − totalExpense`). New: `refunds`, `salesExcludingTax`, `cogs`, `qtyWithoutCost`, `grossProfit`, `netProfit`, `profitMargin`.
+
 **Response:**
 ```json
 {
@@ -4983,9 +4991,17 @@ Auth required. **Query:** `store` (number).
   "message": "Success",
   "data": {
     "totalSales": 5000000,
+    "grossSales": 5100000,
+    "refunds": 100000,
     "dailyTarget": 10000000,
     "averageOrderValue": 100000,
     "netSales": 4900000,
+    "salesExcludingTax": 4500000,
+    "cogs": 2000000,
+    "qtyWithoutCost": 0,
+    "grossProfit": 2500000,
+    "netProfit": 2400000,
+    "profitMargin": 53.3,
     "totalOrders": 50,
     "totalProducts": 120,
     "totalMembers": 200,
@@ -5093,6 +5109,8 @@ Auth required. **Query:** `productId`, `store`.
 ### GET `/pos/dashboard/super-admin`
 Auth required (super_admin; other roles receive 403). Global multi-store dashboard for a date range (defaults to the current month). Optional `store` scopes all figures to one store; omitted means all active stores.
 
+**Sales definitions (shared by every dashboard and sales report, 2026-11-01).** A sale counts when it is completed (`utils/completedSaleSql.js`): not cancelled/void, and `paymentStatus` `paid`/`refunded`, or `partial` explained by an approved sales return (a partially refunded sale). `partial` without an approved return is an unfinished split bill and is not a sale. Refunds of approved sales returns are subtracted on their approval date (`api/service/salesFigures.js`). Profit uses the daily report's definitions: net sales = subtotal − discount − refunded lines (tax and service charge excluded); HPP (`cogs`) = Σ `hppSnapshot` × qty − HPP of returned units (lines without a cost snapshot add nothing and are counted in `qtyWithoutCost`); `grossProfit` = net sales − HPP; `netProfit` = gross profit − approved expenses; `profitMargin` = net profit / net sales (%). `revenue` (KPI "Total Pendapatan"), `storePerformance[].revenue`, `kpiTrend[].revenue` and the previous-period growth are completed sales (tax included) − refunds; `grossRevenue` and `refunds` show the two parts. "Laba Bersih" is `netProfit` / `profitMargin`; `netRevenue` / `netMargin` keep their old meaning (`revenue − totalExpense`) for older clients.
+
 **Query:**
 | Field | Type | Description |
 |-------|------|-------------|
@@ -5111,6 +5129,9 @@ Auth required (super_admin; other roles receive 403). Global multi-store dashboa
       "revenue": 150000000, "orders": 500, "avgOrderValue": 300000, "itemsSold": 1200,
       "discount": 5000000, "tax": 15000000, "serviceCharge": 0,
       "totalExpense": 40000000, "netRevenue": 110000000, "netMargin": 73.3,
+      "grossRevenue": 152000000, "refunds": 2000000,
+      "netSales": 133000000, "cogs": 60000000, "qtyWithoutCost": 0,
+      "grossProfit": 73000000, "netProfit": 33000000, "profitMargin": 24.8,
       "totalMembers": 200, "newMembers": 15, "activeProducts": 0, "lowStockCount": 4,
       "apOutstanding": 10000000, "arOutstanding": 2000000, "pendingOrders": 0,
       "growth": { "revenue": 12, "orders": 8, "expense": -3, "newMembers": 100 }
@@ -5119,7 +5140,9 @@ Auth required (super_admin; other roles receive 403). Global multi-store dashboa
     "storePerformance": [{ "storeId": 1, "storeName": "Toko A", "city": "Jakarta", "province": "DKI", "managerName": "Budi", "revenue": 90000000, "orders": 300, "avgOrderValue": 300000, "itemsSold": 800, "discount": 0, "tax": 0, "expense": 30000000, "net": 60000000, "members": null, "lowStock": null, "target": 5000000, "targetPercent": 999, "sharePercent": 60 }],
     "paymentBreakdown": { "byMethod": [{ "method": "cash", "count": 200, "amount": 60000000, "bucket": "CASH" }], "byType": [{ "type": "CASH", "count": 200, "amount": 60000000 }], "totalPayments": 150000000 },
     "finance": {
-      "revenue": 150000000, "totalExpense": 40000000, "netRevenue": 110000000, "netMargin": 73.3,
+      "revenue": 150000000, "grossRevenue": 152000000, "refunds": 2000000,
+      "netSales": 133000000, "cogs": 60000000, "grossProfit": 73000000, "netProfit": 33000000, "profitMargin": 24.8,
+      "totalExpense": 40000000, "netRevenue": 110000000, "netMargin": 73.3,
       "discount": 5000000, "tax": 15000000,
       "ap": { "outstanding": 10000000, "count": 3, "paidInRange": 5000000 },
       "ar": { "outstanding": 2000000, "count": 4 },

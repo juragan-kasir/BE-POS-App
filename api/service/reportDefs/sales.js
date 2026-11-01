@@ -4,6 +4,7 @@ const { Op } = require('sequelize')
 const { assertReportStore } = require('./getReportStore')
 const { getStoreFilterRange } = require('../../../utils/businessDate')
 const { resolveStoreTimezone } = require('../../../utils/storeTimezone')
+const { completedOrderWhere, refundTotals } = require('../salesFigures')
 
 const defaultColumns = [
   { key: 'name', label: 'Toko', type: 'string', width: 18, align: 'left' },
@@ -27,9 +28,7 @@ const getData = async (req) => {
   if (range?.start) dateRange[Op.gte] = range.start
   if (range?.end) dateRange[Op.lte] = range.end
 
-  const orderWhere = { paymentStatus: 'paid', status: { [Op.notIn]: ['cancelled', 'void'] } }
-  if (store) orderWhere.store = store
-  if (range) orderWhere.createdAt = dateRange
+  const refunds = await refundTotals({ start: range?.start, end: range?.end, store })
 
   const storeWhere = store ? { id: store } : {}
   const locations = await db.location.findAll({ where: storeWhere, attributes: ['id', 'name', 'city'] })
@@ -42,13 +41,13 @@ const getData = async (req) => {
   }
   const rows = await Promise.all(
     locations.map(async (loc) => {
-      const locWhere = { paymentStatus: 'paid', status: { [Op.notIn]: ['cancelled', 'void'] }, store: loc.id }
+      const locWhere = { ...completedOrderWhere(), store: loc.id }
       if (dateRange[Op.gte]) locWhere.createdAt = dateRange
       const [sales, ordersCount] = await Promise.all([
         db.order.sum('totalPrice', { where: locWhere }),
         db.order.count({ where: locWhere })
       ])
-      return { name: loc.name, city: (loc.city && (cityNames.get(String(loc.city)) || loc.city)) || '-', sales: Number(sales || 0), transactions: Number(ordersCount || 0) }
+      return { name: loc.name, city: (loc.city && (cityNames.get(String(loc.city)) || loc.city)) || '-', sales: Number(sales || 0) - (refunds.byStore[loc.id] || 0), transactions: Number(ordersCount || 0) }
     })
   )
 
