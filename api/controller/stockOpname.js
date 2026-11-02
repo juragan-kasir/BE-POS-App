@@ -822,8 +822,9 @@ const stockOpnameController = {
       }
 
       const whereClause = { id }
-      if (store && userRole !== 'super_admin') {
-        whereClause.store = store
+      const userStore = req.storeId ?? req.user?.store
+      if (userStore) {
+        whereClause.store = userStore
       }
 
       const opname = await db.stockOpname.findOne({ where: whereClause })
