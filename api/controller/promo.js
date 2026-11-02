@@ -21,18 +21,19 @@ const promoController = {
       const where = {}
       const andConditions = []
 
-      const storeFilter = req.user?.roleType !== 'super_admin'
-        ? (req.user?.store ? Number(req.user.store) : null)
-        : (store && store !== '' ? Number(store) : null)
+      const userStore = req.storeId ?? req.user?.store
 
-      if (storeFilter) {
+      if (userStore) {
+        // Enforce store scoping even for super_admin with an active tenant
+        // Global bypass only for store === null vendor accounts
         andConditions.push({
           [Op.or]: [
-            { store: { [Op.contains]: [storeFilter] } },
+            { store: { [Op.contains]: [userStore] } },
             { store: null }
           ]
         })
       }
+      // If no userStore (global super_admin), skip filtering - allow all tenants
 
       if (status && status !== 'all') {
         where.status = status
@@ -431,15 +432,16 @@ const promoController = {
         endDate: { [Op.gte]: now }
       }
 
-      const storeFilter = req.user?.roleType !== 'super_admin'
-        ? (req.user?.store ? Number(req.user.store) : null)
-        : (store ? Number(store) : null)
+      const userStore = req.storeId ?? req.user?.store
 
-      if (storeFilter) {
+      if (userStore) {
+        // Enforce store scoping even for super_admin with an active tenant
+        // Global bypass only for store === null vendor accounts
         where[Op.and] = [
-          { [Op.or]: [{ store: { [Op.contains]: [storeFilter] } }, { store: null }] }
+          { [Op.or]: [{ store: { [Op.contains]: [userStore] } }, { store: null }] }
         ]
       }
+      // If no userStore (global super_admin), skip filtering - allow all tenants
 
       if (code) {
         where.code = code

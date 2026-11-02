@@ -42,13 +42,11 @@ const {
 // id or null. Its WhatsApp-session callers are gone (Fonnte removed); it stays
 // for the cashier table panel endpoints (feat/cashier-table-release).
 const getAuthorizedStoreId = (req) => {
-  if (isSuperAdmin(req)) {
-    const s = Number(req.query.storeId)
-    return Number.isFinite(s) ? s : null
-  }
   const own = Number(req.storeId)
   if (!Number.isFinite(own)) return null
   const claimed = Number(req.query.storeId)
+  // Even super_admin is restricted to their active tenant store;
+  // global bypass only for store === null vendor accounts
   if (Number.isFinite(claimed) && claimed !== own) return null
   return own
 }
@@ -505,7 +503,7 @@ const posController = {
         })
       }
 
-      if (req.user?.roleType !== 'super_admin' && req.storeId) {
+      if (req.storeId) {
         if (Number(fromStore) !== Number(req.storeId)) {
           return res.status(403).json({
             success: false,
@@ -781,7 +779,7 @@ const posController = {
       const { id } = req.params
 
       const where = { id }
-      if (req.storeId && req.user?.roleType !== 'super_admin') {
+      if (req.storeId) {
         where.toStore = req.storeId
       }
 
@@ -974,7 +972,7 @@ const posController = {
       const { id } = req.params
 
       const where = { id }
-      if (req.storeId && req.user?.roleType !== 'super_admin') {
+      if (req.storeId) {
         where.fromStore = req.storeId
       }
 
@@ -1192,7 +1190,7 @@ const posController = {
       const { id } = req.params
 
       const where = { id }
-      if (req.storeId && req.user?.roleType !== 'super_admin') {
+      if (req.storeId) {
         where[Op.or] = [{ fromStore: req.storeId }, { toStore: req.storeId }]
       }
 

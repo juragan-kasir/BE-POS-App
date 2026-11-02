@@ -688,9 +688,10 @@ exports.getAllProductInTable = async (req, res) => {
 // Function Post Add Form Product
 // Inventory links name outlets; a tenant admin may link only their own.
 const scopedInventoryLinks = (req, links) => {
-  if (!links || isSuperAdmin(req)) return links
+  if (!links) return links
   const callerStore = Number(req.storeId ?? req.user?.store)
-  if (links.some((l) => l.store !== callerStore)) {
+  // Even super_admin with an active tenant must scope inventory links to their store
+  if (callerStore && links.some((l) => l.store !== callerStore)) {
     throw new InventoryLinkError('Anda hanya dapat menautkan item persediaan toko Anda sendiri', { statusCode: 403 })
   }
   return links
@@ -828,11 +829,10 @@ exports.postAddProduct = async (req, res) => {
       })
     }
     // HIGH-7: validate the submitted stores[] against the caller's own store.
-    // super_admin may bind a product to any store (intentional multi-store
-    // administration). For tenant admins, any foreign store ID in the array
-    // is a cross-tenant write attempt — reject the entire request.
-    if (!isSuperAdmin(req) && parsedStores.length > 0) {
-      const callerStore = Number(req.storeId ?? req.user?.store)
+    // Even super_admin with an active tenant must limit store assignment to their tenant.
+    // Global bypass only for store === null vendor accounts.
+    const callerStore = Number(req.storeId ?? req.user?.store)
+    if (callerStore && parsedStores.length > 0) {
       const foreignStores = parsedStores.filter(
         (s) => Number(s) !== callerStore
       )

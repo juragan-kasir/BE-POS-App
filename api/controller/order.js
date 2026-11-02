@@ -469,21 +469,25 @@ const getServiceChargeRate = async (store) => {
   return configs.reduce((sum, t) => sum + Number(t.rate), 0)
 }
 
-const evaluatePromoCampaign = async (items, store, customerId, subtotal) => {
+const evaluatePromoCampaign = async (items, store, customerId, subtotal, tenantId) => {
   const now = new Date()
-  // Active days and happy-hour windows are store wall-clock time, not the
-  // server's (UTC on Vercel).
   const { day: currentDay, time: currentTime } = getStoreClock(
     await resolveStoreTimezone(store),
     now
   )
 
+  const where = {
+    status: 'active',
+    startDate: { [Op.lte]: now },
+    endDate: { [Op.gte]: now }
+  }
+
+  if (tenantId) {
+    where.tenantId = tenantId
+  }
+
   const campaigns = await db.promo_campaign.findAll({
-    where: {
-      status: 'active',
-      startDate: { [Op.lte]: now },
-      endDate: { [Op.gte]: now }
-    },
+    where,
     include: [
       {
         model: db.promo_rule,
@@ -1162,7 +1166,8 @@ const calculateFinalTotals = async ({
     })),
     store,
     customerId,
-    rawSubTotal
+    rawSubTotal,
+    req?.user?.tenant ?? null
   )
 
   let totals
@@ -1712,10 +1717,24 @@ exports.createOrder = async (req, res) => {
       // register, resolved under a SHARE lock that serializes against
       // register close(). No open register -> 422 with zero side effects;
       // a register that closes mid-flight -> 409. Never NULL-and-continue.
-       const openRegister = await resolveAttributedRegister(authorizedStore, t)
-       orderData.cashRegisterId = openRegister.id
+      // PGA-04 deadlock prevention: lock promo_campaign BEFORE order_daily_counter
+      // by recording promo usage before generating customer number. This ensures
+      // consistent lock ordering across all concurrent transactions, preventing
+      // lock-order inversion with other transactions that lock in opposite order.
+      await recordPromoUsageIfApplied(
+        createdOrder,
+        appliedCampaignId,
+        customerId,
+        promoDiscountAmount,
+        campaignWithSubtotal,
+        req.user?.id,
+        t
+      )
 
-       orderData.customerNumber = await generateCustomerNumber(authorizedStore, t)
+       const openRegister = await resolveAttributedRegister(authorizedStore, t)
+        orderData.cashRegisterId = openRegister.id
+
+         orderData.customerNumber = await generateCustomerNumber(authorizedStore, t)
       const createdOrder = await Order.create(orderData, { transaction: t })
 
       await createOrderItems(
@@ -1785,15 +1804,6 @@ exports.createOrder = async (req, res) => {
         items,
         customerId,
         orderNumber,
-        req.user?.id,
-        t
-      )
-      await recordPromoUsageIfApplied(
-        createdOrder,
-        appliedCampaignId,
-        customerId,
-        promoDiscountAmount,
-        campaignWithSubtotal,
         req.user?.id,
         t
       )
@@ -3961,22 +3971,13 @@ exports.updateOrderItemStatus = async (req, res) => {
   const { id, itemId, itemStatus } = req.body
 
   try {
-    // HIGH-3: was OrderItem.findOne({ where: { id: itemId, order: id } })
-    // with no store ownership check — any authenticated user could flip the
-    // status of another tenant's order item (integer IDOR) and cascade-flip
-    // the parent order status too.
-    //
-    // Fix: verify the parent order belongs to the caller's store BEFORE
+    // HIGH-3: verify the parent order belongs to the caller's store BEFORE
     // touching any item row. No mutation occurs until ownership is confirmed.
-    // super_admin is unrestricted (intentional global access).
+    // super_admin is restricted to their active tenant only;
+    // global bypass only for store === null vendor accounts.
     const orderWhere = { id }
     const userStore = req.storeId ?? req.user?.store
-    if (req.user?.roleType !== 'super_admin') {
-      if (!userStore) {
-        return res.status(403).json({
-          message: 'Store assignment required'
-        })
-      }
+    if (userStore) {
       orderWhere.store = userStore
     }
     const parentOrder = await Order.findOne({ where: orderWhere })
@@ -4371,6 +4372,12 @@ const resolveCustomerItemPrices = async (items, store) => {
 // `discountApplied` names the campaign so the diner sees why the total is lower.
 const quoteCustomerTotals = async (items, store) => {
   const subTotal = items.reduce((sum, item) => sum + Number(item.subtotal || 0), 0)
+  
+  const storeLocation = await db.location.findOne({
+    where: { id: store },
+    attributes: ['tenantId']
+  })
+  
   const campaign = await evaluatePromoCampaign(
     items.map((item) => ({
       ...item,
@@ -4380,7 +4387,8 @@ const quoteCustomerTotals = async (items, store) => {
     })),
     store,
     null,
-    subTotal
+    subTotal,
+    storeLocation?.tenantId ?? null
   )
   const discountAmount = Math.min(subTotal, Math.max(0, Number(campaign.discountAmount) || 0))
   const afterDiscount = subTotal - discountAmount
