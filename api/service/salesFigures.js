@@ -10,11 +10,21 @@ const completedOrderWhere = () => ({
 const rangeSql = (column, { start, end }) =>
   `${start ? ` AND ${column} >= :start` : ''}${end ? ` AND ${column} <= :end` : ''}`
 
-const replacementsFor = ({ start, end, store }) => {
+// An outlet set (`stores`, e.g. a multi-outlet owner's tenant roster) wins
+// over a single `store`; neither = every outlet (the vendor's view).
+const scopeIds = ({ stores, store }) => {
+  if (Array.isArray(stores) && stores.length > 0) return stores.map(Number)
+  return store ? [Number(store)] : []
+}
+const storeSql = (column, opts) => (scopeIds(opts).length > 0 ? ` AND ${column} IN (:storeIds)` : '')
+
+const replacementsFor = (opts) => {
+  const { start, end } = opts
   const r = {}
   if (start) r.start = start
   if (end) r.end = end
-  if (store) r.store = store
+  const ids = scopeIds(opts)
+  if (ids.length > 0) r.storeIds = ids
   return r
 }
 
@@ -34,7 +44,7 @@ const refundTotals = async (opts) => {
        FROM sales_return sr
       WHERE sr.status = 'approved' AND sr."approvedAt" IS NOT NULL AND sr."deletedAt" IS NULL
         ${rangeSql('sr."approvedAt"', opts)}
-        ${opts.store ? ' AND sr."store" = :store' : ''}
+        ${storeSql('sr."store"', opts)}
       GROUP BY sr."store", 2`,
     { ...replacementsFor(opts), ...(opts.timezone ? { timezone: opts.timezone } : {}) }
   )
@@ -57,7 +67,7 @@ const refundTotals = async (opts) => {
 // a line without a cost snapshot adds nothing and is counted in qtyWithoutCost.
 const profitFigures = async (opts) => {
   const repl = replacementsFor(opts)
-  const storeO = opts.store ? ' AND o."store" = :store' : ''
+  const storeO = storeSql('o."store"', opts)
   const [[sales], [cogs], [returned]] = await Promise.all([
     select(
       `SELECT COALESCE(SUM(o."subTotal"), 0)::bigint AS "subTotal",
@@ -84,7 +94,7 @@ const profitFigures = async (opts) => {
          JOIN order_item oi ON oi.id = sri."orderItem"
         WHERE sr.status = 'approved' AND sr."approvedAt" IS NOT NULL AND sr."deletedAt" IS NULL
           ${rangeSql('sr."approvedAt"', opts)}
-          ${opts.store ? ' AND sr."store" = :store' : ''}`,
+          ${storeSql('sr."store"', opts)}`,
       repl
     )
   ])

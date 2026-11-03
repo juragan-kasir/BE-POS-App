@@ -2247,8 +2247,26 @@ order: [['updatedAt', 'DESC']],
       const storeCondAlias = hasStoreScope ? ' AND o."store" IN (:storeIds)' : ''
       const storeCondPP = hasStoreScope ? ' AND pp."store" IN (:storeIds)' : ''
       const storeCondE = hasStoreScope ? ' AND e."store" IN (:storeIds)' : ''
+      // PGA-10: every aggregate is confined to the same outlet set. Several
+      // used the scalar `store` (one outlet for a multi-outlet owner, and
+      // NONE when no outlet is picked) or nothing at all, so a store-bound
+      // owner saw platform-wide stock value / low stock / queue / AP / tiers
+      // / audit rows — and the platform-wide stock value overflowed ::int,
+      // which made the whole dashboard 500 for every super_admin.
+      const storeCondPO = hasStoreScope ? ' AND po."store" IN (:storeIds)' : ''
+      const storeCondM = hasStoreScope ? ' AND m."store" IN (:storeIds)' : ''
+      const storeCondI = hasStoreScope ? ' AND i."store" IN (:storeIds)' : ''
+      const productInScope = (alias) =>
+        hasStoreScope
+          ? ` AND EXISTS (SELECT 1 FROM "product_store" ps WHERE ps."product" = ${alias}id AND ps."store" IN (:storeIds))`
+          : ''
+      // queue.store is a JSONB array of outlet ids.
+      const queueStoreCond = hasStoreScope ? ' AND "store" @> ANY (ARRAY[:queueStores]::jsonb[])' : ''
       const replacements = { startDate, endDate }
-      if (hasStoreScope) replacements.storeIds = storeScope
+      if (hasStoreScope) {
+        replacements.storeIds = storeScope
+        replacements.queueStores = storeScope.map((id) => JSON.stringify([id]))
+      }
 
       const startDay = getStoreLocalDate(timezone, rangeStart)
       const endDay = getStoreLocalDate(timezone, rangeEnd)
@@ -2310,12 +2328,12 @@ order: [['updatedAt', 'DESC']],
         // 1. KPI aggregate (paid orders in range)
         db.sequelize.query(
           `SELECT
-             COALESCE(SUM("totalPrice"),0)::int as revenue,
+             COALESCE(SUM("totalPrice"),0)::bigint as revenue,
              COUNT(*)::int as orders,
-             COALESCE(SUM("totalQuantity"),0)::int as "itemsSold",
-             COALESCE(SUM("discountAmount"),0)::int as discount,
-             COALESCE(SUM("taxAmount"),0)::int as tax,
-             COALESCE(SUM("serviceChargeAmount"),0)::int as "serviceCharge"
+             COALESCE(SUM("totalQuantity"),0)::bigint as "itemsSold",
+             COALESCE(SUM("discountAmount"),0)::bigint as discount,
+             COALESCE(SUM("taxAmount"),0)::bigint as tax,
+             COALESCE(SUM("serviceChargeAmount"),0)::bigint as "serviceCharge"
            FROM "order"
            WHERE ${completedSaleSql()}
              AND "deletedAt" IS NULL
@@ -2326,11 +2344,11 @@ order: [['updatedAt', 'DESC']],
         // 2. Per-store sales aggregation
         db.sequelize.query(
           `SELECT o."store" as "storeId",
-             COALESCE(SUM(o."totalPrice"),0)::int as revenue,
+             COALESCE(SUM(o."totalPrice"),0)::bigint as revenue,
              COUNT(DISTINCT o.id)::int as orders,
-             COALESCE(SUM(o."totalQuantity"),0)::int as "itemsSold",
-             COALESCE(SUM(o."discountAmount"),0)::int as discount,
-             COALESCE(SUM(o."taxAmount"),0)::int as tax
+             COALESCE(SUM(o."totalQuantity"),0)::bigint as "itemsSold",
+             COALESCE(SUM(o."discountAmount"),0)::bigint as discount,
+             COALESCE(SUM(o."taxAmount"),0)::bigint as tax
            FROM "order" o
            WHERE ${completedSaleSql('o.')}
              AND o."deletedAt" IS NULL
@@ -2342,9 +2360,9 @@ order: [['updatedAt', 'DESC']],
         // 3. Daily sales trend
         db.sequelize.query(
           `SELECT DATE(o."createdAt") as date,
-             COALESCE(SUM(o."totalPrice"),0)::int as revenue,
+             COALESCE(SUM(o."totalPrice"),0)::bigint as revenue,
              COUNT(DISTINCT o.id)::int as orders,
-             COALESCE(SUM(o."totalQuantity"),0)::int as "itemsSold"
+             COALESCE(SUM(o."totalQuantity"),0)::bigint as "itemsSold"
            FROM "order" o
            WHERE ${completedSaleSql('o.')}
              AND o."deletedAt" IS NULL
@@ -2359,7 +2377,7 @@ order: [['updatedAt', 'DESC']],
           `SELECT t."typePayment" as method,
              t."paymentMethodName" as name,
              COUNT(*)::int as count,
-             COALESCE(SUM(t.amount),0)::int as amount
+             COALESCE(SUM(t.amount),0)::bigint as amount
            FROM "transaction" t
            JOIN "order" o ON o.id = t."order"
            WHERE ${completedSaleSql('o.')}
@@ -2374,7 +2392,7 @@ order: [['updatedAt', 'DESC']],
         // 5. Daily incoming payment (cashflow inflow)
         db.sequelize.query(
           `SELECT DATE(o."createdAt") as date,
-             COALESCE(SUM(t.amount),0)::int as inflow
+             COALESCE(SUM(t.amount),0)::bigint as inflow
            FROM "transaction" t
            JOIN "order" o ON o.id = t."order"
            WHERE ${completedSaleSql('o.')}
@@ -2388,7 +2406,7 @@ order: [['updatedAt', 'DESC']],
         // 6. Expense per store
         db.sequelize.query(
           `SELECT e."store" as "storeId",
-             COALESCE(SUM(e.amount),0)::int as expense,
+             COALESCE(SUM(e.amount),0)::bigint as expense,
              COUNT(*)::int as count
            FROM "expense" e
            WHERE e.status = 'approved'
@@ -2401,7 +2419,7 @@ order: [['updatedAt', 'DESC']],
         // 7. Expense by category
         db.sequelize.query(
           `SELECT COALESCE(ec.name, 'Lainnya') as category,
-             COALESCE(SUM(e.amount),0)::int as amount,
+             COALESCE(SUM(e.amount),0)::bigint as amount,
              COUNT(*)::int as count
            FROM "expense" e
            LEFT JOIN "expense_category" ec ON ec.id = e.category
@@ -2416,7 +2434,7 @@ order: [['updatedAt', 'DESC']],
         // 8. Daily expense (cashflow outflow)
         db.sequelize.query(
           `SELECT DATE(e."date") as date,
-             COALESCE(SUM(e.amount),0)::int as outflow
+             COALESCE(SUM(e.amount),0)::bigint as outflow
            FROM "expense" e
            WHERE e.status = 'approved'
              AND e."deletedAt" IS NULL
@@ -2427,7 +2445,7 @@ order: [['updatedAt', 'DESC']],
         ),
         // 9. Total expense
         db.sequelize.query(
-          `SELECT COALESCE(SUM(amount),0)::int as amount
+          `SELECT COALESCE(SUM(amount),0)::bigint as amount
            FROM "expense"
            WHERE status = 'approved'
              AND "deletedAt" IS NULL
@@ -2438,7 +2456,7 @@ order: [['updatedAt', 'DESC']],
         // 10. AP payments (outflow) in range — grouped by day
         db.sequelize.query(
           `SELECT "paymentDate" as date,
-             COALESCE(SUM(amount),0)::int as amount,
+             COALESCE(SUM(amount),0)::bigint as amount,
              COUNT(*)::int as count
            FROM "purchase_payment"
            WHERE "deletedAt" IS NULL
@@ -2455,39 +2473,33 @@ order: [['updatedAt', 'DESC']],
         db.sequelize.query(
           `SELECT po.id, po."orderNumber", po.store, po."finalAmount",
              po."dueDate", po.status,
-             COALESCE(SUM(pp.amount),0)::int as paid
+             COALESCE(SUM(pp.amount),0)::bigint as paid
            FROM "purchase_order" po
            LEFT JOIN "purchase_payment" pp
              ON pp."purchaseOrder" = po.id AND pp."deletedAt" IS NULL
            WHERE po.status NOT IN ('cancelled','draft')
              AND po."deletedAt" IS NULL
-             ${store ? ' AND po."store" = :store' : ''}
+             ${storeCondPO}
            GROUP BY po.id
            HAVING po."finalAmount" > COALESCE(SUM(pp.amount),0)
            ORDER BY (po."finalAmount" - COALESCE(SUM(pp.amount),0)) DESC`,
-          {
-            replacements: store ? { store } : {},
-            type: db.sequelize.QueryTypes.SELECT
-          }
+          { replacements, type: db.sequelize.QueryTypes.SELECT }
         ),
         // 12. AP total summary
         db.sequelize.query(
           `SELECT COUNT(*)::int as count,
-             COALESCE(SUM(po."finalAmount" - COALESCE((SELECT SUM(pp2.amount) FROM "purchase_payment" pp2 WHERE pp2."purchaseOrder" = po.id AND pp2."deletedAt" IS NULL),0)),0)::int as outstanding,
-             COALESCE(SUM((SELECT COALESCE(SUM(pp3.amount),0) FROM "purchase_payment" pp3 WHERE pp3."purchaseOrder" = po.id AND pp3."deletedAt" IS NULL)),0)::int as paid
+             COALESCE(SUM(po."finalAmount" - COALESCE((SELECT SUM(pp2.amount) FROM "purchase_payment" pp2 WHERE pp2."purchaseOrder" = po.id AND pp2."deletedAt" IS NULL),0)),0)::bigint as outstanding,
+             COALESCE(SUM((SELECT COALESCE(SUM(pp3.amount),0) FROM "purchase_payment" pp3 WHERE pp3."purchaseOrder" = po.id AND pp3."deletedAt" IS NULL)),0)::bigint as paid
            FROM "purchase_order" po
            WHERE po.status NOT IN ('cancelled','draft')
              AND po."deletedAt" IS NULL
-             ${store ? ' AND po."store" = :store' : ''}
+             ${storeCondPO}
            HAVING SUM(po."finalAmount" - COALESCE((SELECT SUM(pp2.amount) FROM "purchase_payment" pp2 WHERE pp2."purchaseOrder" = po.id AND pp2."deletedAt" IS NULL),0)) > 0`,
-          {
-            replacements: store ? { store } : {},
-            type: db.sequelize.QueryTypes.SELECT
-          }
+          { replacements, type: db.sequelize.QueryTypes.SELECT }
         ),
         // 13. AR outstanding summary
         db.sequelize.query(
-          `SELECT COALESCE(SUM("outstandingAmount"),0)::int as outstanding,
+          `SELECT COALESCE(SUM("outstandingAmount"),0)::bigint as outstanding,
              COUNT(*)::int as count
            FROM "accounts_receivable"
            WHERE status NOT IN ('PAID','CANCELLED')
@@ -2498,7 +2510,7 @@ order: [['updatedAt', 'DESC']],
         // 14. AR by customer
         db.sequelize.query(
           `SELECT "customerName" as customer,
-             COALESCE(SUM("outstandingAmount"),0)::int as outstanding,
+             COALESCE(SUM("outstandingAmount"),0)::bigint as outstanding,
              COUNT(*)::int as count
            FROM "accounts_receivable"
            WHERE status NOT IN ('PAID','CANCELLED')
@@ -2525,18 +2537,15 @@ order: [['updatedAt', 'DESC']],
            FROM "member" m
            LEFT JOIN "member_tier" mt ON mt.id = m.tier
            WHERE m."deletedAt" IS NULL
-             ${store ? ' AND m."store" = :store' : ''}
+             ${storeCondM}
            GROUP BY mt.name
            ORDER BY count DESC`,
-          {
-            replacements: store ? { store } : {},
-            type: db.sequelize.QueryTypes.SELECT
-          }
+          { replacements, type: db.sequelize.QueryTypes.SELECT }
         ),
         // 17. Top members by spend
         db.sequelize.query(
           `SELECT o."customerId" as id, m.name, m."phoneNumber",
-             COALESCE(SUM(o."totalPrice"),0)::int as "totalSpend",
+             COALESCE(SUM(o."totalPrice"),0)::bigint as "totalSpend",
              COUNT(DISTINCT o.id)::int as "orderCount"
            FROM "order" o
            JOIN "member" m ON m.id = o."customerId" AND m."deletedAt" IS NULL
@@ -2559,9 +2568,10 @@ order: [['updatedAt', 'DESC']],
              AND p."deletedAt" IS NULL
              AND p."minStock" > 0
              AND p."stock" <= p."minStock"
+             ${productInScope('p.')}
            ORDER BY (p."minStock" - p.stock) DESC
            LIMIT 10`,
-          { type: db.sequelize.QueryTypes.SELECT }
+          { replacements, type: db.sequelize.QueryTypes.SELECT }
         ),
         // 19. Low stock ingredients
         // F21-06: this was the one ingredient low-stock query in the
@@ -2581,23 +2591,17 @@ order: [['updatedAt', 'DESC']],
            WHERE i.status = 'active'
              AND i."deletedAt" IS NULL
              AND i."stock" <= i."minStock"
-             ${store ? ' AND i."store" = :store' : ''}
+             ${storeCondI}
            ORDER BY (i."minStock" - i.stock) DESC
            LIMIT 10`,
-          {
-            replacements: store ? { store } : {},
-            type: db.sequelize.QueryTypes.SELECT
-          }
+          { replacements, type: db.sequelize.QueryTypes.SELECT }
         ),
         // 20. Stock value (products + ingredients)
         db.sequelize.query(
           `SELECT
-             (SELECT COALESCE(SUM(stock * "costPrice"),0)::int FROM "product" WHERE status='active' AND "deletedAt" IS NULL) as "productValue",
-             (SELECT COALESCE(SUM(stock * "costPrice"),0)::int FROM "ingredient" WHERE status='active' AND "deletedAt" IS NULL ${store ? ' AND "store" = :store' : ''}) as "ingredientValue"`,
-          {
-            replacements: store ? { store } : {},
-            type: db.sequelize.QueryTypes.SELECT
-          }
+             (SELECT COALESCE(SUM(p.stock * p."costPrice"),0)::bigint FROM "product" p WHERE p.status='active' AND p."deletedAt" IS NULL ${productInScope('p.')}) as "productValue",
+             (SELECT COALESCE(SUM(i.stock * i."costPrice"),0)::bigint FROM "ingredient" i WHERE i.status='active' AND i."deletedAt" IS NULL ${storeCondI}) as "ingredientValue"`,
+          { replacements, type: db.sequelize.QueryTypes.SELECT }
         ),
         // 21. Production status counts
         db.sequelize.query(
@@ -2611,20 +2615,21 @@ order: [['updatedAt', 'DESC']],
         // 22. Cash register status
         db.sequelize.query(
           `SELECT status, COUNT(*)::int as count,
-             COALESCE(SUM("totalSales"),0)::int as "totalSales"
+             COALESCE(SUM("totalSales"),0)::bigint as "totalSales"
            FROM "cash_register"
            WHERE "deletedAt" IS NULL
              ${storeCond}
            GROUP BY status`,
           { replacements, type: db.sequelize.QueryTypes.SELECT }
         ),
-        // 23. Queue waiting (global)
+        // 23. Queue waiting
         db.sequelize.query(
           `SELECT COUNT(*)::int as count
            FROM "queue"
            WHERE status IN ('waiting','seated')
              AND "deletedAt" IS NULL
-             AND "checkedInAt" >= :startDate`,
+             AND "checkedInAt" >= :startDate
+             ${queueStoreCond}`,
           { replacements, type: db.sequelize.QueryTypes.SELECT }
         ),
         // 24. Reservation today
@@ -2685,13 +2690,10 @@ order: [['updatedAt', 'DESC']],
         db.sequelize.query(
           `SELECT id, action, entity, "entityId", description, "userName", store, "createdAt"
            FROM "auditLog"
-           ${store ? 'WHERE store = :store' : ''}
+           ${hasStoreScope ? 'WHERE store IN (:storeIds)' : ''}
            ORDER BY "createdAt" DESC
            LIMIT 8`,
-          {
-            replacements: store ? { store } : {},
-            type: db.sequelize.QueryTypes.SELECT
-          }
+          { replacements, type: db.sequelize.QueryTypes.SELECT }
         ),
         // 29-32. Previous period comparisons
         (async () => {
@@ -2706,7 +2708,7 @@ order: [['updatedAt', 'DESC']],
           }
           const [sales, orders, expense, members, prevRefunds] = await Promise.all([
             db.sequelize.query(
-              `SELECT COALESCE(SUM("totalPrice"),0)::int as revenue
+              `SELECT COALESCE(SUM("totalPrice"),0)::bigint as revenue
                FROM "order" WHERE ${completedSaleSql()} AND "deletedAt" IS NULL
                  AND "createdAt" >= :pStart AND "createdAt" <= :pEnd ${storeCond}`,
               { replacements: prevRepl, type: db.sequelize.QueryTypes.SELECT }
@@ -2718,7 +2720,7 @@ order: [['updatedAt', 'DESC']],
               { replacements: prevRepl, type: db.sequelize.QueryTypes.SELECT }
             ),
             db.sequelize.query(
-              `SELECT COALESCE(SUM(amount),0)::int as amount
+              `SELECT COALESCE(SUM(amount),0)::bigint as amount
                FROM "expense" WHERE status='approved' AND "deletedAt" IS NULL
                  AND "date" >= :pStart AND "date" <= :pEnd ${storeCond}`,
               { replacements: prevRepl, type: db.sequelize.QueryTypes.SELECT }
@@ -2729,7 +2731,7 @@ order: [['updatedAt', 'DESC']],
                  AND "createdAt" >= :pStart AND "createdAt" <= :pEnd ${storeCond}`,
               { replacements: prevRepl, type: db.sequelize.QueryTypes.SELECT }
             ),
-            refundTotals({ start: prevRepl.pStart, end: prevRepl.pEnd, store })
+            refundTotals({ start: prevRepl.pStart, end: prevRepl.pEnd, stores: storeScope })
           ])
           return {
             prevRevenue: (sales[0]?.revenue || 0) - prevRefunds.total,
@@ -2741,7 +2743,7 @@ order: [['updatedAt', 'DESC']],
       ])
 
       // ---- Assemble ----
-      const figureRange = { start: startDate, end: endDate, store }
+      const figureRange = { start: startDate, end: endDate, stores: storeScope }
       const [refunds, profit] = await Promise.all([
         refundTotals(figureRange),
         profitFigures(figureRange)
