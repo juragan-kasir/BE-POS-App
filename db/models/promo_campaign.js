@@ -12,6 +12,12 @@ module.exports = (sequelize, DataTypes) => {
       store: {
         type: DataTypes.JSONB
       },
+      // PGA-03 / ADR-02 (batch B11): the tenant that owns the campaign. NULL
+      // only for a campaign of a store without a tenant; such a campaign
+      // never applies to an outlet that has one.
+      tenantId: {
+        type: DataTypes.INTEGER
+      },
       name: {
         allowNull: false,
         type: DataTypes.STRING

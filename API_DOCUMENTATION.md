@@ -4298,6 +4298,8 @@ Key errors: 404 `Report tidak ditemukan`; 403 `Store assignment required`.
 
 ## Promo Campaign
 
+**Tenant scope (PGA-03 / ADR-02, batch B11).** Every campaign belongs to one tenant (`promo_campaign.tenantId`, set by the server from the creator — never from the body). `store: null` ("semua outlet") means every outlet **of that tenant**. List, stats, read, edit, status, delete, apply, the diner list and checkout only see the caller's / the outlet's own tenant's campaigns (another tenant's campaign answers 404). The store-less platform vendor account cannot create a campaign for a merchant's outlet (`403 PROMO_VENDOR_FORBIDDEN`); its `store: null` campaign is tenant-less and never applies to a tenant's outlet. Outlets of more than one tenant → `400 PROMO_STORES_SPAN_TENANTS`; another tenant's outlet → `403 FOREIGN_STORE`. An edit cannot change `tenantId` or `createdBy`.
+
 ### GET `/promo/campaigns`
 Auth required. **Query:** `store` (number).
 
@@ -4385,7 +4387,7 @@ No auth. Public active-promo list for the customer app: at most 10 campaigns, hi
 **Query:**
 | Field | Type | Description |
 |-------|------|-------------|
-| `store` | number | Optional; matches promos whose JSONB store list contains it, plus global (`store: null`) promos |
+| `store` | number | The diner's outlet. Matches that outlet's tenant's promos whose JSONB store list contains it, plus that tenant's "all outlets" (`store: null`) promos. Without a valid `store` the list is empty (PGA-03). |
 
 **Response:**
 ```json

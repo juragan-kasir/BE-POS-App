@@ -39,6 +39,7 @@ const { usesOwnStock, isInventoryItemMode } = require('../service/inventoryLinkS
 const { withDeadlockRetry } = require('../../utils/deadlockRetry')
 const { getStoreOpenStatus } = require('../../utils/storeHours')
 const { callerStoreIds, storeIdsCondition } = require('../../utils/tenantScope')
+const { storeTenantId } = require('../../utils/promoTenant')
 const {
   FINANCIAL_STATES,
   TERMINAL_FULFILMENT,
@@ -479,11 +480,15 @@ const evaluatePromoCampaign = async (items, store, customerId, subtotal) => {
     now
   )
 
+  // PGA-03 / ADR-02: only the order outlet's own tenant's campaigns apply;
+  // a campaign with no outlet (store null) covers that tenant's outlets
+  // only. An outlet without a tenant sees only tenant-less campaigns.
   const campaigns = await db.promo_campaign.findAll({
     where: {
       status: 'active',
       startDate: { [Op.lte]: now },
-      endDate: { [Op.gte]: now }
+      endDate: { [Op.gte]: now },
+      tenantId: await storeTenantId(store)
     },
     include: [
       {

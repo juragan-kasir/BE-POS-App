@@ -177,10 +177,24 @@ const E2_BATCHES = Object.freeze({
     // restocked. No governance gate. The BE code reads the column, so B10
     // must be recorded before it deploys.
     openGates: []
+  }),
+  B11: deepFreeze({
+    id: 'B11',
+    title: 'Tenant-scoped promo campaigns',
+    expectedCount: 1,
+    migrations: ['20261103000001-promo-campaign-tenant.js'],
+    // PGA-03 / ADR-02 (product owner, 2026-11-03): up adds
+    // promo_campaign.tenantId (nullable FK tenant + index, add-if-missing)
+    // and fills NULL rows from the campaign's outlets (one tenant only),
+    // else from its creator's outlet; anything else stays NULL, which the
+    // code treats as tenant-less (never applied to a tenanted outlet).
+    // Replays safely; down drops the index and column. No governance gate.
+    // The BE code reads the column, so B11 must be recorded before it deploys.
+    openGates: []
   })
 })
 
-const BATCH_ORDER = Object.freeze(['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B9', 'B10'])
+const BATCH_ORDER = Object.freeze(['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B9', 'B10', 'B11'])
 
 // D-08 B1 resume contracts. A resume finishes a batch whose earlier members
 // were recorded by an interrupted run; it never redefines the batch (the
