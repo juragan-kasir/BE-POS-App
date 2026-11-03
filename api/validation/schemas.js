@@ -214,10 +214,28 @@ exports.createProductSchema = z.object({
   imageOrder: z.string().optional().nullable()
 })
 
-exports.updateProductSchema = exports.createProductSchema.partial().extend({
-  id: strToNum(),
-  inventoryMode: inventoryModeEnumBase.optional()
-})
+// PGA-08: an edit changes only the fields it sends. `.partial()` is not
+// enough — zod 4 still fills `.default()` for a missing key, so
+// `{ id, isAvailable }` came back with nameProduct '', price 0, stock 0 …
+// and the edit wiped the product. Strip every default from the create shape.
+const withoutDefault = (field) => {
+  let inner = field
+  while (inner instanceof z.ZodDefault) inner = inner.unwrap()
+  return inner.optional()
+}
+exports.updateProductSchema = z
+  .object(
+    Object.fromEntries(
+      Object.entries(exports.createProductSchema.shape).map(([key, field]) => [
+        key,
+        withoutDefault(field)
+      ])
+    )
+  )
+  .extend({
+    id: strToNum(),
+    inventoryMode: inventoryModeEnumBase.optional()
+  })
 
 // ===================== Category =====================
 exports.createCategorySchema = z.object({

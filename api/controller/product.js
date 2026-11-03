@@ -1255,54 +1255,58 @@ exports.editProductByLocationAndId = async (req, res) => {
       }
     }
 
+    // PGA-08: a field the request does not carry keeps its stored value. Only
+    // a value that is sent — '' / null included, which clears it — is
+    // written. Before, every missing field was reset (name '', price 0,
+    // points 0, supplier/tax null) and a missing `stock` was read as 0, so
+    // `{ id, isAvailable: false }` zeroed the product and its outlet stock.
+    const sent = (v) => v !== undefined
+    const asBool = (v) => v === true || v === 'true' || v === '1' || v === 1
+    const asJson = (v) => (typeof v === 'string' ? JSON.parse(v) : v)
+    const listToggle = (flag, list, storedFlag, storedList) => {
+      if (!sent(flag) && !sent(list)) return undefined
+      const on = sent(flag) ? asBool(flag) : asBool(storedFlag)
+      if (!on) return []
+      return sent(list) ? asJson(list) ?? [] : storedList ?? []
+    }
+    const existing = getAllProductByIdAndLocation
+    const nextModifiers = listToggle(hasModifiers, modifiers, existing.hasModifiers, existing.modifiers)
+    const nextOptions = listToggle(isOption, options, existing.isOption, existing.options)
+
     const reqBody = {
-      nameProduct,
       image: imageUrl,
       ...(gallery ? { images: gallery } : {}),
-      category: category !== undefined ? toIntOrNull(category) : undefined,
-      description,
-      price,
-      costPrice,
-      stock,
-      minStock,
-      unit,
-      baseUnit:
-        baseUnit !== undefined
-          ? baseUnit
-          : getAllProductByIdAndLocation.baseUnit,
-      conversionFactor:
-        conversionFactor != null
-          ? parseFloat(conversionFactor)
-          : getAllProductByIdAndLocation.conversionFactor,
-      point: point || 0,
-      redeemPoints: redeemPoints || 0,
-      barcode: barcode || null,
-      brand: brand || null,
-      hasModifiers,
-      modifiers: hasModifiers
-        ? typeof modifiers === 'string'
-          ? JSON.parse(modifiers)
-          : modifiers
-        : [],
-      isOption,
-      options: isOption
-        ? typeof options === 'string'
-          ? JSON.parse(options)
-          : options
-        : [],
-      isAvailable,
-      status: status !== undefined ? normalizeStatus(status) : undefined,
-      supplier: toIntOrNull(supplier),
-      tax: normalizedTax,
-      priceTiers: parsedPriceTiers,
-      currencyId: currencyId || null,
-      currencyCode: currencyCode || null,
-      tipeProduk,
+      ...(sent(nameProduct) ? { nameProduct } : {}),
+      ...(sent(category) ? { category: toIntOrNull(category) } : {}),
+      ...(sent(description) ? { description } : {}),
+      ...(sent(price) ? { price } : {}),
+      ...(sent(costPrice) ? { costPrice } : {}),
+      ...(sent(stock) ? { stock } : {}),
+      ...(sent(minStock) ? { minStock } : {}),
+      ...(sent(unit) ? { unit } : {}),
+      ...(sent(baseUnit) ? { baseUnit } : {}),
+      ...(conversionFactor != null ? { conversionFactor: parseFloat(conversionFactor) } : {}),
+      ...(sent(point) ? { point: point || 0 } : {}),
+      ...(sent(redeemPoints) ? { redeemPoints: redeemPoints || 0 } : {}),
+      ...(sent(barcode) ? { barcode: barcode || null } : {}),
+      ...(sent(brand) ? { brand: brand || null } : {}),
+      ...(sent(hasModifiers) ? { hasModifiers } : {}),
+      ...(nextModifiers !== undefined ? { modifiers: nextModifiers } : {}),
+      ...(sent(isOption) ? { isOption } : {}),
+      ...(nextOptions !== undefined ? { options: nextOptions } : {}),
+      ...(sent(isAvailable) ? { isAvailable } : {}),
+      ...(sent(status) ? { status: normalizeStatus(status) } : {}),
+      ...(sent(supplier) ? { supplier: toIntOrNull(supplier) } : {}),
+      ...(sent(tax) ? { tax: normalizedTax } : {}),
+      ...(sent(priceTiers) ? { priceTiers: parsedPriceTiers } : {}),
+      ...(sent(currencyId) ? { currencyId: currencyId || null } : {}),
+      ...(sent(currencyCode) ? { currencyCode: currencyCode || null } : {}),
+      ...(sent(tipeProduk) ? { tipeProduk } : {}),
       ...(inventoryMode !== undefined ? { inventoryMode } : {}),
       // BA finding #3: composition is not editable here — it is the BOM's
       // recipe snapshot (bom.js refreshProductCosting). An edit that sent a
       // manual list used to overwrite it, leaving two diverging recipes.
-      estimationTime: estimationTime || 0,
+      ...(sent(estimationTime) ? { estimationTime: estimationTime || 0 } : {}),
       ...(actorId !== null && actorId > 0 ? { modifiedBy: actorId } : {})
     }
 
@@ -1310,6 +1314,7 @@ exports.editProductByLocationAndId = async (req, res) => {
       delete reqBody.stock
       delete reqBody.minStock
     }
+    const stockSent = reqBody.stock !== undefined
     const newStock = Number(reqBody.stock) || 0
     // HIGH-7: storeId for per-store shadow stock must derive from trusted
     // server-side context (req.storeId / JWT claim), never unvalidated cookies.
@@ -1337,7 +1342,8 @@ exports.editProductByLocationAndId = async (req, res) => {
         transaction: t
       })
       oldStock = Number(lockedProduct.stock) || 0
-      stockDiff = linksInventoryItem ? 0 : newStock - oldStock
+      // No `stock` in the request = no stock change (PGA-08).
+      stockDiff = linksInventoryItem || !stockSent ? 0 : newStock - oldStock
 
       const [, editRows] = await Product.update(reqBody, {
         returning: true,
@@ -1403,15 +1409,17 @@ exports.editProductByLocationAndId = async (req, res) => {
         })
       : null
 
+    // A partial edit has no nameProduct; name the product as it is saved.
+    const savedName = editLocation?.nameProduct ?? existing.nameProduct
     createNotification({
       type: 'product_updated',
       store: firstStoreRow?.store || req.user?.store,
       referenceId: id,
       referenceType: 'product',
-      params: [nameProduct],
+      params: [savedName],
       createdBy: req.user?.fullName || 'System'
     }).catch(console.error)
-    createAudit(req, 'update', 'product', id, `Updated product: ${nameProduct}`)
+    createAudit(req, 'update', 'product', id, `Updated product: ${savedName}`)
 
     return res.status(200).json({
       success: true,
