@@ -3,6 +3,11 @@ const { Op } = require('sequelize')
 const { enrichAuditFields } = require('../../utils/auditFields')
 const { emitToStore } = require('../service/socket')
 const { arrayStoreScope } = require('../../utils/tenantScope')
+const {
+  storeTenantId,
+  promoTenantWhere,
+  resolveCampaignTenant
+} = require('../../utils/promoTenant')
 const { incrementPromoUsage } = require('../service/promoUsageService')
 const { buyXGetYCondition, isActiveOnDay } = require('../../utils/promoRuleCondition')
 const { getStoreClock } = require('../../utils/businessDate')
@@ -16,9 +21,10 @@ const promoController = {
   async getCampaigns(req, res) {
     try {
       const { search, status, type, page = 1, limit = 10 } = req.query
-      const store = req.query.store
 
-      const where = {}
+      // PGA-03: only the caller's own tenant's campaigns (all of them for
+      // the store-less vendor account).
+      const where = await promoTenantWhere(req)
       const andConditions = []
 
       const userStore = req.storeId ?? req.user?.store
@@ -112,7 +118,7 @@ const promoController = {
       // Same IDOR fix as updateCampaign — was findByPk(id) with no
       // ownership check, leaking another store's campaign config.
       const campaign = await db.promo_campaign.findOne({
-        where: arrayStoreScope(req, { id }),
+        where: await promoTenantWhere(req, arrayStoreScope(req, { id })),
         include: [
           { model: db.promo_rule, as: 'rules' },
           { model: db.promo_reward, as: 'rewards' }
@@ -169,8 +175,18 @@ const promoController = {
         rewards
       } = req.body
 
+      // PGA-03 / ADR-02: the campaign belongs to the creator's tenant; its
+      // outlets must be outlets of that tenant.
+      const owner = await resolveCampaignTenant(req, store)
+      if (!owner.ok) {
+        return res
+          .status(owner.status)
+          .json({ success: false, code: owner.code, message: owner.message })
+      }
+
       const campaign = await db.promo_campaign.create({
         store,
+        tenantId: owner.tenantId,
         name,
         description,
         code,
@@ -269,12 +285,33 @@ const promoController = {
       // admin could edit any other store's campaign (rules/rewards
       // included).
       const campaign = await db.promo_campaign.findOne({
-        where: arrayStoreScope(req, { id })
+        where: await promoTenantWhere(req, arrayStoreScope(req, { id }))
       })
       if (!campaign) {
         return res
           .status(404)
           .json({ success: false, message: 'Campaign not found' })
+      }
+
+      // The owning tenant and the creator are fixed; outlets may change only
+      // within the campaign's own tenant.
+      delete updateData.tenantId
+      delete updateData.createdBy
+      delete updateData.id
+      if (updateData.store !== undefined) {
+        const owner = await resolveCampaignTenant(req, updateData.store)
+        if (!owner.ok) {
+          return res
+            .status(owner.status)
+            .json({ success: false, code: owner.code, message: owner.message })
+        }
+        if (owner.tenantId !== campaign.tenantId) {
+          return res.status(403).json({
+            success: false,
+            code: 'FOREIGN_STORE',
+            message: 'Anda hanya dapat membuat promo untuk outlet bisnis Anda'
+          })
+        }
       }
 
       if (updateData.startDate)
@@ -355,7 +392,7 @@ const promoController = {
 
       // Same IDOR fix as updateCampaign.
       const campaign = await db.promo_campaign.findOne({
-        where: arrayStoreScope(req, { id })
+        where: await promoTenantWhere(req, arrayStoreScope(req, { id }))
       })
       if (!campaign) {
         return res
@@ -390,7 +427,7 @@ const promoController = {
 
       // Same IDOR fix as updateCampaign.
       const campaign = await db.promo_campaign.findOne({
-        where: arrayStoreScope(req, { id })
+        where: await promoTenantWhere(req, arrayStoreScope(req, { id }))
       })
       if (!campaign) {
         return res
@@ -433,6 +470,13 @@ const promoController = {
       }
 
       const userStore = req.storeId ?? req.user?.store
+
+      // PGA-03: only campaigns of the outlet's own tenant apply.
+      if (userStore) {
+        where.tenantId = await storeTenantId(userStore)
+      } else {
+        Object.assign(where, await promoTenantWhere(req))
+      }
 
       if (userStore) {
         // Enforce store scoping even for super_admin with an active tenant
@@ -641,7 +685,7 @@ const promoController = {
     try {
       const store = req.query.store
 
-      const where = {}
+      const where = await promoTenantWhere(req)
       const storeFilter = req.user?.roleType !== 'super_admin'
         ? (req.user?.store ? Number(req.user.store) : null)
         : (store && store !== '' ? Number(store) : null)
@@ -753,15 +797,21 @@ const promoController = {
         endDate: { [Op.gte]: now }
       }
 
-      if (store && store !== '') {
-        const storeId = Number(store)
-        if (!isNaN(storeId)) {
-          where[Op.or] = [
-            { store: { [Op.contains]: [storeId] } },
-            { store: null }
-          ]
-        }
+      // PGA-03: a diner sees the outlet's own tenant's campaigns only. No
+      // outlet named means no campaign (this endpoint is public).
+      const storeId = Number(store)
+      if (!Number.isInteger(storeId) || storeId <= 0) {
+        return res.status(200).json({
+          success: true,
+          message: 'Success get customer active promos',
+          data: []
+        })
       }
+      where.tenantId = await storeTenantId(storeId)
+      where[Op.or] = [
+        { store: { [Op.contains]: [storeId] } },
+        { store: null }
+      ]
 
       const campaigns = await db.promo_campaign.findAll({
         where,

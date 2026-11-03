@@ -91,7 +91,7 @@ vocabulary and field rules are in `db/migration-dispositions/README.md`.
    for the same `--env`. Flags that could retarget the runner are refused.
    - **D-08 E2 runs in bounded batches (Option C)**, one separately approved
      batch at a time:
-     `npm run migrate -- --env production --batch B1` (then `B2`, `B3`, `B4`, `B5`, `B6`, `B7`, `B8`, `B9`, `B10`).
+     `npm run migrate -- --env production --batch B1` (then `B2`, `B3`, `B4`, `B5`, `B6`, `B7`, `B8`, `B9`, `B10`, `B11`).
      The batches are defined in `scripts/migration-batches.js` and recorded
      in `docs/superpowers/evidence/d08-e2-batch-contract-record.md`:
      - **B1**: the original 13 E2 migrations;
@@ -136,6 +136,15 @@ vocabulary and field rules are in `db/migration-dispositions/README.md`.
        were all restocked). Additive and replays safely; `down()` stops before
        any DDL while a return is recorded as not restocked. **Run B10 before
        the BE code that reads `sales_return.restock` reaches production.**
+     - **B11**: tenant-scoped promo campaigns (PGA-03 / ADR-02, product owner
+       2026-11-03) — adds nullable `promo_campaign."tenantId"` (FK `tenant`,
+       `ON DELETE SET NULL`) + index, then fills NULL rows from the campaign's
+       outlets (only when one tenant owns them all), else from the creator's
+       outlet. Rows that resolve to no tenant or several stay NULL and stop
+       applying to any tenant's outlet. Replays safely; `down()` drops the
+       index and the column. **Run B11 before the BE code that reads
+       `promo_campaign.tenantId` reaches production**; check the rows first
+       with `ops/promo-tenant-2026-11-03/check_promo_tenant.js` (read-only).
     - After the preflight, the runner refuses a batch whose members are
       missing or already recorded, when any pending migration outside the
       batch would run first, or when a governance gate is open (B3: P1

@@ -373,6 +373,8 @@ module.exports = async () => {
     ['order_item', 'roundId', 'INTEGER REFERENCES "order_round"(id) ON UPDATE CASCADE ON DELETE SET NULL'],
     // Sales return restock choice (migration 20261101000003, batch B10).
     ['sales_return', 'restock', 'BOOLEAN NOT NULL DEFAULT TRUE'],
+    // PGA-03 tenant-scoped promotions (migration 20261103000001, batch B11).
+    ['promo_campaign', 'tenantId', 'INTEGER REFERENCES "tenant"(id) ON UPDATE CASCADE ON DELETE SET NULL'],
   ]
 
   // Phase 34: stock_opname_item's quantity columns are migration-owned
