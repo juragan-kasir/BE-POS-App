@@ -58,6 +58,8 @@ beforeAll(async () => {
     stock: 3,
     status: 'active'
   })
+  // PGA-10: the stock value counts the products sold at the outlets in scope.
+  await db.product_store.create({ product: product.id, store: store.id })
   ingredient = await db.ingredient.create({
     name: unique('DASHC_ING'),
     store: store.id,
@@ -103,6 +105,7 @@ afterAll(async () => {
   await db.transaction.destroy({ where: { order: orderIds }, force: true })
   await db.order.destroy({ where: { id: orderIds }, force: true })
   await db.ingredient.destroy({ where: { id: ingredient?.id }, force: true })
+  await db.product_store.destroy({ where: { product: product?.id }, force: true })
   await db.product.destroy({ where: { id: product?.id }, force: true })
   await db.category.destroy({ where: { id: category?.id }, force: true })
   await db.user.destroy({ where: { id: SUPER_ID }, force: true })
@@ -129,17 +132,13 @@ describe('GET /pos/dashboard/super-admin response contract', () => {
       expect(kpiTrend.reduce((s, d) => s + d.itemsSold, 0)).toBe(14)
     })
 
-    test('operations stock value includes product and ingredient value', async () => {
+    test('operations stock value includes product and ingredient value of the outlet in scope', async () => {
       const { operations } = res.body.data
-      const [{ productValue }] = await db.sequelize.query(
-        `SELECT COALESCE(SUM(stock * "costPrice"),0)::int AS "productValue"
-           FROM "product" WHERE status='active' AND "deletedAt" IS NULL`,
-        { type: db.sequelize.QueryTypes.SELECT }
-      )
+      // PGA-10: ?store=X counts only products sold at X (3 × Rp 1.000) —
+      // never the platform-wide catalog, which also overflowed ::int.
       expect(operations.ingredientStockValue).toBe(10000)
-      expect(operations.productStockValue).toBe(productValue)
-      expect(operations.productStockValue).toBeGreaterThanOrEqual(3000)
-      expect(operations.stockValue).toBe(operations.productStockValue + 10000)
+      expect(operations.productStockValue).toBe(3000)
+      expect(operations.stockValue).toBe(3000 + 10000)
     })
   })
 
