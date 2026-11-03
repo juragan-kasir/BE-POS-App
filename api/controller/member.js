@@ -3,6 +3,7 @@ const Member = db.member
 const { Op } = require('sequelize')
 const { createAudit } = require('../../utils/auditLog')
 const { enrichAuditFields } = require('../../utils/auditFields')
+const { callerStoreIds, storeIdsCondition } = require('../../utils/tenantScope')
 const {
   canonicalPhone,
   isGuestPhone,
@@ -56,6 +57,15 @@ const respondMemberWriteError = (res, error) => {
   return null
 }
 
+// PGA-01: a member record may be changed by a caller whose tenant roster
+// holds the member's outlet. A chain-wide member (store null) belongs to no
+// tenant, so only a store-less vendor account may change it (C-9).
+const memberInCallerScope = async (req, member) => {
+  const allowed = await callerStoreIds(req)
+  if (allowed === null) return true
+  return member.store != null && allowed.includes(Number(member.store))
+}
+
 exports.getAllMember = async (req, res) => {
   try {
     const {
@@ -74,6 +84,12 @@ exports.getAllMember = async (req, res) => {
     }
     if (store) {
       filters.store = store
+    } else {
+      // A store-bound super_admin without ?store= lists its own tenant's
+      // outlets, never every tenant's members; a store-less vendor account
+      // stays global.
+      const condition = storeIdsCondition(await callerStoreIds(req))
+      if (condition !== undefined) filters.store = condition
     }
 
     if (nameMember) {
@@ -385,10 +401,7 @@ exports.editMember = async (req, res) => {
     // edit it. A global member's own ADMIN record (name/phone/tier/points)
     // must only be mutated by super_admin — falsy store is no longer an
     // implicit pass.
-    if (
-      req.user?.roleType !== 'super_admin' &&
-      (!member.store || Number(member.store) !== Number(req.user?.store))
-    ) {
+    if (!(await memberInCallerScope(req, member))) {
       return res.status(403).json({
         success: false,
         message: 'Anda tidak memiliki akses untuk mengedit member ini'
@@ -519,10 +532,7 @@ exports.deleteMember = async (req, res) => {
 
     // C-9: same falsy-store bypass as editMember — a global member must
     // only be deleted by super_admin, not any tenant admin.
-    if (
-      req.user?.roleType !== 'super_admin' &&
-      (!member.store || Number(member.store) !== Number(req.user?.store))
-    ) {
+    if (!(await memberInCallerScope(req, member))) {
       return res.status(403).json({
         success: false,
         message: 'Anda tidak memiliki akses untuk menghapus member ini'

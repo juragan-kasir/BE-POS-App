@@ -2,7 +2,7 @@ const db = require('../../db/models')
 const { Op } = require('sequelize')
 const { createAudit } = require('../../utils/auditLog')
 const { enrichAuditFields } = require('../../utils/auditFields')
-const { resolveStoreId } = require('../../utils/tenantScope')
+const { resolveStoreId, tenantStoreWhere } = require('../../utils/tenantScope')
 const {
   adjustIngredientStock,
   getIngredientStockRecording
@@ -283,7 +283,6 @@ const ingredientController = {
   async update(req, res) {
     try {
       const { id } = req.params
-      const store = resolveStoreId(req)
       const {
         name,
         category,
@@ -298,22 +297,17 @@ const ingredientController = {
       } = req.body
       const modifiedBy = req.user?.id || null
 
-      const isSuperAdmin = req.user?.roleType === 'super_admin'
+      // PGA-01: the ingredient must belong to an outlet of the caller's
+      // tenant. A store-bound super_admin used to fall back to any id, and
+      // the write below then moved the row to the caller's outlet.
+      const scopedWhere = await tenantStoreWhere(req, { id })
 
       const updated = await db.sequelize.transaction(async (t) => {
-        let ingredient = await db.ingredient.findOne({
-          where: { id, ...(store ? { store } : {}) },
+        const ingredient = await db.ingredient.findOne({
+          where: scopedWhere,
           transaction: t,
           lock: t.LOCK.UPDATE
         })
-
-        if (!ingredient && isSuperAdmin) {
-          ingredient = await db.ingredient.findOne({
-            where: { id },
-            transaction: t,
-            lock: t.LOCK.UPDATE
-          })
-        }
 
         if (!ingredient) return null
 
@@ -332,7 +326,7 @@ const ingredientController = {
               conversionFactor != null
                 ? parseFloat(conversionFactor)
                 : ingredient.conversionFactor,
-            store: store !== undefined ? store : ingredient.store,
+            // An edit never moves the ingredient to another outlet.
             costPrice: costPrice !== undefined ? costPrice : ingredient.costPrice,
             status:
               status !== undefined
