@@ -3,7 +3,7 @@ const { Op } = require('sequelize')
 const { enrichAuditFields } = require('../../utils/auditFields')
 const { redactAndAudit, AUDIT_ACTIONS } = require('../../utils/auditLog')
 const { withDeadlockRetry } = require('../../utils/deadlockRetry')
-const { scalarStoreScope } = require('../../utils/tenantScope')
+const { scalarStoreScope, storesInCallerTenant } = require('../../utils/tenantScope')
 const { assertIntegerRupiah } = require('../../utils/moneyGuard')
 const { reportingBucket, CANONICAL_METHOD_ORDER } = require('../service/canonicalPayment')
 const {
@@ -2124,7 +2124,12 @@ const cashRegisterController = {
         })
       }
 
-      if (!isSuperAdmin && register.store !== Number(store)) {
+      // PGA-12: a store-bound super_admin (client owner) reads Z-reports of
+      // its own tenant's outlets only; a store-less vendor account is global.
+      const canRead = isSuperAdmin
+        ? await storesInCallerTenant(req, [register.store])
+        : register.store === Number(store)
+      if (!canRead) {
         return res.status(403).json({
           success: false,
           message: 'Forbidden'

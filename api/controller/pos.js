@@ -1786,8 +1786,16 @@ const posController = {
       const { id } = req.params
       const { page = 1, limit = 20 } = req.query
 
+      // PGA-12: only a member of an outlet in the caller's tenant roster.
+      // A chain-wide member (store null) belongs to no tenant, so only a
+      // store-less vendor account reads its history.
+      const allowedStores = await callerStoreIds(req)
       const member = await db.member.findByPk(id)
-      if (!member) {
+      const inScope =
+        member &&
+        (allowedStores === null ||
+          (member.store != null && allowedStores.includes(Number(member.store))))
+      if (!inScope) {
         return res.status(404).json({
           success: false,
           message: 'Member not found'
@@ -3080,6 +3088,13 @@ order: [['updatedAt', 'DESC']],
             .filter((s) => Number.isFinite(s) && s === own)
           if (storeIds.length === 0) storeIds = [own]
         }
+      } else {
+        // PGA-12: a store-bound super_admin reads its own tenant's outlets
+        // only; a store-less vendor account is global.
+        const allowed = await callerStoreIds(req)
+        if (allowed !== null) {
+          storeIds = storeIds.map(Number).filter((s) => allowed.includes(s))
+        }
       }
 
       if (!productId) {
@@ -3175,6 +3190,40 @@ order: [['updatedAt', 'DESC']],
           (sp) => sp.storeId !== 'base' && Number(sp.storeId) !== own
         )
         if (!Number.isFinite(own) || hasBase || foreign) {
+          return res.status(403).json({
+            success: false,
+            message: 'Anda hanya dapat mengakses harga di toko Anda'
+          })
+        }
+      }
+
+      // PGA-01: a store-bound super_admin (client owner) prices outlets of
+      // its own tenant only. An outlet row affects that outlet alone (C-11),
+      // but the shared base price reaches every outlet the product is
+      // assigned to, so the owner may write it only when all of those
+      // outlets are its own.
+      const allowedStores = await callerStoreIds(req)
+      if (allowedStores !== null) {
+        const outletIds = storePrices
+          .filter((sp) => sp.storeId !== 'base')
+          .map((sp) => Number(sp.storeId))
+        if (outletIds.some((sid) => !allowedStores.includes(sid))) {
+          return res.status(403).json({
+            success: false,
+            message: 'Anda hanya dapat mengakses harga di toko Anda'
+          })
+        }
+        const hasBase = storePrices.some((sp) => sp.storeId === 'base')
+        const assigned = hasBase
+          ? (
+              await db.product_store.findAll({
+                where: { product: productId },
+                attributes: ['store'],
+                raw: true
+              })
+            ).map((r) => Number(r.store))
+          : []
+        if (assigned.some((sid) => !allowedStores.includes(sid))) {
           return res.status(403).json({
             success: false,
             message: 'Anda hanya dapat mengakses harga di toko Anda'
