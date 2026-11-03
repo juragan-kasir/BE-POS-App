@@ -241,7 +241,7 @@ describe('Concurrent status update — double stock deduction (order.js updateOr
       request(app)
         .put('/order/update-status')
         .set('Authorization', `Bearer ${token}`)
-        .send({ id: order.id, status: 'paid', store: location.id })
+        .send({ id: order.id, status: 'paid', paymentMethod: 'cash', store: location.id })
 
     await Promise.all([markPaid(), markPaid()])
 

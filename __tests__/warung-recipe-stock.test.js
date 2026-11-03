@@ -560,7 +560,7 @@ describe('QR table order (BISA-MAKAN) — same recipe, deducted exactly once at 
       request(app)
         .put('/order/update-status')
         .set(auth(tokenAdminA))
-        .send({ id: created.body.data.id, status: 'paid' })
+        .send({ id: created.body.data.id, status: 'paid', paymentMethod: 'cash' })
     const paid = await pay()
     expect(paid.status).toBe(200)
     const afterPaid = await snapshot()
@@ -614,7 +614,7 @@ describe('QR table order (BISA-MAKAN) — same recipe, deducted exactly once at 
     const paid = await request(app)
       .put('/order/update-status')
       .set(auth(tokenAdminA))
-      .send({ id: created.body.data.id, status: 'paid' })
+      .send({ id: created.body.data.id, status: 'paid', paymentMethod: 'cash' })
     expect(paid.status).toBe(200)
     expect(paid.body.stockShortages).toEqual([
       expect.objectContaining({ type: 'ingredient', id: ING.telur.id, required: 2, deducted: 1, shortfall: 1 })

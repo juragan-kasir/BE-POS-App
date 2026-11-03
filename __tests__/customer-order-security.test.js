@@ -365,7 +365,8 @@ describe('SEC-001/SEC-006 — quantity trust boundary on customer-create', () =>
     //    payment-ledger row belong, exactly once.
     const paid = await markOrderPaid(adminTokenStore1, {
       id: res.body.data.id,
-      status: 'paid'
+      status: 'paid',
+      paymentMethod: 'cash'
     })
 
     expect(paid.status).toBe(200)

@@ -175,7 +175,7 @@ describe('POST /order/customer-create — QR paid only via trusted cashier trans
 
     // 2) Authorized cashier marks it paid: payment-ledger row and the stock
     //    deduction commit atomically with that transition.
-    const paid = await markOrderPaid(adminToken, { id: res.body.data.id, status: 'paid' })
+    const paid = await markOrderPaid(adminToken, { id: res.body.data.id, status: 'paid', paymentMethod: 'cash' })
 
     expect(paid.status).toBe(200)
 
@@ -250,7 +250,7 @@ describe('POST /order/customer-create — QR order unpaid & exactly-once', () =>
 
     // Replaying the idempotent create after payment still returns the same
     // order, and the single trusted transition deducts exactly once.
-    const paid = await markOrderPaid(adminToken, { id: r1.body.data.id, status: 'paid' })
+    const paid = await markOrderPaid(adminToken, { id: r1.body.data.id, status: 'paid', paymentMethod: 'cash' })
     expect(paid.status).toBe(200)
 
     const r3 = await request(app).post('/order/customer-create').send(body)
