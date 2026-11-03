@@ -2323,8 +2323,8 @@ const recordOrderPayment = async (
 }
 
 // DR-04: builds the complete settlement tender for an update-status paid
-// transition. The request must carry a payment method when the order does
-// not already hold one (QR orders are created method-less); cash detail is
+// transition. The request must always carry the payment method (PGA-06 /
+// ADR-03: the order's own method is never inherited); cash detail is
 // validated with the same server-side validateCashTender as order create.
 // P1 attribution (DR-PAY-ATTR-01..03): the tender is canonicalized (422 on
 // unknown), and drawer attribution ALWAYS resolves the currently open
@@ -2341,15 +2341,20 @@ const resolvePaidSettlement = async ({
   cashAmount,
   changeAmount,
   referenceNumber,
-  lockedOrder,
   effectiveStore,
   amountDue,
   t
 }) => {
-  const method = normalizePaymentMethod(bodyMethod || lockedOrder.paymentMethod || null)
+  // PGA-06 / ADR-03 (BR-PAY-001 retired): the tender is what the staff
+  // member chose in THIS request. order.paymentMethod on a QR order is the
+  // diner's declared intent ("saya bayar tunai"), never a tender — falling
+  // back to it booked CASH with cashReceived = amount due when staff sent no
+  // method, i.e. cash recorded without anyone counting it.
+  const method = normalizePaymentMethod(bodyMethod || null)
   if (!method) {
     const err = new Error('paymentMethod is required to settle an order to paid')
     err.statusCode = 422
+    err.code = 'PAYMENT_METHOD_REQUIRED'
     throw err
   }
   const { cashReceived, changeGiven } = validateCashTender({
@@ -3434,7 +3439,6 @@ exports.updateOrderStatus = async (req, res) => {
             cashAmount: req.body.cashAmount,
             changeAmount: req.body.changeAmount,
             referenceNumber: req.body.referenceNumber,
-            lockedOrder,
             effectiveStore,
             amountDue: settleAmount,
             t

@@ -220,10 +220,15 @@ describe('settlement reference (DR-23 §D)', () => {
     expect(await ledgerRows(order.id)).toHaveLength(1)
   })
 
-  test('the tender taken from the order itself (no paymentMethod in the request) also needs a reference', async () => {
+  // PGA-06 / ADR-03: the order's own method (a QR diner's intent) is never
+  // the tender — a settlement with no paymentMethod is refused outright.
+  test('a QRIS intent is never inherited: no paymentMethod is refused even with a reference', async () => {
     const order = await makeQrOrder({ paymentMethod: 'qris' })
-    await expectRefusedWithoutEffect(await settlePaid({ id: order.id }), order.id)
-    const ok = await settlePaid({ id: order.id, referenceNumber: 'QR-ORDER-TENDER' })
+    const noMethod = await settlePaid({ id: order.id, referenceNumber: 'QR-ORDER-TENDER' })
+    expect(noMethod.status).toBe(422)
+    expect(noMethod.body.code).toBe('PAYMENT_METHOD_REQUIRED')
+    expect(await ledgerRows(order.id)).toHaveLength(0)
+    const ok = await settlePaid({ id: order.id, paymentMethod: 'qris', referenceNumber: 'QR-ORDER-TENDER' })
     expect(ok.status).toBe(200)
     const rows = await ledgerRows(order.id)
     expect(rows[0].typePayment).toBe('QRIS')

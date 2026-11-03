@@ -524,7 +524,7 @@ describe('F7 — deferred path (deductStockForPaidOrder, via PUT /order/update-s
     // Not yet deducted — order is still unpaid.
     expect(Number((await db.ingredient.findByPk(ing.id)).stock)).toBe(100)
 
-    const res = await updateOrderStatus(tokenA, { id: order.id, status: 'paid' })
+    const res = await updateOrderStatus(tokenA, { id: order.id, status: 'paid', paymentMethod: 'cash' })
     expect(res.status).toBe(200)
     expect(Number((await db.ingredient.findByPk(ing.id)).stock)).toBe(100 - 12)
   })
@@ -626,8 +626,8 @@ describe('F7 — exactly-once', () => {
     const { order } = await makeUnpaidOrderWithItem({ store: storeA.id, product, quantity: 1 })
 
     const [r1, r2] = await Promise.all([
-      updateOrderStatus(tokenA, { id: order.id, status: 'paid' }),
-      updateOrderStatus(tokenA, { id: order.id, status: 'paid' })
+      updateOrderStatus(tokenA, { id: order.id, status: 'paid', paymentMethod: 'cash' }),
+      updateOrderStatus(tokenA, { id: order.id, status: 'paid', paymentMethod: 'cash' })
     ])
     const statuses = [r1.status, r2.status].sort((a, b) => a - b)
     // DR-23 (BA §35.10 K): the loser re-validates under the order lock and is
@@ -901,7 +901,8 @@ describe('F7 — QR customer paid via trusted cashier transition (Phase 3.1)', (
     if (created.status !== 201) return { created, paid: null }
     const paid = await updateOrderStatus(tokenA, {
       id: created.body.data.id,
-      status: 'paid'
+      status: 'paid',
+      paymentMethod: 'cash'
     })
     return { created, paid }
   }
@@ -982,7 +983,8 @@ describe('F7 — QR customer paid via trusted cashier transition (Phase 3.1)', (
 
     const paid = await updateOrderStatus(tokenA, {
       id: created.body.data.id,
-      status: 'paid'
+      status: 'paid',
+      paymentMethod: 'cash'
     })
     // DR-18: the payment is not refused for stock at settlement.
     expect(paid.status).toBe(200)
@@ -1008,7 +1010,7 @@ describe('F7 — QR customer paid via trusted cashier transition (Phase 3.1)', (
     // Another sale takes the last unit before this order is paid.
     await db.product_store_stock.update({ stock: 0 }, { where: { product: product.id, store: storeA.id } })
 
-    const paid = await updateOrderStatus(tokenA, { id: created.body.data.id, status: 'paid' })
+    const paid = await updateOrderStatus(tokenA, { id: created.body.data.id, status: 'paid', paymentMethod: 'cash' })
     expect(paid.status).toBe(200)
     expect(paid.body.stockShortages).toEqual([
       expect.objectContaining({ type: 'product', id: product.id, required: 1, deducted: 0, shortfall: 1 })
@@ -1097,7 +1099,8 @@ describe('F7 — bundle FG reversal symmetry (F-REV1)', () => {
     if (created.status !== 201) return { created, paid: null }
     const paid = await updateOrderStatus(tokenA, {
       id: created.body.data.id,
-      status: 'paid'
+      status: 'paid',
+      paymentMethod: 'cash'
     })
     return { created, paid }
   }
@@ -1313,7 +1316,7 @@ describe('F7 — bundle FG reversal symmetry (F-REV1)', () => {
     await repackBundle(bundle.id, [{ product: A }, { product: D }])
 
     // T2: trusted paid reads the CURRENT config — only A and D are deducted.
-    const paid = await updateOrderStatus(tokenA, { id: created.body.data.id, status: 'paid' })
+    const paid = await updateOrderStatus(tokenA, { id: created.body.data.id, status: 'paid', paymentMethod: 'cash' })
     expect(paid.status).toBe(200)
     expect(Number((await db.product.findByPk(A.id)).stock)).toBe(9)
     expect(Number((await db.product.findByPk(D.id)).stock)).toBe(9)
