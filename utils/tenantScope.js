@@ -284,6 +284,66 @@ async function superAdminStoreIds(req) {
   return ids
 }
 
+// ---------------------------------------------------------------------------
+// Tenant roster for by-id reads/writes (PGA-01).
+//
+// The store ids whose rows this caller may address by id, read from the
+// caller's own identity, never from request input:
+// - canonical context: assigned stores for store-confined roles, the whole
+//   tenant roster otherwise; null for a platform actor outside any tenant.
+// - store-bound super_admin (a client owner): every outlet of its tenant.
+//   Its own store alone when that store has no tenant.
+// - global super_admin (users.store null): null, meaning unrestricted.
+// - everyone else: exactly its own store; [] (matches nothing) when unassigned.
+//
+// The single active outlet (req.storeId) is the wrong boundary here: a
+// multi-outlet owner must reach every outlet of its tenant, and no other.
+// ---------------------------------------------------------------------------
+const positiveIds = (list) =>
+  (list || []).map(Number).filter((n) => Number.isInteger(n) && n > 0)
+
+async function callerStoreIds(req) {
+  const ctx = req?.authContext
+  if (ctx) {
+    if (ctx.eligible !== true) return []
+    if (ctx.isPlatformAdmin && ctx.activeTenantId == null) return null
+    if (ctx.activeTenantId == null) return []
+    return positiveIds(
+      STORE_CONFINED_ROLES.includes(ctx.activeRole) ? ctx.assignedStoreIds : ctx.tenantStoreIds
+    )
+  }
+  if (isSuperAdmin(req)) {
+    const own = Number(req.user?.store)
+    if (!Number.isInteger(own) || own <= 0) return null
+    return (await superAdminStoreIds(req)) ?? [own]
+  }
+  const own = Number(req.user?.store)
+  return Number.isInteger(own) && own > 0 ? [own] : []
+}
+
+// WHERE value for a scalar store column from callerStoreIds(): undefined
+// means "no narrowing" (global), [] an impossible id (fail closed).
+const storeIdsCondition = (ids) => {
+  if (ids === null) return undefined
+  if (ids.length === 0) return -1
+  return ids.length === 1 ? ids[0] : { [Op.in]: ids }
+}
+
+// `where` narrowed to the caller's tenant roster on `column`.
+async function tenantStoreWhere(req, where = {}, column = 'store') {
+  const condition = storeIdsCondition(await callerStoreIds(req))
+  return condition === undefined ? { ...where } : { ...where, [column]: condition }
+}
+
+// True when every id is inside the caller's tenant roster (always true for
+// a global caller).
+async function storesInCallerTenant(req, storeIds) {
+  const allowed = await callerStoreIds(req)
+  if (allowed === null) return true
+  return positiveIds(storeIds).length === storeIds.length &&
+    storeIds.every((id) => allowed.includes(Number(id)))
+}
+
 // WHERE fragment for the nullable-array shape (supplier, driver) limited to
 // a set of stores: shared rows (store null / []) plus any row tagged with at
 // least one of the stores.
@@ -298,6 +358,10 @@ function nullableArrayStoresWhere(storeIds) {
 }
 
 module.exports = {
+  callerStoreIds,
+  storeIdsCondition,
+  tenantStoreWhere,
+  storesInCallerTenant,
   superAdminStoreIds,
   nullableArrayStoresWhere,
   isSuperAdmin,

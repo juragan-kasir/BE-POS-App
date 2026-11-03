@@ -9,7 +9,15 @@ const batchService = require('../service/batchService')
 const { withDeadlockRetry } = require('../../utils/deadlockRetry')
 const { assertDecimalQuantity } = require('../../utils/decimalQuantityGuard')
 const { redactAndAudit, AUDIT_ACTIONS } = require('../../utils/auditLog')
-const { scalarStoreScope, isSuperAdmin, resolveStoreId } = require('../../utils/tenantScope')
+const {
+  scalarStoreScope,
+  isSuperAdmin,
+  resolveStoreId,
+  callerStoreIds,
+  storeIdsCondition,
+  storesInCallerTenant,
+  tenantStoreWhere
+} = require('../../utils/tenantScope')
 const { IRREVERSIBLE_STORE_STATUSES } = require('../validation/schemas')
 const { canonicalPhone } = require('../../utils/memberIdentity')
 const { listTableReleaseStatus, releaseTable } = require('../service/tableRelease')
@@ -35,20 +43,22 @@ const {
   CANONICAL_METHOD_ORDER
 } = require('../service/canonicalPayment')
 
-// N-3 (security): authoritative store for reads scoped by ?storeId. For
-// non-super-admin the store MUST be req.storeId (pinned by validateStoreAccess);
-// a client-supplied ?storeId that targets another store is rejected. Only
-// super_admin may explicitly target an arbitrary store. Returns a numeric store
-// id or null. Its WhatsApp-session callers are gone (Fonnte removed); it stays
-// for the cashier table panel endpoints (feat/cashier-table-release).
-const getAuthorizedStoreId = (req) => {
+// N-3 (security): authoritative store for reads scoped by ?storeId. A
+// client-supplied ?storeId must be an outlet of the caller's tenant roster
+// (callerStoreIds: its own store for admin/kasir, every outlet of its tenant
+// for a store-bound super_admin, anything for a store-less vendor account).
+// Without ?storeId the pinned req.storeId is used. Returns a numeric store id
+// or null. It serves the cashier table panel endpoints
+// (feat/cashier-table-release).
+const getAuthorizedStoreId = async (req) => {
+  const raw = req.query.storeId
+  if (raw !== undefined && raw !== '') {
+    const claimed = Number(raw)
+    if (!Number.isInteger(claimed) || claimed <= 0) return null
+    return (await storesInCallerTenant(req, [claimed])) ? claimed : null
+  }
   const own = Number(req.storeId)
-  if (!Number.isFinite(own)) return null
-  const claimed = Number(req.query.storeId)
-  // Even super_admin is restricted to their active tenant store;
-  // global bypass only for store === null vendor accounts
-  if (Number.isFinite(claimed) && claimed !== own) return null
-  return own
+  return Number.isInteger(own) && own > 0 ? own : null
 }
 
 let _psExists = null
@@ -369,7 +379,7 @@ const posController = {
   // caller may put it back to "available" (server-decided).
   async getCashierTables(req, res) {
     try {
-      const storeId = getAuthorizedStoreId(req)
+      const storeId = await getAuthorizedStoreId(req)
       if (storeId === null) {
         return res
           .status(400)
@@ -503,13 +513,14 @@ const posController = {
         })
       }
 
-      if (req.storeId) {
-        if (Number(fromStore) !== Number(req.storeId)) {
-          return res.status(403).json({
-            success: false,
-            message: 'Anda hanya dapat mentransfer stok dari toko Anda'
-          })
-        }
+      // The source must be an outlet of the caller's tenant (any of them for
+      // a multi-outlet owner). The destination's tenant is checked by
+      // assertTransferStoreBoundary below.
+      if (!(await storesInCallerTenant(req, [Number(fromStore)]))) {
+        return res.status(403).json({
+          success: false,
+          message: 'Anda hanya dapat mentransfer stok dari toko Anda'
+        })
       }
 
       // Phase 39 Batch 1: quantities follow the DECIMAL(10,4) stock contract
@@ -778,10 +789,7 @@ const posController = {
     try {
       const { id } = req.params
 
-      const where = { id }
-      if (req.storeId) {
-        where.toStore = req.storeId
-      }
+      const where = await tenantStoreWhere(req, { id }, 'toStore')
 
       const existing = await db.stock_transfer.findOne({ where })
 
@@ -971,10 +979,7 @@ const posController = {
     try {
       const { id } = req.params
 
-      const where = { id }
-      if (req.storeId) {
-        where.fromStore = req.storeId
-      }
+      const where = await tenantStoreWhere(req, { id }, 'fromStore')
 
       const existing = await db.stock_transfer.findOne({ where })
 
@@ -1190,8 +1195,9 @@ const posController = {
       const { id } = req.params
 
       const where = { id }
-      if (req.storeId) {
-        where[Op.or] = [{ fromStore: req.storeId }, { toStore: req.storeId }]
+      const storeCondition = storeIdsCondition(await callerStoreIds(req))
+      if (storeCondition !== undefined) {
+        where[Op.or] = [{ fromStore: storeCondition }, { toStore: storeCondition }]
       }
 
       const transfer = await db.stock_transfer.findOne({

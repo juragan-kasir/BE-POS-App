@@ -30,7 +30,7 @@ const {
   downloadProductTemplate,
   parseProductTemplate
 } = require('../../utils/excelTemplate')
-const { isSuperAdmin } = require('../../utils/tenantScope')
+const { isSuperAdmin, storesInCallerTenant } = require('../../utils/tenantScope')
 const { assertSellableProductAssignment } = require('../validation/schemas')
 // W3-1 (DR-11): shared authoritative outlet-price resolution (checkout +
 // display use one rule).
@@ -687,11 +687,11 @@ exports.getAllProductInTable = async (req, res) => {
 
 // Function Post Add Form Product
 // Inventory links name outlets; a tenant admin may link only their own.
-const scopedInventoryLinks = (req, links) => {
+// A client owner (store-bound super_admin) may link any outlet of its own
+// tenant; only a store-less vendor account is unrestricted.
+const scopedInventoryLinks = async (req, links) => {
   if (!links) return links
-  const callerStore = Number(req.storeId ?? req.user?.store)
-  // Even super_admin with an active tenant must scope inventory links to their store
-  if (callerStore && links.some((l) => l.store !== callerStore)) {
+  if (!(await storesInCallerTenant(req, links.map((l) => l.store)))) {
     throw new InventoryLinkError('Anda hanya dapat menautkan item persediaan toko Anda sendiri', { statusCode: 403 })
   }
   return links
@@ -828,20 +828,14 @@ exports.postAddProduct = async (req, res) => {
         message: assignmentDecision.message
       })
     }
-    // HIGH-7: validate the submitted stores[] against the caller's own store.
-    // Even super_admin with an active tenant must limit store assignment to their tenant.
-    // Global bypass only for store === null vendor accounts.
-    const callerStore = Number(req.storeId ?? req.user?.store)
-    if (callerStore && parsedStores.length > 0) {
-      const foreignStores = parsedStores.filter(
-        (s) => Number(s) !== callerStore
-      )
-      if (foreignStores.length > 0) {
-        return res.status(403).json({
-          success: false,
-          message: 'Anda hanya dapat menambahkan produk ke toko Anda sendiri'
-        })
-      }
+    // HIGH-7 / PGA-02: every submitted store must be an outlet of the
+    // caller's tenant — all of them for a multi-outlet owner, only its own
+    // for a single-store admin. Only a store-less vendor account is global.
+    if (parsedStores.length > 0 && !(await storesInCallerTenant(req, parsedStores))) {
+      return res.status(403).json({
+        success: false,
+        message: 'Anda hanya dapat menambahkan produk ke toko Anda sendiri'
+      })
     }
 
     let parsedPriceTiers = []
@@ -920,7 +914,7 @@ exports.postAddProduct = async (req, res) => {
     const linksInventoryItem = isInventoryItemMode(inventoryMode)
     const validatedLinks = linksInventoryItem
       ? await validateInventoryLinks({
-          links: scopedInventoryLinks(req, parseInventoryLinks(inventoryLinks)) || [],
+          links: (await scopedInventoryLinks(req, parseInventoryLinks(inventoryLinks))) || [],
           stores: parsedStores
         })
       : null
@@ -1189,21 +1183,16 @@ exports.editProductByLocationAndId = async (req, res) => {
         message: editAssignmentError.message
       })
     }
-    // HIGH-7: validate the submitted stores[] against the caller's own store.
-    // super_admin may bind a product to any store (intentional multi-store
-    // administration). For tenant admins, any foreign store ID in the array
-    // is a cross-tenant write attempt — reject the entire request.
-    if (!isSuperAdmin(req) && stores !== undefined && parsedStores.length > 0) {
-      const callerStore = Number(req.storeId ?? req.user?.store)
-      const foreignStores = parsedStores.filter(
-        (s) => Number(s) !== callerStore
-      )
-      if (foreignStores.length > 0) {
-        return res.status(403).json({
-          success: false,
-          message: 'Anda hanya dapat mengubah produk untuk toko Anda sendiri'
-        })
-      }
+    // HIGH-7 / PGA-02: same rule as create — outlets of the caller's tenant.
+    if (
+      stores !== undefined &&
+      parsedStores.length > 0 &&
+      !(await storesInCallerTenant(req, parsedStores))
+    ) {
+      return res.status(403).json({
+        success: false,
+        message: 'Anda hanya dapat mengubah produk untuk toko Anda sendiri'
+      })
     }
 
     // BRD BR-02: after this edit, does the product take its stock from an
@@ -1221,7 +1210,7 @@ exports.editProductByLocationAndId = async (req, res) => {
               await db.product_store.findAll({ where: { product: id }, attributes: ['store'], raw: true })
             ).map((r) => Number(r.store))
       validatedLinks = await validateInventoryLinks({
-        links: scopedInventoryLinks(req, parseInventoryLinks(inventoryLinks)) || [],
+        links: (await scopedInventoryLinks(req, parseInventoryLinks(inventoryLinks))) || [],
         existing: await storedInventoryLinks(id),
         stores: sellingStores
       })

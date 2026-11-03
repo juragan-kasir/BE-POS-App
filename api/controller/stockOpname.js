@@ -10,7 +10,7 @@ const {
   InventoryLinkError,
   inventoryLinkErrorBody
 } = require('../service/inventoryLinkService')
-const { scalarStoreScope, resolveStoreId } = require('../../utils/tenantScope')
+const { scalarStoreScope, resolveStoreId, tenantStoreWhere } = require('../../utils/tenantScope')
 const { assertDecimalQuantity } = require('../../utils/decimalQuantityGuard')
 
 // Phase 34: the six primary stock-opname quantity fields, all DECIMAL(10,4).
@@ -811,9 +811,6 @@ const stockOpnameController = {
     try {
       const { id } = req.params
       const { status } = req.body
-      const store = resolveStoreId(req)
-      const userRole = req.user?.roleType
-
       if (!['completed', 'cancelled'].includes(status)) {
         return res.status(400).json({
           success: false,
@@ -821,11 +818,9 @@ const stockOpnameController = {
         })
       }
 
-      const whereClause = { id }
-      const userStore = req.storeId ?? req.user?.store
-      if (userStore) {
-        whereClause.store = userStore
-      }
+      // PGA-01: the opname must belong to an outlet of the caller's tenant
+      // (any outlet for a multi-outlet owner, never another tenant's).
+      const whereClause = await tenantStoreWhere(req, { id })
 
       const opname = await db.stockOpname.findOne({ where: whereClause })
 
