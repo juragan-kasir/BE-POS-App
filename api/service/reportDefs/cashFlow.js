@@ -1,6 +1,6 @@
 'use strict'
 const db = require('../../../db/models')
-const { assertReportStore } = require('./getReportStore')
+const { assertReportStore, getReportStores } = require('./getReportStore')
 const { bucketCashFlowTenders } = require('../canonicalPayment')
 const { DEFAULT_TIMEZONE, getStoreDayBounds } = require('../../../utils/businessDate')
 
@@ -14,11 +14,14 @@ const label = 'Arus Kas'
 
 const getData = async (req) => {
   const store = assertReportStore(req)
+  // PGA-11: aggregate the whole outlet set (a multi-outlet owner's
+  // tenant); `store` is only the timezone / label outlet.
+  const stores = getReportStores(req)
   const { startDate, endDate } = req.query
   const replacements = {}
   let txConditions = '1=1'
 
-  if (store) { txConditions += ` AND o."store" = :store`; replacements.store = store }
+  if (stores.length) { txConditions += ` AND o."store" IN (:storeIds)`; replacements.storeIds = stores }
   // Store-local day windows (same contract as the HTTP cash-flow controller):
   // never derive bounds from the server machine's clock — the old
   // setHours(23, 59, 59, 999) dropped 00:00-07:00 WIB orders on machines
@@ -62,7 +65,7 @@ const getData = async (req) => {
 
   const expReplacements = {}
   let expConditions = `"status" = 'approved'`
-  if (store) { expConditions += ` AND "store" = :store`; expReplacements.store = store }
+  if (stores.length) { expConditions += ` AND "store" IN (:storeIds)`; expReplacements.storeIds = stores }
   if (startDate) { expConditions += ` AND "date" >= :startDate`; expReplacements.startDate = replacements.startDate }
   if (endDate) { expConditions += ` AND "date" <= :endDate`; expReplacements.endDate = replacements.endDate }
 
@@ -74,7 +77,7 @@ const getData = async (req) => {
 
   const ppReplacements = {}
   let ppConditions = '1=1'
-  if (store) { ppConditions += ` AND "store" = :store`; ppReplacements.store = store }
+  if (stores.length) { ppConditions += ` AND "store" IN (:storeIds)`; ppReplacements.storeIds = stores }
   if (startDate) { ppConditions += ` AND COALESCE("paymentDate", "createdAt") >= :startDate`; ppReplacements.startDate = replacements.startDate }
   if (endDate) { ppConditions += ` AND COALESCE("paymentDate", "createdAt") <= :endDate`; ppReplacements.endDate = replacements.endDate }
 
@@ -88,7 +91,7 @@ const getData = async (req) => {
 
   const refReplacements = {}
   let refConditions = `r."status" = 'approved' AND r."resolution" = 'credit'`
-  if (store) { refConditions += ` AND r."store" = :store`; refReplacements.store = store }
+  if (stores.length) { refConditions += ` AND r."store" IN (:storeIds)`; refReplacements.storeIds = stores }
   if (startDate) { refConditions += ` AND r."createdAt" >= :startDate`; refReplacements.startDate = replacements.startDate }
   if (endDate) { refConditions += ` AND r."createdAt" <= :endDate`; refReplacements.endDate = replacements.endDate }
 

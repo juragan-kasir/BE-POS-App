@@ -1,7 +1,7 @@
 'use strict'
 const db = require('../../../db/models')
 const { Op } = require('sequelize')
-const { assertReportStore } = require('./getReportStore')
+const { assertReportStore, getReportStores, storeWhere } = require('./getReportStore')
 
 const defaultColumns = [
   { key: 'category', label: 'Kategori', type: 'string', width: 24, align: 'left' },
@@ -16,9 +16,11 @@ const label = 'Penjualan per Kategori'
 
 const getData = async (req) => {
   const { startDate, endDate } = req.query
-  const store = assertReportStore(req)
+  assertReportStore(req)
+  // PGA-11: aggregate the whole outlet set (a multi-outlet owner's tenant).
+  const stores = getReportStores(req)
 
-  const where = store ? { store } : {}
+  const where = storeWhere(stores)
   if (startDate || endDate) {
     where.report_date = {}
     if (startDate) where.report_date[Op.gte] = new Date(startDate)
@@ -52,7 +54,7 @@ const getData = async (req) => {
   const subtitleParts = []
   if (startDate) subtitleParts.push(new Date(startDate).toLocaleDateString('id-ID'))
   if (endDate) subtitleParts.push(new Date(endDate).toLocaleDateString('id-ID'))
-  if (store) subtitleParts.push(`Toko: ${store}`)
+  if (stores.length) subtitleParts.push(`Toko: ${stores.join(', ')}`)
 
   return {
     rows: mapRows,

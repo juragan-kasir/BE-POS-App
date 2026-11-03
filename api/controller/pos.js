@@ -2260,12 +2260,16 @@ order: [['updatedAt', 'DESC']],
         hasStoreScope
           ? ` AND EXISTS (SELECT 1 FROM "product_store" ps WHERE ps."product" = ${alias}id AND ps."store" IN (:storeIds))`
           : ''
-      // queue.store is a JSONB array of outlet ids.
-      const queueStoreCond = hasStoreScope ? ' AND "store" @> ANY (ARRAY[:queueStores]::jsonb[])' : ''
+      // queue.store is JSONB, written as a bare number by queue create
+      // (and as an array by older rows): match both shapes.
+      const queueStoreCond = hasStoreScope
+        ? ' AND ("store" @> ANY (ARRAY[:queueStores]::jsonb[]) OR "store" = ANY (ARRAY[:queueScalars]::jsonb[]))'
+        : ''
       const replacements = { startDate, endDate }
       if (hasStoreScope) {
         replacements.storeIds = storeScope
         replacements.queueStores = storeScope.map((id) => JSON.stringify([id]))
+        replacements.queueScalars = storeScope.map((id) => JSON.stringify(id))
       }
 
       const startDay = getStoreLocalDate(timezone, rangeStart)

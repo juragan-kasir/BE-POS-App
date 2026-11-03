@@ -1,7 +1,7 @@
 'use strict'
 const db = require('../../../db/models')
 const { completedSaleSql } = require('../../../utils/completedSaleSql')
-const { assertReportStore } = require('./getReportStore')
+const { assertReportStore, getReportStores } = require('./getReportStore')
 const { DEFAULT_TIMEZONE, getStoreDayBounds } = require('../../../utils/businessDate')
 
 const defaultColumns = [
@@ -19,6 +19,9 @@ const label = 'Laba per Produk'
 
 const getData = async (req) => {
   const store = assertReportStore(req)
+  // PGA-11: aggregate the whole outlet set (a multi-outlet owner's
+  // tenant); `store` is only the timezone / label outlet.
+  const stores = getReportStores(req)
   const { startDate, endDate } = req.query
   const replacements = {}
   // F6-09: a return can flip paymentStatus to 'refunded' after the sale —
@@ -27,9 +30,9 @@ const getData = async (req) => {
   // Cancelled/void orders are never active revenue, regardless of paymentStatus.
   let orderConditions = completedSaleSql('o.')
 
-  if (store) {
-    orderConditions += ` AND o."store" = :store`
-    replacements.store = store
+  if (stores.length) {
+    orderConditions += ` AND o."store" IN (:storeIds)`
+    replacements.storeIds = stores
   }
   // Store-local day windows (same contract as the HTTP report controllers):
   // date bounds must not depend on the server machine's timezone — the old
@@ -95,9 +98,9 @@ const getData = async (req) => {
   // rows here, which GROUP BY correctly sums once each.
   let returnConditions = `sr.status = 'approved' AND sr."approvedAt" IS NOT NULL`
   const returnReplacements = {}
-  if (store) {
-    returnConditions += ` AND sr."store" = :store`
-    returnReplacements.store = store
+  if (stores.length) {
+    returnConditions += ` AND sr."store" IN (:storeIds)`
+    returnReplacements.storeIds = stores
   }
   if (replacements.startDate) {
     returnConditions += ` AND sr."approvedAt" >= :startDate`
@@ -178,7 +181,7 @@ const getData = async (req) => {
   const subtitleParts = []
   if (startDate) subtitleParts.push(new Date(startDate).toLocaleDateString('id-ID'))
   if (endDate) subtitleParts.push(new Date(endDate).toLocaleDateString('id-ID'))
-  if (store) subtitleParts.push(`Toko: ${store}`)
+  if (stores.length) subtitleParts.push(`Toko: ${stores.join(', ')}`)
 
   return {
     rows: mapRows,

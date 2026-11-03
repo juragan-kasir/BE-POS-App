@@ -67,14 +67,31 @@ beforeAll(async () => {
   created.ingredients.push(ingB.id, ingF.id)
 
   const q = await db.queue.create({
-    queueNumber: `PGA10-${uniq()}`,
+    queueNumber: `P10F${Date.now() % 1e8}`,
     customerName: 'Tamu Lain',
     partySize: 2,
     status: 'waiting',
     store: [foreign.id],
     checkedInAt: new Date()
   })
-  created.queues.push(q.id)
+  // queue create writes `store` as a bare JSONB number; both shapes count.
+  const ownQ = await db.queue.create({
+    queueNumber: `P10O${Date.now() % 1e8}`,
+    customerName: 'Tamu Sendiri',
+    partySize: 1,
+    status: 'waiting',
+    store: homeB.id,
+    checkedInAt: new Date()
+  })
+  const ownQArray = await db.queue.create({
+    queueNumber: `P10A${Date.now() % 1e8}`,
+    customerName: 'Tamu Sendiri 2',
+    partySize: 1,
+    status: 'waiting',
+    store: [homeA.id],
+    checkedInAt: new Date()
+  })
+  created.queues.push(q.id, ownQ.id, ownQArray.id)
 
   const owner = await db.user.create({
     userName: `${P}_owner_${uniq()}`,
@@ -129,7 +146,8 @@ describe('PGA-10 — super-admin dashboard', () => {
     // Stock value: only the owner's product (10 × 1.000), never the other
     // tenant's Rp 5 billion.
     expect(data.operations.productStockValue).toBe(10000)
-    expect(data.operations.queueWaiting).toBe(0)
+    // Own scalar + own array rows count; the other tenant's row never does.
+    expect(data.operations.queueWaiting).toBe(2)
     expect(data.summary.lowStockCount).toBeGreaterThanOrEqual(2)
     const body = JSON.stringify(data)
     expect(body).toContain(homeLow.nameProduct)
