@@ -38,9 +38,19 @@ async function incrementPromoUsage({
   if (!transaction) {
     throw new Error('incrementPromoUsage requires an explicit transaction')
   }
+  // PGA-04: FOR NO KEY UPDATE, not FOR UPDATE. The checkout inserts the
+  // order (order.promoCampaignId → promo_campaign FK) before it records the
+  // usage, and that FK insert holds FOR KEY SHARE on this campaign row until
+  // commit. FOR UPDATE conflicts with KEY SHARE, so two checkouts using one
+  // campaign each held KEY SHARE and waited for the other's — a guaranteed
+  // deadlock under load (audit 60-load: 428 deadlocks, 233 × 500). FOR NO
+  // KEY UPDATE does not conflict with KEY SHARE but still conflicts with
+  // itself, so concurrent increments stay serialized and the maxUsageTotal
+  // re-check below stays race-safe. The UPDATE of currentUsage (a non-key
+  // column) takes the same lock mode.
   const campaign = await db.promo_campaign.findByPk(campaignId, {
     transaction,
-    lock: transaction.LOCK.UPDATE
+    lock: transaction.LOCK.NO_KEY_UPDATE
   })
   if (!campaign) return { notFound: true }
 
