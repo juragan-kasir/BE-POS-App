@@ -1290,7 +1290,7 @@ const posController = {
         })
       }
 
-      const adjStore = storeId || store || req.storeId
+      const adjStore = Number(storeId || store || req.storeId) || null
 
       // KF-NEW-07: read and write under one row lock so the recorded
       // before/after chain can never be built from a stale pre-transaction
@@ -1305,20 +1305,33 @@ const posController = {
         })
         if (!product) return { notFound: true }
 
+        // PGA-01 family: the product must be sold at the adjusting outlet
+        // (or be unassigned). The outlet itself is already confined to the
+        // caller's tenant by validateStoreAccess; without this check an
+        // owner could move another tenant's global stock with their own
+        // outlet id and the victim's product id.
+        const assignedStores = (
+          await db.product_store.findAll({
+            where: { product: productId },
+            attributes: ['store'],
+            raw: true,
+            transaction: t
+          })
+        ).map((r) => Number(r.store))
+        if (adjStore && assignedStores.length > 0 && !assignedStores.includes(adjStore)) {
+          return { notFound: true }
+        }
+
         const oldStock = Number(product.stock) || 0
         const delta = Math.floor(Number(qty)) || 0
         const newStock = oldStock + delta
 
-        if (newStock < 0) return { insufficient: true }
-
-        await db.product.update(
-          {
-            stock: db.sequelize.literal(`GREATEST(stock + ${delta}, 0)`)
-          },
-          { where: { id: productId }, transaction: t }
-        )
-
-        // Update per-store stock — ponytail: atomic upsert + adjust
+        // PGA-07: the guard used to check only the global product.stock and
+        // then clamp the outlet row at 0 (GREATEST), so removing 150 from an
+        // outlet holding 100 (global 400) left outlet 0, global 250 — the
+        // books drifted 50 from the shelf. The outlet's own balance is now
+        // the limit, and both rows move by the same exact delta.
+        let outletBefore = null
         if (adjStore) {
           await db.sequelize.query(
             `INSERT INTO product_store_stock (product, store, stock, "createdAt", "updatedAt")
@@ -1326,10 +1339,33 @@ const posController = {
              ON CONFLICT (product, store) DO NOTHING`,
             { bind: [productId, adjStore], transaction: t }
           )
+          const outletRow = await db.product_store_stock.findOne({
+            where: { product: productId, store: adjStore },
+            transaction: t,
+            lock: t.LOCK.UPDATE
+          })
+          outletBefore = Number(outletRow?.stock) || 0
+          if (outletBefore + delta < 0) {
+            return { insufficient: true, available: outletBefore }
+          }
+        } else if (
+          (await db.product_store_stock.count({ where: { product: productId }, transaction: t })) > 0
+        ) {
+          // A global-only change to a product stocked per outlet would break
+          // global = Σ outlets; the caller must say which outlet moved.
+          return { storeRequired: true }
+        }
+
+        if (newStock < 0) return { insufficient: true, available: oldStock }
+
+        await db.product.update(
+          { stock: db.sequelize.literal(`stock + (${delta})`) },
+          { where: { id: productId }, transaction: t }
+        )
+
+        if (adjStore) {
           await db.product_store_stock.update(
-            {
-              stock: db.sequelize.literal(`GREATEST(stock + ${delta}, 0)`)
-            },
+            { stock: db.sequelize.literal(`stock + (${delta})`) },
             { where: { product: productId, store: adjStore }, transaction: t }
           )
         }
@@ -1360,7 +1396,18 @@ const posController = {
         })
 
         product.set('stock', newStock)
-        return { product, adjustment: { oldStock, newStock, qty: delta, reason } }
+        return {
+          product,
+          adjustment: {
+            oldStock,
+            newStock,
+            qty: delta,
+            reason,
+            ...(adjStore
+              ? { store: adjStore, outletStockBefore: outletBefore, outletStockAfter: outletBefore + delta }
+              : {})
+          }
+        }
       })
 
       if (result.notFound) {
@@ -1369,9 +1416,18 @@ const posController = {
           message: 'Product not found'
         })
       }
+      if (result.storeRequired) {
+        return res.status(400).json({
+          success: false,
+          code: 'STORE_REQUIRED',
+          message: 'Store is required'
+        })
+      }
       if (result.insufficient) {
         return res.status(400).json({
           success: false,
+          code: 'INSUFFICIENT_STOCK',
+          available: result.available,
           message: 'Insufficient stock for adjustment'
         })
       }
