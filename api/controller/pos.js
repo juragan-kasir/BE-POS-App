@@ -1922,7 +1922,18 @@ const posController = {
         if (endDate) orderWhere.createdAt[Op.lte] = new Date(endDate)
       }
 
+      // PGA-14: both counts used to span every tenant (1,519 products at
+      // every outlet). A product belongs to an outlet through product_store;
+      // a member through its own store column.
       const productWhere = { status: 'active' }
+      if (store) {
+        productWhere.id = {
+          [Op.in]: db.sequelize.literal(
+            `(SELECT ps.product FROM "product_store" ps WHERE ps.store = ${db.sequelize.escape(String(store))})`
+          )
+        }
+      }
+      const memberWhere = store ? { store } : {}
 
       // Determine chart grouping based on filter
       let chartGroupBy, chartLimit
@@ -1957,7 +1968,7 @@ const posController = {
         db.order.sum('totalPrice', { where: orderWhere }),
         db.order.count({ where: orderWhere }),
         db.product.count({ where: productWhere }),
-        db.member.count(),
+        db.member.count({ where: memberWhere }),
         db.sequelize.query(
           `
           SELECT ${chartGroupBy} as date, SUM("totalPrice") as sales
