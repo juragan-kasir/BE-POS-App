@@ -3292,6 +3292,9 @@ exports.updateOrderStatus = async (req, res) => {
 
     // Perform the whole status transition atomically.
     let orderJournalJob, cogsJournalJob, reversalJob
+    // PGA-30: a repeat cancel/void of an order already in that state is an
+    // idempotent no-op — it must not write another history or audit row.
+    let repeatTerminal = false
     // F7: wrapped in withDeadlockRetry — this transaction may now also
     // lock ingredient rows (via deductPaidOrderStock's ingredient step,
     // or reverseOrderStock's reversal step), raising the number of
@@ -3504,6 +3507,7 @@ exports.updateOrderStatus = async (req, res) => {
               `Order is already ${oldStatus}; it cannot become ${status}`
             )
           }
+          repeatTerminal = true
         } else if (status === 'cancelled') {
           if (fin.N > 0) {
             throw financialError(
@@ -3687,15 +3691,17 @@ exports.updateOrderStatus = async (req, res) => {
         })
       }
 
-      await OrderStatus.create(
-        {
-          order: id,
-          status,
-          createdBy: changedBy,
-          notes: notes || (changedByName ? `By ${changedByName}` : null)
-        },
-        { transaction: t }
-      )
+      if (!repeatTerminal) {
+        await OrderStatus.create(
+          {
+            order: id,
+            status,
+            createdBy: changedBy,
+            notes: notes || (changedByName ? `By ${changedByName}` : null)
+          },
+          { transaction: t }
+        )
+      }
 
       // Settlement: record exactly the outstanding amount, retire every
       // pending split (it can no longer be a collection opportunity), and
@@ -3938,7 +3944,9 @@ exports.updateOrderStatus = async (req, res) => {
       if (!r3.ok) console.error('Accounting reversal deferred to retry queue:', r3.error)
     }
 
-    await createAudit(req, 'update', 'order', id, `Updated order status to ${status}`)
+    if (!repeatTerminal) {
+      await createAudit(req, 'update', 'order', id, `Updated order status to ${status}`)
+    }
     // DR-23: terminal reason of each retired split, recorded after commit
     // (best effort — never inside the financial transaction).
     for (const split of retiredSplits) {
