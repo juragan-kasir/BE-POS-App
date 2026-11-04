@@ -260,7 +260,12 @@ const orderItemSchema = z
     product: strToNum(),
     productId: strToNum().optional(),
     productName: z.string().optional(),
-    quantity: strToNum(),
+    // PGA-19: order quantities are stored as integers, so 1.5 used to reach
+    // Postgres and fail with a 500. Whole units only until Q-INV-05
+    // (weight-based selling) is decided.
+    quantity: strToNum().refine((v) => Number.isInteger(v), {
+      message: 'quantity must be a whole number'
+    }),
     price: strToNum().optional().default(0),
     // W3-2: optional client echo of the final charged unit price for
     // mismatch detection (comparison-only, never persisted). Absent/null/''
