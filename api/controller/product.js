@@ -1439,7 +1439,14 @@ exports.editProductByLocationAndId = async (req, res) => {
 }
 
 exports.deleteProductByIdAndLocation = async (req, res) => {
-  const { id } = req.body
+  // PGA-33: the route is DELETE /delete-product/:id; the id used to be read
+  // from the body only, so a request without one reached a WHERE id =
+  // undefined and answered 500. The path id wins; the body stays a fallback
+  // for older clients.
+  const id = Number(req.params?.id ?? req.body?.id)
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ success: false, message: 'A valid product id is required' })
+  }
   try {
     // IDOR fix: was findByPk(id) with no ownership check.
     const product = await findProductInScope(req, id)
