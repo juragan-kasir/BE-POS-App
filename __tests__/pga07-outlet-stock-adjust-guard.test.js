@@ -163,3 +163,28 @@ describe('PGA-07 — POST /pos/adjust is limited by the outlet balance', () => {
     expect(await globalStock(p.id)).toBe(100)
   })
 })
+
+// PGA-28 (product-grade audit 2026-11-02): {qty, sign: '-'} ignored the sign
+// and added stock instead of removing it.
+describe('PGA-28 — an explicit sign governs qty too', () => {
+  test.each([
+    [{ qty: 5, sign: '-' }, 95],
+    [{ qty: 5, sign: '+' }, 105],
+    [{ qty: 5 }, 105],
+    [{ sign: '-', value: 5 }, 95]
+  ])('%j at an outlet holding 100 leaves %i', async (body, expected) => {
+    const p = await makeProduct()
+    const res = await adjust(adminAToken, { productId: p.id, reason: 'pga28', ...body })
+    expect(res.status).toBe(200)
+    expect(await outletStock(p.id, storeA.id)).toBe(expected)
+  })
+
+  // The schema refuses negative numbers, so a decrease is always spelled
+  // with sign '-'. Pin that so nobody relies on a signed qty silently.
+  test('a negative qty is refused and leaves stock unchanged', async () => {
+    const p = await makeProduct()
+    const res = await adjust(adminAToken, { productId: p.id, reason: 'pga28', qty: -5 })
+    expect(res.status).toBe(400)
+    expect(await outletStock(p.id, storeA.id)).toBe(100)
+  })
+})

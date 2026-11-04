@@ -1278,9 +1278,13 @@ const posController = {
         })
       }
 
-      // ponytail: support both signed qty and explicit sign+value
+      // ponytail: support both signed qty and explicit sign+value.
+      // PGA-28: an explicit sign also governs qty — {qty: 2, sign: '-'} used
+      // to ADD 2 because the sign was ignored whenever qty was present.
       if (qty === undefined) {
         qty = sign === '-' ? -Math.abs(Number(value)) : Math.abs(Number(value))
+      } else if (sign === '-' || sign === '+') {
+        qty = sign === '-' ? -Math.abs(Number(qty)) : Math.abs(Number(qty))
       }
 
       if (!productId || !qty) {
