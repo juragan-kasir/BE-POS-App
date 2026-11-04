@@ -1,7 +1,7 @@
 'use strict'
 const db = require('../../../db/models')
 const { Op } = require('sequelize')
-const { assertReportStore } = require('./getReportStore')
+const { assertReportStore, getReportStores, storeWhere } = require('./getReportStore')
 const { getStoreFilterRange } = require('../../../utils/businessDate')
 const { resolveStoreTimezone } = require('../../../utils/storeTimezone')
 const { completedOrderWhere, refundTotals } = require('../salesFigures')
@@ -18,6 +18,9 @@ const label = 'Ringkasan Penjualan'
 
 const getData = async (req) => {
   const store = assertReportStore(req)
+  // PGA-11: aggregate the whole outlet set (a multi-outlet owner's
+  // tenant); `store` is only the timezone / label outlet.
+  const stores = getReportStores(req)
   const { startDate, endDate, filter } = req.query
 
   const range = getStoreFilterRange(
@@ -28,10 +31,9 @@ const getData = async (req) => {
   if (range?.start) dateRange[Op.gte] = range.start
   if (range?.end) dateRange[Op.lte] = range.end
 
-  const refunds = await refundTotals({ start: range?.start, end: range?.end, store })
+  const refunds = await refundTotals({ start: range?.start, end: range?.end, stores })
 
-  const storeWhere = store ? { id: store } : {}
-  const locations = await db.location.findAll({ where: storeWhere, attributes: ['id', 'name', 'city'] })
+  const locations = await db.location.findAll({ where: storeWhere(stores, 'id'), attributes: ['id', 'name', 'city'] })
   // location.city holds a region code; show the region name.
   const cityCodes = [...new Set(locations.map((loc) => loc.city).filter(Boolean).map(String))]
   const cityNames = new Map()

@@ -6,6 +6,7 @@ const { bucketCashFlowTenders } = require('../service/canonicalPayment')
 const { completedSaleSql } = require('../../utils/completedSaleSql')
 const { completedOrderWhere, refundTotals, dayKey } = require('../service/salesFigures')
 const { getStoreTodayBounds, getStoreDayBounds, DEFAULT_TIMEZONE } = require('../../utils/businessDate')
+const { getReportStores, storeWhere } = require('../service/reportDefs/getReportStore')
 const Order = db.order
 
 exports.getDailyReport = async (req, res) => {
@@ -30,6 +31,10 @@ exports.getSalesSummary = async (req, res) => {
     if (!store && req.user?.roleType !== 'super_admin') {
       return res.status(403).json({ success: false, message: 'Store assignment required' })
     }
+    // PGA-11: a multi-outlet owner's consolidated view covers its whole
+    // tenant (req.storeIds); req.storeId is only the first outlet and stays
+    // the timezone outlet. [] = every outlet (vendor).
+    const scopeStores = getReportStores(req)
     const { startDate, endDate, filter } = req.query
 
     let dateRange = {}
@@ -95,7 +100,7 @@ exports.getSalesSummary = async (req, res) => {
     }
 
     const orderWhere = completedOrderWhere()
-    if (store) orderWhere.store = store
+    Object.assign(orderWhere, storeWhere(scopeStores))
     if (dateRange[Op.gte]) orderWhere.createdAt = dateRange
 
     const [totalSales, totalOrders, activeLocations, totalMembers, refunds] =
@@ -103,13 +108,13 @@ exports.getSalesSummary = async (req, res) => {
         Order.sum('totalPrice', { where: orderWhere }),
         Order.count({ where: orderWhere }),
         db.location.count({
-          where: { status: 'active', ...(store ? { id: store } : {}) }
+          where: { status: 'active', ...storeWhere(scopeStores, 'id') }
         }),
-        db.member.count({ where: store ? { store } : {} }),
+        db.member.count({ where: storeWhere(scopeStores) }),
         refundTotals({
           start: dateRange[Op.gte],
           end: dateRange[Op.lte],
-          store,
+          stores: scopeStores,
           timezone: storeTimezone
         })
       ])
@@ -120,9 +125,9 @@ exports.getSalesSummary = async (req, res) => {
     const avgTransaction =
       totalOrdersNum > 0 ? totalSalesNum / totalOrdersNum : 0
 
-    const chartReplacements = { ...(store && { store }), storeTimezone }
+    const chartReplacements = { ...(scopeStores.length && { storeIds: scopeStores }), storeTimezone }
     let chartWhere = `WHERE ${completedSaleSql()}`
-    if (store) chartWhere += ` AND "store" = :store`
+    if (scopeStores.length) chartWhere += ` AND "store" IN (:storeIds)`
     if (dateRange[Op.gte]) {
       chartWhere += ` AND "createdAt" >= :startDate AND "createdAt" <= :endDate`
       chartReplacements.startDate = dateRange[Op.gte]
@@ -136,9 +141,9 @@ exports.getSalesSummary = async (req, res) => {
       { replacements: chartReplacements, type: db.sequelize.QueryTypes.SELECT }
     )
 
-    const storeChartReplacements = { ...(store && { store }), storeTimezone }
+    const storeChartReplacements = { ...(scopeStores.length && { storeIds: scopeStores }), storeTimezone }
     let storeChartWhere = `WHERE ${completedSaleSql()}`
-    if (store) storeChartWhere += ` AND "store" = :store`
+    if (scopeStores.length) storeChartWhere += ` AND "store" IN (:storeIds)`
     if (dateRange[Op.gte]) {
       storeChartWhere += ` AND "createdAt" >= :startDate AND "createdAt" <= :endDate`
       storeChartReplacements.startDate = dateRange[Op.gte]
@@ -174,9 +179,8 @@ exports.getSalesSummary = async (req, res) => {
       storeTotals[sid].orders += Number(row.orders || 0)
     }
 
-    const storeWhere = store ? { id: store } : {}
     const locations = await db.location.findAll({
-      where: storeWhere,
+      where: storeWhere(scopeStores, 'id'),
       attributes: ['id', 'name', 'city']
     })
 
@@ -266,9 +270,13 @@ exports.getBestSellerReport = async (req, res) => {
     if (!store && req.user?.roleType !== 'super_admin') {
       return res.status(403).json({ success: false, message: 'Store assignment required' })
     }
+    // PGA-11: a multi-outlet owner's consolidated view covers its whole
+    // tenant (req.storeIds); req.storeId is only the first outlet and stays
+    // the timezone outlet. [] = every outlet (vendor).
+    const stores = getReportStores(req)
     const { limit = 10 } = req.query
 
-    const where = store ? { store } : {}
+    const where = storeWhere(stores)
 
     const [bestSelling, productCount, productRevenues] = await Promise.all([
       db.best_selling.findAll({
@@ -277,25 +285,25 @@ exports.getBestSellerReport = async (req, res) => {
         limit: parseInt(limit),
         attributes: ['productId', 'nameProduct', 'totalSelling', 'image']
       }),
-      store
+      stores.length
         ? db.sequelize.query(
             `SELECT COUNT(*)::int AS "count" FROM "product" p
              WHERE p."deletedAt" IS NULL AND p.status = 'active'
                AND EXISTS (
                  SELECT 1 FROM "product_store" ps
-                 WHERE ps."product" = p."id" AND ps."store" = :store AND ps."deletedAt" IS NULL
+                 WHERE ps."product" = p."id" AND ps."store" IN (:storeIds) AND ps."deletedAt" IS NULL
                )`,
-            { replacements: { store }, type: db.sequelize.QueryTypes.SELECT }
+            { replacements: { storeIds: stores }, type: db.sequelize.QueryTypes.SELECT }
           )
         : db.product.count({ where: { status: 'active' } }),
       db.sequelize.query(
         `SELECT oi.product, COALESCE(SUM(oi."totalPrice"), 0) as revenue
          FROM order_item oi
          JOIN "order" o ON o.id = oi."order"
-         WHERE o."paymentStatus" = 'paid' AND o.status NOT IN ('cancelled','void')${store ? ' AND o.store = :store' : ''}
+         WHERE o."paymentStatus" = 'paid' AND o.status NOT IN ('cancelled','void')${stores.length ? ' AND o.store IN (:storeIds)' : ''}
          GROUP BY oi.product`,
         {
-          replacements: store ? { store } : {},
+          replacements: stores.length ? { storeIds: stores } : {},
           type: db.sequelize.QueryTypes.SELECT
         }
       )
@@ -351,13 +359,17 @@ exports.getCashFlow = async (req, res) => {
     if (!store && req.user?.roleType !== 'super_admin') {
       return res.status(403).json({ success: false, message: 'Store assignment required' })
     }
+    // PGA-11: a multi-outlet owner's consolidated view covers its whole
+    // tenant (req.storeIds); req.storeId is only the first outlet and stays
+    // the timezone outlet. [] = every outlet (vendor).
+    const stores = getReportStores(req)
     const { startDate, endDate } = req.query
     const replacements = {}
     let txConditions = '1=1'
 
-    if (store) {
-      txConditions += ` AND o."store" = :store`
-      replacements.store = store
+    if (stores.length) {
+      txConditions += ` AND o."store" IN (:storeIds)`
+      replacements.storeIds = stores
     }
     // Day windows are STORE-LOCAL days (see getSalesSummary above): the old
     // new Date(...).setHours(23, 59, 59, 999) built the lower and upper
@@ -405,9 +417,9 @@ exports.getCashFlow = async (req, res) => {
     // Aggregate expenses in SQL
     const expReplacements = {}
     let expConditions = `"status" = 'approved'`
-    if (store) {
-      expConditions += ` AND "store" = :store`
-      expReplacements.store = store
+    if (stores.length) {
+      expConditions += ` AND "store" IN (:storeIds)`
+      expReplacements.storeIds = stores
     }
     if (startDate) {
       expConditions += ` AND "date" >= :startDate`
@@ -428,9 +440,9 @@ exports.getCashFlow = async (req, res) => {
     // Aggregate supplier payments (cash outflow to suppliers) in SQL
     const ppReplacements = {}
     let ppConditions = '1=1'
-    if (store) {
-      ppConditions += ` AND "store" = :store`
-      ppReplacements.store = store
+    if (stores.length) {
+      ppConditions += ` AND "store" IN (:storeIds)`
+      ppReplacements.storeIds = stores
     }
     if (startDate) {
       ppConditions += ` AND COALESCE("paymentDate", "createdAt") >= :startDate`
@@ -456,9 +468,9 @@ exports.getCashFlow = async (req, res) => {
     // resolution (ingredient -> product -> ingredientName) used at approve.
     const refReplacements = {}
     let refConditions = `r."status" = 'approved' AND r."resolution" = 'credit'`
-    if (store) {
-      refConditions += ` AND r."store" = :store`
-      refReplacements.store = store
+    if (stores.length) {
+      refConditions += ` AND r."store" IN (:storeIds)`
+      refReplacements.storeIds = stores
     }
     if (startDate) {
       refConditions += ` AND r."createdAt" >= :startDate`

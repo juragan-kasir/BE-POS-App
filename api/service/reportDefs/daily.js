@@ -1,7 +1,7 @@
 'use strict'
 const db = require('../../../db/models')
 const { completedSaleSql } = require('../../../utils/completedSaleSql')
-const { assertReportStore } = require('./getReportStore')
+const { assertReportStore, getReportStores } = require('./getReportStore')
 const { getStoreDayBounds, DEFAULT_TIMEZONE } = require('../../../utils/businessDate')
 
 const defaultColumns = [
@@ -33,6 +33,9 @@ const layout = {
 
 const getData = async (req) => {
   const store = assertReportStore(req)
+  // PGA-11: aggregate the whole outlet set (a multi-outlet owner's
+  // tenant); `store` is only the timezone / label outlet.
+  const stores = getReportStores(req)
   const { startDate, endDate } = req.query
   const replacements = {}
   // Store-local business date: resolve timezone from location, fallback to DEFAULT_TIMEZONE.
@@ -51,9 +54,9 @@ const getData = async (req) => {
   // Cancelled/void orders are never active revenue, regardless of paymentStatus.
   let orderConditions = completedSaleSql('o.')
 
-  if (store) {
-    orderConditions += ` AND o."store" = :store`
-    replacements.store = store
+  if (stores.length) {
+    orderConditions += ` AND o."store" IN (:storeIds)`
+    replacements.storeIds = stores
   }
   if (startDate) {
     const startBounds = getStoreDayBounds(String(startDate).slice(0, 10), storeTimezone)
@@ -109,12 +112,12 @@ const getData = async (req) => {
 
     let expenseConditions = `"status" = 'approved'`
     const expReplacements = {}
-    if (store) { expenseConditions += ` AND "store" = :store`; expReplacements.store = store }
+    if (stores.length) { expenseConditions += ` AND "store" IN (:storeIds)`; expReplacements.storeIds = stores }
     if (startDate) { expenseConditions += ` AND "date" >= :startDate`; expReplacements.startDate = replacements.startDate }
     if (endDate) { expenseConditions += ` AND "date" <= :endDate`; expReplacements.endDate = replacements.endDate }
 
     let dailyExpenses = []
-    if (startDate || endDate || store) {
+    if (startDate || endDate || stores.length) {
       dailyExpenses = await db.sequelize.query(
         `SELECT DATE("date") as tanggal, COALESCE(SUM("amount"), 0) as "totalExpense"
          FROM expense
@@ -137,7 +140,7 @@ const getData = async (req) => {
     // convention).
     let refundConditions = `sr.status = 'approved' AND sr."approvedAt" IS NOT NULL`
     const refundReplacements = { storeTimezone }
-    if (store) { refundConditions += ` AND sr."store" = :store`; refundReplacements.store = store }
+    if (stores.length) { refundConditions += ` AND sr."store" IN (:storeIds)`; refundReplacements.storeIds = stores }
     if (startDate) { refundConditions += ` AND sr."approvedAt" >= :startDate`; refundReplacements.startDate = replacements.startDate }
     if (endDate) { refundConditions += ` AND sr."approvedAt" <= :endDate`; refundReplacements.endDate = replacements.endDate }
 
@@ -204,7 +207,7 @@ const getData = async (req) => {
   const subtitleParts = []
   if (startDate) subtitleParts.push(new Date(startDate).toLocaleDateString('id-ID'))
   if (endDate) subtitleParts.push(new Date(endDate).toLocaleDateString('id-ID'))
-  if (store) subtitleParts.push(`Toko: ${store}`)
+  if (stores.length) subtitleParts.push(`Toko: ${stores.join(', ')}`)
 
   return {
     rows,

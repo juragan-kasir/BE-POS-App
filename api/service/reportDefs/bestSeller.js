@@ -1,6 +1,6 @@
 'use strict'
 const db = require('../../../db/models')
-const { assertReportStore } = require('./getReportStore')
+const { assertReportStore, getReportStores, storeWhere } = require('./getReportStore')
 
 const defaultColumns = [
   { key: 'name', label: 'Produk', type: 'string', width: 28, align: 'left' },
@@ -12,10 +12,12 @@ const filename = () => 'produk-terlaris'
 const label = 'Produk Terlaris'
 
 const getData = async (req) => {
-  const store = assertReportStore(req)
+  assertReportStore(req)
+  // PGA-11: aggregate the whole outlet set (a multi-outlet owner's tenant).
+  const stores = getReportStores(req)
   const { limit = 10 } = req.query
 
-  const where = store ? { store } : {}
+  const where = storeWhere(stores)
 
   const [bestSelling, , productRevenues] = await Promise.all([
     db.best_selling.findAll({
@@ -24,25 +26,25 @@ const getData = async (req) => {
       limit: parseInt(limit),
       attributes: ['productId', 'nameProduct', 'totalSelling', 'image']
     }),
-    store
+    stores.length
       ? db.sequelize.query(
           `SELECT COUNT(*)::int AS "count" FROM "product" p
            WHERE p."deletedAt" IS NULL AND p.status = 'active'
              AND EXISTS (
                SELECT 1 FROM "product_store" ps
-               WHERE ps."product" = p."id" AND ps."store" = :store AND ps."deletedAt" IS NULL
+               WHERE ps."product" = p."id" AND ps."store" IN (:storeIds) AND ps."deletedAt" IS NULL
              )`,
-          { replacements: { store }, type: db.sequelize.QueryTypes.SELECT }
+          { replacements: { storeIds: stores }, type: db.sequelize.QueryTypes.SELECT }
         )
       : db.product.count({ where: { status: 'active' } }),
     db.sequelize.query(
       `SELECT oi.product, COALESCE(SUM(oi."totalPrice"), 0) as revenue
        FROM order_item oi
        JOIN "order" o ON o.id = oi."order"
-       WHERE o."paymentStatus" = 'paid' AND o.status NOT IN ('cancelled','void')${store ? ' AND o.store = :store' : ''}
+       WHERE o."paymentStatus" = 'paid' AND o.status NOT IN ('cancelled','void')${stores.length ? ' AND o.store IN (:storeIds)' : ''}
        GROUP BY oi.product`,
       {
-        replacements: store ? { store } : {},
+        replacements: stores.length ? { storeIds: stores } : {},
         type: db.sequelize.QueryTypes.SELECT
       }
     )
@@ -63,7 +65,7 @@ const getData = async (req) => {
   return {
     rows,
     title: label,
-    subtitle: `Limit: ${parseInt(limit)}` + (store ? ` - Toko: ${store}` : '')
+    subtitle: `Limit: ${parseInt(limit)}` + (stores.length ? ` - Toko: ${stores.join(', ')}` : '')
   }
 }
 
