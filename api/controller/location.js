@@ -39,7 +39,11 @@ const { createAudit } = require('../../utils/auditLog')
 const { enrichAuditFields } = require('../../utils/auditFields')
 const { resolveAuthorizationContext } = require('../../utils/authContext')
 const { okPage } = require('../../utils/canonicalHttp')
-const { superAdminStoreIds } = require('../../utils/tenantScope')
+const {
+  superAdminStoreIds,
+  callerStoreIds,
+  storeIdsCondition
+} = require('../../utils/tenantScope')
 const { getStoreOpenStatus } = require('../../utils/storeHours')
 const { page: pageOf, paginated } = require('../service/scopeVisibilityService')
 const { assertOperationalStoreTenant, resolveRequestedLifecycleStatus } = require('../validation/schemas')
@@ -82,34 +86,65 @@ const normalizeOpeningHours = (hours) => {
   )
 }
 
+const PUBLIC_LOCATION_ATTRIBUTES = [
+  'id',
+  'store',
+  'name',
+  'city',
+  'province',
+  'detailLocation',
+  'latitude',
+  'longitude',
+  'status',
+  'timezone',
+  'openingHours'
+]
+
+const toPublicLocation = (location) => {
+  const { timezone, openingHours, ...publicFields } = location.toJSON()
+  return {
+    ...publicFields,
+    ...getStoreOpenStatus(openingHours, timezone)
+  }
+}
+
 exports.getAllLocationPublic = async (req, res) => {
   try {
     const { status } = req.query
     const whereClause = status === 'all' ? {} : { status: 'active' }
     const locations = await Location.findAll({
       where: whereClause,
-      attributes: [
-        'id',
-        'store',
-        'name',
-        'city',
-        'province',
-        'detailLocation',
-        'latitude',
-        'longitude',
-        'status',
-        'timezone',
-        'openingHours'
-      ]
+      attributes: PUBLIC_LOCATION_ATTRIBUTES
     })
-    const data = locations.map((location) => {
-      const { timezone, openingHours, ...publicFields } = location.toJSON()
-      return {
-        ...publicFields,
-        ...getStoreOpenStatus(openingHours, timezone)
-      }
-    })
+    const data = locations.map(toPublicLocation)
     return res.status(200).json({ success: true, message: 'Success', data })
+  } catch (error) {
+    console.error('Error:', error)
+    return res
+      .status(500)
+      .json({ success: false, message: 'Internal Server Error' })
+  }
+}
+
+// PGA-09: the signed-in store pickers used get-location-public, which lists
+// every outlet of every merchant — owners saw (and the dashboard even
+// preselected) a competitor's outlet. This list carries the same fields but
+// only the outlets the caller may work in: the whole tenant for an owner,
+// the assigned outlet(s) for staff, every outlet for the vendor super admin.
+exports.getMyLocations = async (req, res) => {
+  try {
+    const { status } = req.query
+    const whereClause = status === 'all' ? {} : { status: 'active' }
+    const scope = storeIdsCondition(await callerStoreIds(req))
+    if (scope !== undefined) whereClause.id = scope
+    const locations = await Location.findAll({
+      where: whereClause,
+      attributes: PUBLIC_LOCATION_ATTRIBUTES,
+      order: [['id', 'ASC']]
+    })
+    return res
+      .status(200)
+      .json({ success: true, message: 'Success', data: locations.map(toPublicLocation) })
   } catch (error) {
     console.error('Error:', error)
     return res
