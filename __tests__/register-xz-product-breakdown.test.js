@@ -157,6 +157,35 @@ describe('BA finding #1 — X/Z product-level breakdown', () => {
     expect(totalSales).toBe(PRICE_A * QTY_A + PRICE_B * QTY_B)
   })
 
+  // PGA-15 (product-grade audit 2026-11-02): the open-register report
+  // summed every tender into totalNonCashPayment, cash included.
+  test('X-report non-cash total excludes cash and equals the non-cash tenders', async () => {
+    const cashOnly = await xReport()
+    expect(cashOnly.status).toBe(200)
+    expect(cashOnly.body.data.summary.totalNonCashPayment).toBe(0)
+
+    const res = await request(app)
+      .post('/order/create')
+      .set(auth(adminToken))
+      .send(
+        withIdempotencyKey({
+          store: store.id,
+          items: [{ product: productB.id, quantity: 1 }],
+          paymentMethod: 'e-wallet',
+          referenceNumber: unique('PGA15REF'),
+          cashierName: 'B1XZ Cashier',
+          idempotencyKey: unique('pga15ewallet')
+        })
+      )
+    expect(res.status).toBe(201)
+
+    const after = await xReport()
+    const { summary, payments } = after.body.data
+    const nonCash = payments.filter((p) => p.type !== 'CASH').reduce((s, p) => s + p.amount, 0)
+    expect(nonCash).toBe(PRICE_B)
+    expect(summary.totalNonCashPayment).toBe(PRICE_B)
+  })
+
   test('Z-report freezes the same breakdown into the close snapshot', async () => {
     const register = await db.cashRegister.findOne({ where: { store: store.id, status: 'open' } })
     const closed = await request(app)
