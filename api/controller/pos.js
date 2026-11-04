@@ -2035,18 +2035,25 @@ order: [['updatedAt', 'DESC']],
               }
             })
           })),
+        // PGA-13: per-method figures come from the payment ledger, not the
+        // order-level method. An order-level method is one label for the
+        // whole bill: it hid the E-wallet part of a split bill, ignored
+        // refunds, and split CASH/cash. Refund rows are negative ledger
+        // rows, so `sales` is net, like the drawer.
         db.sequelize.query(
           `
-          SELECT COALESCE("paymentMethod", 'cash') AS method,
-                 "paymentMethodName" AS name,
-                 COUNT(*)::int AS orders,
-                 SUM("totalPrice") AS sales
-          FROM "order"
-          WHERE ${completedSaleSql()}
-          ${startDate && endDate ? 'AND "createdAt" >= :startDate AND "createdAt" <= :endDate' : ''}
-          ${store ? 'AND "store" = :store' : ''}
+          SELECT t."typePayment" AS method,
+                 t."paymentMethodName" AS name,
+                 COUNT(DISTINCT o.id) FILTER (WHERE t.amount > 0)::int AS orders,
+                 COALESCE(SUM(t.amount), 0)::bigint AS sales
+          FROM "transaction" t
+          JOIN "order" o ON o.id = t."order"
+          WHERE ${completedSaleSql('o.')}
+            AND o."deletedAt" IS NULL
+            AND t."deletedAt" IS NULL
+          ${startDate && endDate ? 'AND o."createdAt" >= :startDate AND o."createdAt" <= :endDate' : ''}
+          ${store ? 'AND o."store" = :store' : ''}
           GROUP BY 1, 2
-          ORDER BY sales DESC
         `,
           {
             replacements: chartReplacements,
@@ -2208,7 +2215,7 @@ order: [['updatedAt', 'DESC']],
           grossProfit: profit.grossProfit,
           netProfit,
           profitMargin: marginPercent(netProfit, profit.netSales),
-          paymentMethods: paymentMethods || [],
+          paymentMethods: mergeMethodRows(paymentMethods, { amountKey: 'sales', countKey: 'orders' }),
           storeInfo,
           totalOrders: totalOrders || 0,
           totalProducts: totalProducts || 0,
@@ -2820,12 +2827,9 @@ order: [['updatedAt', 'DESC']],
         .sort((a, b) => b.revenue - a.revenue)
 
       // Canonical reporting bucket per stored tender (+ UNRECONCILED).
-      const byMethod = (paymentMethodRows || []).map((r) => ({
-        method: r.method,
-        name: r.name || null,
-        count: r.count,
-        amount: Number(r.amount || 0),
-        bucket: reportingBucket(r.method)
+      const byMethod = mergeMethodRows(paymentMethodRows).map((r) => ({
+        ...r,
+        bucket: r.method
       }))
       const byTypeMap = {}
       byMethod.forEach((r) => {
@@ -3589,6 +3593,30 @@ order: [['updatedAt', 'DESC']],
     }
   },
 
+}
+
+// PGA-13: one row per canonical method (and per store-defined name for
+// non-cash tenders, e.g. two QRIS providers). Cash has no provider, so the
+// labels the clients send for it ("Cash", "Tunai") collapse into one row.
+const mergeMethodRows = (rows, { amountKey = 'amount', countKey = 'count' } = {}) => {
+  const merged = new Map()
+  for (const r of rows || []) {
+    const method = reportingBucket(r.method)
+    // Cash has no provider; an unmapped legacy value keeps its stored text
+    // so it stays traceable instead of vanishing into one UNRECONCILED row.
+    const name =
+      method === 'CASH' ? null : r.name || (method === 'UNRECONCILED' ? String(r.method ?? '') : null)
+    const key = `${method}|${name ?? ''}`
+    const row = merged.get(key) || { method, name, [countKey]: 0, [amountKey]: 0 }
+    row[countKey] += Number(r[countKey] || 0)
+    row[amountKey] += Number(r[amountKey] || 0)
+    merged.set(key, row)
+  }
+  return [...merged.values()].sort(
+    (a, b) =>
+      b[amountKey] - a[amountKey] ||
+      (CANONICAL_METHOD_ORDER[a.method] ?? 99) - (CANONICAL_METHOD_ORDER[b.method] ?? 99)
+  )
 }
 
 module.exports = posController
