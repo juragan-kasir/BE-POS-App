@@ -43,6 +43,10 @@ const upload = multer({
 // Public - Get all active locations (for registration dropdown) - NO auth required
 router.get('/get-location-public', locationController.getAllLocationPublic)
 
+// Signed-in store pickers (PGA-09): same fields, only the caller's outlets
+// (tenant for an owner, assigned outlet(s) for staff, all for the vendor).
+router.get('/get-location-mine', authorization, locationController.getMyLocations)
+
 // Get all locations in table - Super Admin sees all; admin sees own store
 // only (controller scopes non-super_admin by req.user.store).
 router.get(
