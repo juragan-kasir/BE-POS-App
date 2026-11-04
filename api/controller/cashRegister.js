@@ -391,7 +391,11 @@ async function buildReportData({
     totalSales: Number(r.totalSales || 0)
   }))
 
-  const totalNonCashPayment = payments.reduce((s, p) => s + p.amount, 0)
+  // PGA-15: the open-register X/Z summed every tender here, cash included
+  // (the close and frozen paths already filter it out).
+  const totalNonCashPayment = payments
+    .filter((p) => p.type !== 'CASH')
+    .reduce((s, p) => s + p.amount, 0)
 
   const openingBalance = Number(register.openingBalance || 0)
   const closingBalance = Number(register.closingBalance || 0)
