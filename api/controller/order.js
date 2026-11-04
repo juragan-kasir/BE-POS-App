@@ -1651,8 +1651,7 @@ exports.createOrder = async (req, res) => {
       orderNumber,
       store: authorizedStore,
       tableId,
-      cashierId,
-      cashierName,
+      ...sessionCashier(req, { cashierId, cashierName }),
       customerId,
       customerName,
       customerPhone,
@@ -1767,7 +1766,7 @@ exports.createOrder = async (req, res) => {
       )
       await createInitialOrderStatus(
         createdOrder,
-        cashierName,
+        createdOrder.cashierName,
         effectivePaymentMethod,
         req.user?.id,
         t
@@ -1923,6 +1922,15 @@ exports.createOrder = async (req, res) => {
 // cashier, so receipts and per-cashier figures credited the customer. A QR
 // order now has no cashier until staff settle it; the staff member who
 // collects the payment becomes its cashier (an existing cashier is kept).
+// PGA-34: the cashier of a counter sale or an open bill is the signed-in
+// account, never the request body. The body carried the FE cookie's
+// userName (receipts said "kasir_t3_1" while QR settlements said
+// "Kasir 1 Kopi Senja") and let one cashier credit a sale to another.
+const sessionCashier = (req, body = {}) =>
+  req.user?.id
+    ? { cashierId: req.user.id, cashierName: req.user.fullName || req.user.userName || null }
+    : { cashierId: body.cashierId ?? null, cashierName: body.cashierName ?? null }
+
 const settlingCashier = (lockedOrder, req) => {
   if (lockedOrder.cashierId != null || !req.user?.id) return {}
   return {
@@ -5803,8 +5811,7 @@ exports.createOpenBill = async (req, res) => {
             orderNumber,
             store,
             tableId,
-            cashierId,
-            cashierName,
+            ...sessionCashier(req, { cashierId, cashierName }),
             customerName,
             customerPhone,
             notes,
@@ -5835,7 +5842,7 @@ exports.createOpenBill = async (req, res) => {
             order: created.id,
             status: 'pending',
             createdBy: req.user?.id,
-            notes: `Open bill by ${cashierName || 'cashier'}`
+            notes: `Open bill by ${created.cashierName || 'cashier'}`
           },
           { transaction: t }
         )
