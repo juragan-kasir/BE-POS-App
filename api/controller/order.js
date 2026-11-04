@@ -4006,7 +4006,20 @@ exports.updateOrderItemStatus = async (req, res) => {
       })
     }
 
+    const previousItemStatus = item.status
     await item.update({ status: itemStatus })
+    // PGA-22: a kitchen item-status change left no audit trail.
+    if (previousItemStatus !== itemStatus) {
+      await createAudit(
+        req,
+        'update',
+        'order_item',
+        item.id,
+        `Item ${item.productName || item.id} of order ${parentOrder.orderNumber || id}: ${previousItemStatus || '-'} → ${itemStatus}`,
+        { status: previousItemStatus, order: Number(id) },
+        { status: itemStatus, order: Number(id) }
+      )
+    }
 
     const orderAttrs = await getOrderAttributes()
     const order = await Order.findByPk(

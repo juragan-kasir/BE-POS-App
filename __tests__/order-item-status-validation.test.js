@@ -115,3 +115,28 @@ describe('PUT /order/update-item-status — request-boundary validation', () => 
     expect(res.status).toBe(400)
   })
 })
+
+// PGA-22 (product-grade audit 2026-11-02): kitchen item-status flips left
+// no audit row.
+describe('PUT /order/update-item-status — audit trail', () => {
+  const audits = () => db.auditLog.findAll({ where: { entity: 'order_item', entityId: item.id } })
+
+  test('a status change writes one audit row with old and new status', async () => {
+    await db.order_item.update({ status: 'pending' }, { where: { id: item.id } })
+    const before = (await audits()).length
+    const res = await setItemStatus('ready')
+    expect(res.status).toBe(200)
+    const rows = await audits()
+    expect(rows).toHaveLength(before + 1)
+    const last = rows[rows.length - 1]
+    expect(last.oldValues).toEqual(expect.objectContaining({ status: 'pending' }))
+    expect(last.newValues).toEqual(expect.objectContaining({ status: 'ready' }))
+  })
+
+  test('setting the same status again writes nothing', async () => {
+    const before = (await audits()).length
+    const res = await setItemStatus('ready')
+    expect(res.status).toBe(200)
+    expect(await audits()).toHaveLength(before)
+  })
+})
