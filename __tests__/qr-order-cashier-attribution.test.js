@@ -126,8 +126,40 @@ describe('QR order cashier attribution', () => {
       store: store.id,
       status: 'paid',
       paymentMethod: 'cash',
-      changedByName: 'Kasir Sore'
+      changedByName: 'Kasir Malam'
     })
-    expect((await db.order.findByPk(bill.body.data.id)).cashierName).toBe('Kasir Pagi')
+    // PGA-34: the open bill's cashier is the signed-in account (its full
+    // name), not the body's 'Kasir Pagi'; collecting it keeps that cashier.
+    expect((await db.order.findByPk(bill.body.data.id)).cashierName).toBe('Kasir Sore')
+  })
+
+  // PGA-34 (product-grade audit, browser pass 2026-11-04): counter sales
+  // stored the body's cashierName (the FE cookie userName) and cashierId,
+  // so receipts disagreed with QR settlements and a cashier could credit a
+  // sale to someone else.
+  test('a counter sale records the signed-in cashier, whatever the body says', async () => {
+    const other = await db.user.create({
+      userName: unique('qrc_other'),
+      email: `${unique('qrc_other')}@test.com`,
+      roleType: 'admin',
+      userType: 'admin',
+      store: store.id,
+      status: 'active',
+      fullName: 'Kasir Lain'
+    })
+    const res = await as('post', '/order/create').send({
+      store: store.id,
+      items: [{ product: product.id, quantity: 1 }],
+      paymentMethod: 'cash',
+      cashAmount: 10000,
+      changeAmount: 0,
+      cashierId: other.id,
+      cashierName: admin.userName,
+      idempotencyKey: unique('qrc-counter')
+    })
+    expect(res.status).toBe(201)
+    const row = await db.order.findByPk(res.body.data.id)
+    expect(row.cashierId).toBe(admin.id)
+    expect(row.cashierName).toBe('Kasir Sore')
   })
 })
