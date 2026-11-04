@@ -186,4 +186,16 @@ describe('Dashboard endpoints must not leak cross-tenant data when ?store= is om
     // counted every low-stock product in the whole deployment.
     expect(Number(res.body.data.lowStock)).toBe(1)
   })
+
+  // PGA-14 (product-grade audit 2026-11-02): totalProducts was 1,519 at
+  // every outlet (every tenant's catalog) and totalMembers counted every
+  // tenant's members.
+  test('GET /pos/dashboard/summary product and member totals count only the caller\'s own store', async () => {
+    const res = await request(app)
+      .get('/pos/dashboard/summary')
+      .set('Authorization', `Bearer ${adminAToken}`)
+    expect(res.status).toBe(200)
+    expect(Number(res.body.data.totalProducts)).toBe(1)
+    expect(Number(res.body.data.totalMembers)).toBe(1)
+  })
 })
