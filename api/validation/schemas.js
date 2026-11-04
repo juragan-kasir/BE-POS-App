@@ -2258,6 +2258,9 @@ exports.createPromoCampaignSchema = z.object({
   priority: z.number().int().min(0).default(0),
   isCombinable: z.boolean().default(false),
   autoActivate: z.boolean().default(false),
+  // PGA-16: "Simpan" sends status 'active' and "Simpan Draft" sends 'draft'.
+  // Without this key zod stripped it and every new campaign became a draft.
+  status: z.enum(['draft', 'active']).optional(),
   rules: z
     .array(
       z.object({
