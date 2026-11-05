@@ -256,11 +256,18 @@ describe('paid-order reversal (void) requires a reason and an elevated capabilit
     expect(first.status).toBe(200)
     expect(await refundTxns(order.id)).toHaveLength(1)
     expect(await voidAudits(order.id)).toHaveLength(1)
+    // PGA-30: count every audit and status-history row, not only 'void'.
+    const allAudits = () => db.auditLog.count({ where: { entity: 'order', entityId: order.id } })
+    const history = () => db.order_status.count({ where: { order: order.id } })
+    const auditsBefore = await allAudits()
+    const historyBefore = await history()
     // Repeat without reason: still a no-op success, no new side effects.
     const second = await voidOrder(adminToken, order.id)
     expect(second.status).toBe(200)
     expect(await refundTxns(order.id)).toHaveLength(1)
     expect(await voidAudits(order.id)).toHaveLength(1)
+    expect(await allAudits()).toBe(auditsBefore)
+    expect(await history()).toBe(historyBefore)
   })
 
   test('non-string reason is rejected by validation', async () => {
