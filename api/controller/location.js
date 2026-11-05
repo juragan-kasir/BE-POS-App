@@ -579,8 +579,9 @@ exports.editLocationById = async (req, res) => {
     tenantId: requestedTenantId,
     ...rest
   } = bodyData
+  // PGA-33: a numeric locationId (not "loc-001") crashed on .replace → 500.
   const id = rawId
-    ? parseInt(rawId.replace('loc-', ''))
+    ? parseInt(String(rawId).replace('loc-', ''))
     : rawIdAlt
       ? parseInt(String(rawIdAlt).replace('loc-', ''))
       : null
