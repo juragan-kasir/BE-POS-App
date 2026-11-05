@@ -147,7 +147,10 @@ const createAudit = (
   return auditLog({
     store: req.storeId || req.user?.store || req.cookies?.store,
     userId: req.user?.id,
-    userName: req.user?.name || req.user?.username,
+    // req.user (utils/authorization.js) carries userName/fullName, never
+    // name/username, so this used to store null on every row. Same actor
+    // rule as recordAudit().
+    userName: resolveActorFromReq(req).name,
     action,
     entity,
     entityId,
