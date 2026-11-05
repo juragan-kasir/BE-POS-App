@@ -145,7 +145,10 @@ const createAudit = (
   transaction
 ) => {
   return auditLog({
-    store: req.storeId || req.user?.store || req.cookies?.store,
+    // Trusted context only. The raw `store` cookie is client-controlled; where
+    // validateStoreAccess runs it has already been checked and copied into
+    // req.storeId, and where it does not run it must not reach the audit row.
+    store: req.storeId || req.user?.store || null,
     userId: req.user?.id,
     // req.user (utils/authorization.js) carries userName/fullName, never
     // name/username, so this used to store null on every row. Same actor
