@@ -409,11 +409,6 @@ const KNOWN_LEAKS = new Set([
   'get /delivery/drivers/:id owner',
   'put /delivery/drivers/:id owner',
   'put /delivery/drivers/:id/status owner',
-  // department
-  'delete /department/delete-department/:id admin',
-  'delete /department/delete-department/:id owner',
-  'get /department/get-department/:id admin',
-  'get /department/get-department/:id owner',
   // goods-receipt
   'delete /goods-receipt/delete/:id owner',
   'get /goods-receipt/by-po/:poId owner',
@@ -421,12 +416,6 @@ const KNOWN_LEAKS = new Set([
   // goods-request
   'delete /goods-request/delete/:id owner',
   'get /goods-request/get-by-id/:id owner',
-  // ingredient-category
-  'delete /ingredient-category/delete/:id admin',
-  'delete /ingredient-category/delete/:id owner',
-  'get /ingredient-category/get-by-id/:id admin',
-  'get /ingredient-category/get-by-id/:id owner',
-  'put /ingredient-category/edit/:id owner',
   // product-bundle
   'delete /product-bundle/delete/:id owner',
   'get /product-bundle/get-by-id/:id owner',

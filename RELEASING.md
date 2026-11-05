@@ -91,7 +91,7 @@ vocabulary and field rules are in `db/migration-dispositions/README.md`.
    for the same `--env`. Flags that could retarget the runner are refused.
    - **D-08 E2 runs in bounded batches (Option C)**, one separately approved
      batch at a time:
-     `npm run migrate -- --env production --batch B1` (then `B2`, `B3`, `B4`, `B5`, `B6`, `B7`, `B8`, `B9`, `B10`, `B11`).
+     `npm run migrate -- --env production --batch B1` (then `B2`, `B3`, `B4`, `B5`, `B6`, `B7`, `B8`, `B9`, `B10`, `B11`, `B12`).
      The batches are defined in `scripts/migration-batches.js` and recorded
      in `docs/superpowers/evidence/d08-e2-batch-contract-record.md`:
      - **B1**: the original 13 E2 migrations;
@@ -145,6 +145,14 @@ vocabulary and field rules are in `db/migration-dispositions/README.md`.
        index and the column. **Run B11 before the BE code that reads
        `promo_campaign.tenantId` reaches production**; check the rows first
        with `ops/promo-tenant-2026-11-03/check_promo_tenant.js` (read-only).
+     - **B12**: department and ingredient category outlet scope (wave 4 by-id
+       sweep, product owner 2026-11-05: shared master data is per tenant) —
+       adds nullable `department.store` and `ingredient_category.store` (FK
+       `location`, `ON DELETE SET NULL`) + index, add-if-missing. Existing rows
+       stay NULL: shared defaults every outlet reads and only a global super
+       admin changes. Nothing is rewritten. `down()` stops before any DDL while
+       a row belongs to an outlet. **Run B12 before the BE code that reads
+       `department.store` / `ingredient_category.store` reaches production.**
     - After the preflight, the runner refuses a batch whose members are
       missing or already recorded, when any pending migration outside the
       batch would run first, or when a governance gate is open (B3: P1

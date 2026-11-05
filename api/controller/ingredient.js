@@ -3,6 +3,20 @@ const { Op } = require('sequelize')
 const { createAudit } = require('../../utils/auditLog')
 const { enrichAuditFields } = require('../../utils/auditFields')
 const { resolveStoreId, tenantStoreWhere } = require('../../utils/tenantScope')
+const { visibleWhere } = require('../../utils/ownedOrSharedScope')
+
+// Wave 4: an ingredient may only be filed under a category its caller can
+// see (own outlets' or shared), never another tenant's.
+const categoryVisible = async (req, category) => {
+  if (category === undefined || category === null || category === '') return true
+  const found = await db.ingredientCategory.findOne({
+    where: await visibleWhere(req, { id: category }),
+    attributes: ['id']
+  })
+  return !!found
+}
+const unknownCategory = (res) =>
+  res.status(400).json({ success: false, message: 'Ingredient category not found' })
 const {
   adjustIngredientStock,
   getIngredientStockRecording
@@ -213,6 +227,7 @@ const ingredientController = {
           message: 'Name is required'
         })
       }
+      if (!(await categoryVisible(req, category))) return unknownCategory(res)
 
       // The row starts at 0; a non-zero opening stock goes through the
       // ledger so it is recorded (stock_history) like any other entry. A
@@ -296,6 +311,7 @@ const ingredientController = {
         conversionFactor
       } = req.body
       const modifiedBy = req.user?.id || null
+      if (!(await categoryVisible(req, category))) return unknownCategory(res)
 
       // PGA-01: the ingredient must belong to an outlet of the caller's
       // tenant. A store-bound super_admin used to fall back to any id, and
@@ -630,6 +646,7 @@ const ingredientController = {
     try {
       const store = resolveStoreId(req)
       const categories = await db.ingredientCategory.findAll({
+        where: await visibleWhere(req, {}),
         attributes: ['name'],
         order: [['createdAt', 'ASC']]
       })
@@ -917,7 +934,7 @@ const ingredientController = {
 
       // Fetch lookup maps — match store OR global (store IS NULL)
       const allCategories = await db.ingredientCategory.findAll({
-        where: store ? { [Op.or]: [{ store }, { store: null }] } : {}
+        where: await visibleWhere(req, {})
       })
       const categoryMap = {}
       allCategories.forEach((c) => {
