@@ -409,29 +409,15 @@ const KNOWN_LEAKS = new Set([
   'get /delivery/drivers/:id owner',
   'put /delivery/drivers/:id owner',
   'put /delivery/drivers/:id/status owner',
-  // goods-receipt
-  'delete /goods-receipt/delete/:id owner',
-  'get /goods-receipt/by-po/:poId owner',
-  'get /goods-receipt/get-by-id/:id owner',
-  // goods-request
-  'delete /goods-request/delete/:id owner',
-  'get /goods-request/get-by-id/:id owner',
   // product-bundle
   'delete /product-bundle/delete/:id owner',
   'get /product-bundle/get-by-id/:id owner',
   'patch /product-bundle/status/:id owner',
   'put /product-bundle/update/:id owner',
-  // production-order
-  'delete /production-order/delete/:id owner',
-  'get /production-order/get-by-id/:id owner',
   // queue
   'delete /queue/:id owner',
   'get /queue/:id owner',
   'put /queue/:id owner',
-  // stock-opname
-  'delete /stock-opname/delete/:id owner',
-  'get /stock-opname/get-by-id/:id owner',
-  'put /stock-opname/update/:id owner',
   // purchase-payment
   'get /purchase-payment/by-po/:poId owner',
   // purchase-return

@@ -2,7 +2,7 @@ const db = require('../../db/models')
 const { Op } = require('sequelize')
 const { createAudit } = require('../../utils/auditLog')
 const { enrichAuditFields } = require('../../utils/auditFields')
-const { resolveStoreId } = require('../../utils/tenantScope')
+const { resolveStoreId, tenantStoreWhere } = require('../../utils/tenantScope')
 
 const generateRequestNumber = () => {
   const date = new Date()
@@ -194,7 +194,7 @@ const goodsRequestController = {
       const userRole = req.user?.roleType
 
       const where = { id }
-      if (store && userRole !== 'super_admin') where.store = store
+      Object.assign(where, await tenantStoreWhere(req))
 
       const request = await db.goodsRequest.findOne({
         where,
@@ -344,7 +344,7 @@ const goodsRequestController = {
       const { items, requestedBy, notes, requestDate, neededDate } = req.body
 
       const where = { id }
-      if (store && userRole !== 'super_admin') where.store = store
+      Object.assign(where, await tenantStoreWhere(req))
 
       const request = await db.goodsRequest.findOne({ where })
 
@@ -443,7 +443,7 @@ const goodsRequestController = {
       const userRole = req.user?.roleType
 
       const where = { id }
-      if (store && userRole !== 'super_admin') where.store = store
+      Object.assign(where, await tenantStoreWhere(req))
 
       const request = await db.goodsRequest.findOne({ where })
 
@@ -500,7 +500,7 @@ const goodsRequestController = {
       }
 
       const where = { id }
-      if (store && userRole !== 'super_admin') where.store = store
+      Object.assign(where, await tenantStoreWhere(req))
 
       const request = await db.goodsRequest.findOne({
         where,

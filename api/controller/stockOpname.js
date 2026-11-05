@@ -233,9 +233,7 @@ const stockOpnameController = {
       const userRole = req.user?.roleType
 
       const whereClause = { id }
-      if (store && userRole !== 'super_admin') {
-        whereClause.store = store
-      }
+      Object.assign(whereClause, await tenantStoreWhere(req))
 
       const opname = await db.stockOpname.findOne({
         where: whereClause,
@@ -628,9 +626,7 @@ const stockOpnameController = {
       const { items, notes, date, auditDate, auditor } = req.body
 
       const whereClause = { id }
-      if (store && userRole !== 'super_admin') {
-        whereClause.store = store
-      }
+      Object.assign(whereClause, await tenantStoreWhere(req))
 
       const opname = await db.stockOpname.findOne({
         where: whereClause
@@ -758,9 +754,7 @@ const stockOpnameController = {
       const userRole = req.user?.roleType
 
       const whereClause = { id }
-      if (store && userRole !== 'super_admin') {
-        whereClause.store = store
-      }
+      Object.assign(whereClause, await tenantStoreWhere(req))
 
       const opname = await db.stockOpname.findOne({
         where: whereClause
@@ -1090,10 +1084,9 @@ const stockOpnameController = {
       const store = resolveStoreId(req)
       const userRole = req.user?.roleType
 
-      const locationWhere = { status: 'active' }
-      if (store && userRole !== 'super_admin') {
-        locationWhere.store = store
-      }
+      // Wave 4: only the caller's outlets — a store-bound owner used to get
+      // every tenant's outlet names here.
+      const locationWhere = await tenantStoreWhere(req, { status: 'active' }, 'id')
 
       const locations = await db.location.findAll({
         where: locationWhere,
