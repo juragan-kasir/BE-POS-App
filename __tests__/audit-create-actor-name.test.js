@@ -169,3 +169,53 @@ describe('createAudit records who did it', () => {
     expect(row.userName).toBe(user.userName)
   })
 })
+
+// The store column used to fall back to req.cookies.store, which the client
+// controls. Only the validated req.storeId or the account's own store count.
+describe('createAudit store comes from trusted context only', () => {
+  const req = (extra) => ({
+    ip: '127.0.0.1',
+    get: () => 'jest-agent',
+    cookies: { store: '999999' },
+    ...extra
+  })
+
+  test('a raw store cookie is ignored when nothing trusted is set', async () => {
+    const description = uniq('cookie_only')
+    await createAudit(
+      req({ user: { id: 9103, userName: 'sa_global', store: null } }),
+      'update',
+      'order',
+      1,
+      description
+    )
+    expect((await latest(description)).store).toBeNull()
+  })
+
+  test('the validated req.storeId wins over the cookie', async () => {
+    const description = uniq('validated')
+    await createAudit(
+      req({
+        storeId: store.id,
+        user: { id: 9104, userName: 'sa_scoped', store: null }
+      }),
+      'update',
+      'order',
+      1,
+      description
+    )
+    expect((await latest(description)).store).toBe(store.id)
+  })
+
+  test("the account's own store wins over the cookie", async () => {
+    const description = uniq('own_store')
+    await createAudit(
+      req({ user: { id: 9105, userName: 'kasir', store: store.id } }),
+      'update',
+      'order',
+      1,
+      description
+    )
+    expect((await latest(description)).store).toBe(store.id)
+  })
+})
