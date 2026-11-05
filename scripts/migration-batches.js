@@ -191,10 +191,24 @@ const E2_BATCHES = Object.freeze({
     // Replays safely; down drops the index and column. No governance gate.
     // The BE code reads the column, so B11 must be recorded before it deploys.
     openGates: []
+  }),
+  B12: deepFreeze({
+    id: 'B12',
+    title: 'Department and ingredient category outlet scope',
+    expectedCount: 1,
+    migrations: ['20261106000001-master-data-store-scope.js'],
+    // Wave 4 by-id sweep (product owner, 2026-11-05: shared master data is
+    // per tenant): up adds nullable department.store and
+    // ingredient_category.store (FK location, ON DELETE SET NULL) + index,
+    // add-if-missing. Existing rows stay NULL = shared defaults; nothing is
+    // rewritten. down stops before any DDL while a row belongs to an outlet.
+    // No governance gate. The BE code reads the columns, so B12 must be
+    // recorded before it deploys.
+    openGates: []
   })
 })
 
-const BATCH_ORDER = Object.freeze(['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B9', 'B10', 'B11'])
+const BATCH_ORDER = Object.freeze(['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B9', 'B10', 'B11', 'B12'])
 
 // D-08 B1 resume contracts. A resume finishes a batch whose earlier members
 // were recorded by an interrupted run; it never redefines the batch (the

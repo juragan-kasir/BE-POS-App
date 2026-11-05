@@ -5,11 +5,26 @@ const Position = db.position
 const User = db.user
 const { createAudit } = require('../../utils/auditLog')
 const { enrichAuditFields } = require('../../utils/auditFields')
+const { visibleWhere, canWrite, storeForNew } = require('../../utils/ownedOrSharedScope')
+
+// Wave 4 (owner decision 2026-11-05): departments are per tenant. A caller
+// reads its own outlets' departments plus the shared ones (store null, every
+// department that existed before B12) and changes only its own; a global
+// super admin also changes the shared ones.
+const sharedReadOnly = (res) =>
+  res.status(403).json({
+    success: false,
+    code: 'SHARED_DEPARTMENT_READ_ONLY',
+    message:
+      'Departemen bawaan bersama hanya bisa diubah oleh super admin pusat. Buat departemen untuk toko Anda sendiri.'
+  })
+const outsideStore = (res) =>
+  res.status(403).json({ success: false, message: 'Anda hanya dapat mengakses data di toko Anda' })
 
 exports.getAllDepartment = async (req, res) => {
   try {
     const getAllDepartment = await Department.findAll({
-      where: { status: 'active' }
+      where: await visibleWhere(req, { status: 'active' })
     }).then((res) =>
       res.map((items) => {
         const getData = { ...items.dataValues }
@@ -45,6 +60,9 @@ exports.getAllDepartmentInTable = async (req, res) => {
       whereCondition.name = { [Op.iLike]: `%${search}%` }
     }
 
+    whereCondition = await visibleWhere(req, whereCondition)
+    const scoped = (where = {}) => visibleWhere(req, where)
+
     const { rows: getAllDepartment, count: totalItems } =
       await Department.findAndCountAll({
         where: whereCondition,
@@ -56,24 +74,24 @@ exports.getAllDepartmentInTable = async (req, res) => {
 
     const totalPages = Math.ceil(totalItems / limit)
 
-    const totalDepartemen = await Department.count()
+    const totalDepartemen = await Department.count({ where: await scoped() })
 
     const totalDepartemenAktif = await Department.count({
-      where: { status: 'active' }
+      where: await scoped({ status: 'active' })
     })
 
     const totalDepartemenNonActive = await Department.count({
-      where: { status: 'inactive' }
+      where: await scoped({ status: 'inactive' })
     })
 
     const totalDepartemenDraft = await Department.count({
-      where: { status: 'draft' }
+      where: await scoped({ status: 'draft' })
     })
 
     const totalTanpaDeskripsi = await Department.count({
-      where: {
+      where: await scoped({
         [Op.or]: [{ description: null }, { description: '' }]
-      }
+      })
     })
 
     return res.status(200).json({
@@ -110,7 +128,7 @@ exports.getDepartmentById = async (req, res) => {
     const { id } = req.params
 
     const department = await Department.findOne({
-      where: { id }
+      where: await visibleWhere(req, { id })
     })
 
     if (!department) {
@@ -120,8 +138,10 @@ exports.getDepartmentById = async (req, res) => {
       })
     }
 
+    // Only positions the caller can see (own outlets' + shared) — a shared
+    // department is used by every tenant.
     const positions = await db.position.findAll({
-      where: { departmentId: id },
+      where: await visibleWhere(req, { departmentId: id }),
       attributes: ['id', 'name', 'status'],
       order: [['createdAt', 'DESC']]
     })
@@ -158,12 +178,16 @@ exports.addNewDepartment = async (req, res) => {
   const body = req.body
 
   try {
+    const scope = await storeForNew(req)
+    if (scope.error) return outsideStore(res)
+
     const findOneDepartment = await Department?.findOne({
-      where: { name: body?.name }
+      where: await visibleWhere(req, { name: body?.name })
     })
 
     if (!findOneDepartment?.getDataValue) {
       const creadtedDepartment = await Department.create({
+        store: scope.store,
         name: body.name,
         description: body.description,
         status:
@@ -214,22 +238,23 @@ exports.editDepartmentById = async (req, res) => {
   const id = req.params.id || body.id
 
   try {
+    const department = await Department.findOne({ where: await visibleWhere(req, { id }) })
+    if (!department) {
+      return res.status(404).json({
+        success: false,
+        message: 'Department Tidak Ditemukan'
+      })
+    }
+    if (!(await canWrite(req, department))) return sharedReadOnly(res)
+
     const getDuplicate = await Department.findOne({
-      where: {
+      where: await visibleWhere(req, {
         name: body.name,
         id: { [db.Sequelize.Op.ne]: id }
-      }
+      })
     })
 
     if (!getDuplicate?.dataValues) {
-      const department = await Department.findByPk(id)
-      if (!department) {
-        return res.status(404).json({
-          success: false,
-          message: 'Department Tidak Ditemukan'
-        })
-      }
-
       const [, editRows] = await Department.update(
         {
           name: body.name,
@@ -284,9 +309,18 @@ exports.deleteDepartmentById = async (req, res) => {
   const id = req.params.id
 
   try {
-    // Find all positions in this department
+    const department = await Department.findOne({ where: await visibleWhere(req, { id }) })
+    if (!department) {
+      return res.status(404).json({
+        success: false,
+        message: 'Department Tidak Ditemukan'
+      })
+    }
+    if (!(await canWrite(req, department))) return sharedReadOnly(res)
+
+    // Find the positions in this department the caller can see (all, if global)
     const positions = await Position.findAll({
-      where: { departmentId: id }
+      where: await visibleWhere(req, { departmentId: id })
     })
 
     const positionIds = positions.map((p) => p.id)
@@ -452,6 +486,7 @@ exports.downloadTemplate = async (req, res) => {
     const excelJS = require('exceljs')
 
     const departments = await Department.findAll({
+      where: await visibleWhere(req, {}),
       attributes: ['name', 'description', 'status'],
       order: [['createdAt', 'ASC']]
     })
@@ -491,7 +526,7 @@ exports.downloadData = async (req, res) => {
     }
 
     const departments = await Department.findAll({
-      where: whereCondition,
+      where: await visibleWhere(req, whereCondition),
       attributes: ['id', 'name', 'description', 'status'],
       order: [['createdAt', 'ASC']]
     })
@@ -631,15 +666,17 @@ exports.uploadExcel = async (req, res) => {
       })
     }
 
-    // Process creations
+    // Process creations (owned by the importing outlet)
+    const scope = await storeForNew(req)
+    if (scope.error) return outsideStore(res)
     const createdDepartments = []
     for (const deptData of departmentsToCreate) {
       try {
         const existing = await Department.findOne({
-          where: { name: deptData.name }
+          where: await visibleWhere(req, { name: deptData.name })
         })
         if (!existing) {
-          const dept = await Department.create(deptData)
+          const dept = await Department.create({ ...deptData, store: scope.store })
           createAudit(
             req,
             'create',

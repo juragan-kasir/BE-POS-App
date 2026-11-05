@@ -13,6 +13,12 @@ module.exports = (sequelize, DataTypes) => {
         allowNull: false,
         type: DataTypes.STRING
       },
+      // Owning outlet (batch B12). NULL = shared default, readable by every
+      // outlet and changeable only by a global super admin.
+      store: {
+        type: DataTypes.INTEGER,
+        allowNull: true
+      },
       status: {
         type: DataTypes.STRING(20),
         defaultValue: 'active'

@@ -375,6 +375,9 @@ module.exports = async () => {
     ['sales_return', 'restock', 'BOOLEAN NOT NULL DEFAULT TRUE'],
     // PGA-03 tenant-scoped promotions (migration 20261103000001, batch B11).
     ['promo_campaign', 'tenantId', 'INTEGER REFERENCES "tenant"(id) ON UPDATE CASCADE ON DELETE SET NULL'],
+    // Wave 4 per-tenant master data (migration 20261106000001, batch B12).
+    ['department', 'store', 'INTEGER REFERENCES "location"(id) ON UPDATE CASCADE ON DELETE SET NULL'],
+    ['ingredient_category', 'store', 'INTEGER REFERENCES "location"(id) ON UPDATE CASCADE ON DELETE SET NULL'],
   ]
 
   // Phase 34: stock_opname_item's quantity columns are migration-owned

@@ -4,15 +4,23 @@ const { createAudit } = require('../../utils/auditLog')
 const { enrichAuditFields } = require('../../utils/auditFields')
 const ExcelJS = require('exceljs')
 
-// Ingredients are store-scoped (see ingredient model). For non-super-admin,
-// scope ingredient reads to the caller's store plus shared (store:null) rows,
-// mirroring ingredient.js. super_admin sees all.
-const ingredientScope = (req) => {
-  if (req.user?.roleType === 'super_admin') return {}
-  const store = Number(req.storeId ?? req.user?.store)
-  if (!Number.isFinite(store) || store <= 0) return { [Op.or]: [{ store: null }] }
-  return { [Op.or]: [{ store }, { store: null }] }
-}
+const { visibleWhere, canWrite, storeForNew } = require('../../utils/ownedOrSharedScope')
+
+// Wave 4 (owner decision 2026-11-05): ingredient categories are per tenant,
+// the same as ingredients themselves. A caller reads its own outlets' rows
+// plus the shared ones (store null) and changes only its own; a global
+// super admin also changes the shared ones. Ingredient reads use the same
+// rule — it used to return every tenant's ingredients to any super_admin,
+// store-bound owners included.
+const sharedReadOnly = (res) =>
+  res.status(403).json({
+    success: false,
+    code: 'SHARED_CATEGORY_READ_ONLY',
+    message:
+      'Kategori bawaan bersama hanya bisa diubah oleh super admin pusat. Buat kategori untuk toko Anda sendiri.'
+  })
+const outsideStore = (res) =>
+  res.status(403).json({ success: false, message: 'Anda hanya dapat mengakses data di toko Anda' })
 
 const ingredientCategoryController = {
   async getAll(req, res) {
@@ -30,7 +38,7 @@ const ingredientCategoryController = {
       let supplierFilteredIds = null
       if (supplier) {
         const usedCategories = await db.ingredient.findAll({
-          where: { supplier: Number(supplier), ...ingredientScope(req) },
+          where: await visibleWhere(req, { supplier: Number(supplier) }),
           attributes: ['category'],
           group: ['category']
         })
@@ -41,7 +49,7 @@ const ingredientCategoryController = {
 
       const offset = (page - 1) * limit
 
-      const categoryWhere = { ...where }
+      const categoryWhere = await visibleWhere(req, { ...where })
       if (supplierFilteredIds !== null) {
         if (supplierFilteredIds.length > 0) {
           categoryWhere.id = { [Op.in]: supplierFilteredIds }
@@ -98,7 +106,7 @@ const ingredientCategoryController = {
     try {
       const { id } = req.params
 
-      const category = await db.ingredientCategory.findByPk(id)
+      const category = await db.ingredientCategory.findOne({ where: await visibleWhere(req, { id }) })
 
       if (!category) {
         return res.status(404).json({
@@ -109,7 +117,7 @@ const ingredientCategoryController = {
 
       // ponytail: sertakan bahan baku yang termasuk kategori ini
       const ingredients = await db.ingredient.findAll({
-        where: { category: id, ...ingredientScope(req) },
+        where: await visibleWhere(req, { category: id }),
         attributes: ['id', 'name', 'stock', 'minStock', 'unit', 'status', 'costPrice'],
         order: [['updatedAt', 'DESC']]
       })
@@ -144,8 +152,11 @@ const ingredientCategoryController = {
         })
       }
 
+      const scope = await storeForNew(req)
+      if (scope.error) return outsideStore(res)
+
       const existing = await db.ingredientCategory.findOne({
-        where: { name: { [Op.iLike]: name.trim() } }
+        where: await visibleWhere(req, { name: { [Op.iLike]: name.trim() } })
       })
       if (existing) {
         return res.status(400).json({
@@ -155,6 +166,7 @@ const ingredientCategoryController = {
       }
 
       const category = await db.ingredientCategory.create({
+        store: scope.store,
         name: name.trim(),
         status: ['active', 'inactive', 'draft'].includes(status)
           ? status
@@ -190,7 +202,7 @@ const ingredientCategoryController = {
       const { name, status } = req.body
       const modifiedBy = req.user?.id || null
 
-      const category = await db.ingredientCategory.findByPk(id)
+      const category = await db.ingredientCategory.findOne({ where: await visibleWhere(req, { id }) })
 
       if (!category) {
         return res.status(404).json({
@@ -198,10 +210,11 @@ const ingredientCategoryController = {
           message: 'Ingredient category not found'
         })
       }
+      if (!(await canWrite(req, category))) return sharedReadOnly(res)
 
       if (name && name.trim().toLowerCase() !== category.name.toLowerCase()) {
         const existing = await db.ingredientCategory.findOne({
-          where: { name: { [Op.iLike]: name.trim() }, id: { [Op.ne]: id } }
+          where: await visibleWhere(req, { name: { [Op.iLike]: name.trim() }, id: { [Op.ne]: id } })
         })
         if (existing) {
           return res.status(400).json({
@@ -250,7 +263,7 @@ const ingredientCategoryController = {
     try {
       const { id } = req.params
 
-      const category = await db.ingredientCategory.findByPk(id)
+      const category = await db.ingredientCategory.findOne({ where: await visibleWhere(req, { id }) })
 
       if (!category) {
         return res.status(404).json({
@@ -258,6 +271,7 @@ const ingredientCategoryController = {
           message: 'Ingredient category not found'
         })
       }
+      if (!(await canWrite(req, category))) return sharedReadOnly(res)
 
       await category.destroy()
       createAudit(
@@ -284,6 +298,7 @@ const ingredientCategoryController = {
   async downloadTemplate(req, res) {
     try {
       const categories = await db.ingredientCategory.findAll({
+        where: await visibleWhere(req, {}),
         order: [['createdAt', 'ASC']]
       })
 
@@ -391,6 +406,7 @@ const ingredientCategoryController = {
   async downloadData(req, res) {
     try {
       const categories = await db.ingredientCategory.findAll({
+        where: await visibleWhere(req, {}),
         order: [['createdAt', 'ASC']]
       })
 
@@ -497,17 +513,19 @@ const ingredientCategoryController = {
           .json({ success: false, message: 'Validation errors', errors })
       }
 
+      const scope = await storeForNew(req)
+      if (scope.error) return outsideStore(res)
       const created = []
       const skipped = []
       for (const item of toCreate) {
         const existing = await db.ingredientCategory.findOne({
-          where: { name: item.name }
+          where: await visibleWhere(req, { name: item.name })
         })
         if (existing) {
           skipped.push(item.name)
           continue
         }
-        const cat = await db.ingredientCategory.create(item)
+        const cat = await db.ingredientCategory.create({ ...item, store: scope.store })
         created.push(cat)
       }
 

@@ -14,6 +14,20 @@ const positionInclude = [
   }
 ]
 
+// Wave 4: a position may only be filed under a department its caller can see
+// (own outlets' or shared, see department.js), never another tenant's.
+const { visibleWhere: visibleMasterWhere } = require('../../utils/ownedOrSharedScope')
+const departmentVisible = async (req, departmentId) => {
+  if (departmentId === undefined || departmentId === null || departmentId === '') return true
+  const found = await db.department.findOne({
+    where: await visibleMasterWhere(req, { id: departmentId }),
+    attributes: ['id']
+  })
+  return !!found
+}
+const unknownDepartment = (res) =>
+  res.status(400).json({ success: false, message: 'Departemen tidak ditemukan' })
+
 exports.getAllPosition = async (req, res) => {
   try {
     const getAllPosition = await Position.findAll({
@@ -152,9 +166,13 @@ exports.getPositionByDepartment = async (req, res) => {
         message: 'Department ID wajib diisi'
       })
     }
+    // Another tenant's department answers as if it did not exist.
+    if (!(await departmentVisible(req, departmentId))) {
+      return res.status(404).json({ success: false, message: 'Departemen tidak ditemukan' })
+    }
 
     const positions = await Position.findAll({
-      where: { departmentId },
+      where: await visibleMasterWhere(req, { departmentId }),
       include: positionInclude,
       order: [['name', 'ASC']]
     }).then((records) =>
@@ -182,6 +200,7 @@ exports.addNewPosition = async (req, res) => {
   const body = req.body
 
   try {
+    if (!(await departmentVisible(req, body?.departmentId))) return unknownDepartment(res)
     const findOnePosition = await Position?.findOne({
       where: { name: body?.name }
     })
@@ -248,6 +267,7 @@ exports.editPositionById = async (req, res) => {
       })
     }
 
+    if (!(await departmentVisible(req, body?.departmentId))) return unknownDepartment(res)
     const getDuplicate = await Position.findOne({
       where: {
         name: body.name,
@@ -501,7 +521,7 @@ exports.downloadTemplate = async (req, res) => {
     const excelJS = require('exceljs')
 
     const departments = await db.department.findAll({
-      where: { status: 'active' },
+      where: await visibleMasterWhere(req, { status: 'active' }),
       attributes: ['id', 'name']
     })
 
@@ -635,6 +655,7 @@ exports.uploadExcel = async (req, res) => {
 
     // Get departments for mapping
     const departments = await db.department.findAll({
+      where: await visibleMasterWhere(req, {}),
       attributes: ['id', 'name']
     })
     const departmentMap = {}
