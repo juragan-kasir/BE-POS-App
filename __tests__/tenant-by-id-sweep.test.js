@@ -427,13 +427,6 @@ const KNOWN_LEAKS = new Set([
   'get /ingredient-category/get-by-id/:id admin',
   'get /ingredient-category/get-by-id/:id owner',
   'put /ingredient-category/edit/:id owner',
-  // member-tier
-  'delete /member-tier/delete/:id admin',
-  'delete /member-tier/delete/:id owner',
-  'get /member-tier/detail/:id admin',
-  'get /member-tier/detail/:id owner',
-  'put /member-tier/edit/:id admin',
-  'put /member-tier/edit/:id owner',
   // product-bundle
   'delete /product-bundle/delete/:id owner',
   'get /product-bundle/get-by-id/:id owner',

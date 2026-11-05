@@ -2,6 +2,24 @@ const db = require('../../db/models')
 const { Op, literal } = require('sequelize')
 const { createAudit } = require('../../utils/auditLog')
 const { enrichAuditFields } = require('../../utils/auditFields')
+const { tenantStoreWhere } = require('../../utils/tenantScope')
+const {
+  visibleTierWhere,
+  canWriteTier,
+  storeForNewTier,
+  activeLadder,
+  pickTier
+} = require('../service/memberTierScope')
+
+const notFound = (res) =>
+  res.status(404).json({ success: false, message: 'Member tier not found' })
+const sharedReadOnly = (res) =>
+  res.status(403).json({
+    success: false,
+    code: 'SHARED_TIER_READ_ONLY',
+    message:
+      'Tier bawaan bersama hanya bisa diubah oleh super admin pusat. Buat tier untuk toko Anda sendiri.'
+  })
 
 const memberTierController = {
   normalizeBenefits(benefits) {
@@ -26,7 +44,7 @@ const memberTierController = {
       }
 
       const tiers = await db.member_tier.findAll({
-        where,
+        where: await visibleTierWhere(req, where),
         attributes: {
           include: [
             [
@@ -85,7 +103,8 @@ const memberTierController = {
     try {
       const { id } = req.params
 
-      const tier = await db.member_tier.findByPk(id, {
+      const tier = await db.member_tier.findOne({
+        where: await visibleTierWhere(req, { id }),
         attributes: {
           include: [
             [
@@ -152,7 +171,16 @@ const memberTierController = {
         })
       }
 
+      const scope = await storeForNewTier(req)
+      if (scope.error) {
+        return res.status(403).json({
+          success: false,
+          message: 'Anda hanya dapat mengakses data di toko Anda'
+        })
+      }
+
       const tier = await db.member_tier.create({
+        store: scope.store,
         name,
         minPoints: minPoints || 0,
         maxPoints: maxPoints ?? 0,
@@ -200,14 +228,11 @@ const memberTierController = {
       } = req.body
       const modifiedBy = req.user?.id || null
 
-      const tier = await db.member_tier.findByPk(id)
-
-      if (!tier) {
-        return res.status(404).json({
-          success: false,
-          message: 'Member tier not found'
-        })
-      }
+      const tier = await db.member_tier.findOne({
+        where: await visibleTierWhere(req, { id })
+      })
+      if (!tier) return notFound(res)
+      if (!(await canWriteTier(req, tier))) return sharedReadOnly(res)
 
       await tier.update({
         name: name || tier.name,
@@ -262,14 +287,11 @@ const memberTierController = {
     try {
       const { id } = req.params
 
-      const tier = await db.member_tier.findByPk(id)
-
-      if (!tier) {
-        return res.status(404).json({
-          success: false,
-          message: 'Member tier not found'
-        })
-      }
+      const tier = await db.member_tier.findOne({
+        where: await visibleTierWhere(req, { id })
+      })
+      if (!tier) return notFound(res)
+      if (!(await canWriteTier(req, tier))) return sharedReadOnly(res)
 
       await tier.destroy()
       createAudit(
@@ -304,14 +326,10 @@ const memberTierController = {
         })
       }
 
-      const tier = await db.member_tier.findOne({
-        where: {
-          status: { [Op.or]: ['active', 'true'] },
-          minPoints: { [Op.lte]: points },
-          maxPoints: { [Op.gte]: points }
-        },
-        order: [['minPoints', 'DESC']]
-      })
+      // The ladder of the outlet asking (validated req.storeId), or the
+      // shared defaults when that outlet has none.
+      const storeId = Number(req.storeId ?? req.user?.store) || null
+      const tier = pickTier(await activeLadder(db, storeId), points)
 
       return res.status(200).json({
         success: true,
@@ -329,19 +347,22 @@ const memberTierController = {
 
   async updateMemberTier(req, res) {
     try {
-      const tiers = await db.member_tier.findAll({
-        where: { status: { [Op.or]: ['active', 'true'] } },
-        order: [['minPoints', 'DESC']]
+      // Only the caller's own members, each graded on its outlet's ladder.
+      const members = await db.member.findAll({
+        where: await tenantStoreWhere(req, {})
       })
-
-      const members = await db.member.findAll({})
+      const ladders = new Map()
+      const ladderFor = async (storeId) => {
+        const key = storeId ?? 'shared'
+        if (!ladders.has(key)) ladders.set(key, await activeLadder(db, storeId))
+        return ladders.get(key)
+      }
 
       const updates = []
       for (const member of members) {
-        const newTier = tiers.find(
-          (t) =>
-            member.totalPoints >= t.minPoints &&
-            member.totalPoints <= t.maxPoints
+        const newTier = pickTier(
+          await ladderFor(member.store),
+          member.totalPoints
         )
 
         if (newTier && member.tier !== newTier.id) {
