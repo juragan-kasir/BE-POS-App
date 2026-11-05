@@ -1,6 +1,7 @@
 'use strict'
 const db = require('../../db/models')
 const { Op } = require('sequelize')
+const { activeLadder, pickTier } = require('./memberTierScope')
 
 // Single authoritative path for mutating a member's point balance, mirroring
 // stockMutationService.adjustProductStock exactly: lock the row first,
@@ -88,22 +89,13 @@ async function adjustMemberPoints({
 // minPoints exceeds the current tier's).
 async function maybeUpgradeMemberTier({ member, transaction }) {
   const newTotal = Number(member.totalPoints) || 0
-  let targetTier = await db.member_tier.findOne({
-    where: {
-      status: 'active',
-      minPoints: { [Op.lte]: newTotal },
-      maxPoints: { [Op.gte]: newTotal }
-    },
-    order: [['minPoints', 'DESC']],
-    transaction
+  // Wave 4: graded on the member's own outlet ladder (shared defaults when
+  // the outlet has none) — never on a tier another tenant created.
+  const ladder = await activeLadder(db, member.store ?? null, {
+    transaction,
+    status: 'active'
   })
-  if (!targetTier) {
-    targetTier = await db.member_tier.findOne({
-      where: { status: 'active', minPoints: { [Op.lte]: newTotal } },
-      order: [['minPoints', 'DESC']],
-      transaction
-    })
-  }
+  const targetTier = pickTier(ladder, newTotal, { fallback: true })
   if (!targetTier) return
   const currentTierRow = member.tier
     ? await db.member_tier.findByPk(member.tier, { transaction })
