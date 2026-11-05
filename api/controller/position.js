@@ -4,7 +4,7 @@ const Position = db.position
 const User = db.user
 const { createAudit } = require('../../utils/auditLog')
 const { enrichAuditFields } = require('../../utils/auditFields')
-const { scalarStoreScope } = require('../../utils/tenantScope')
+const { storesInCallerTenant } = require('../../utils/tenantScope')
 
 const positionInclude = [
   {
@@ -16,7 +16,27 @@ const positionInclude = [
 
 // Wave 4: a position may only be filed under a department its caller can see
 // (own outlets' or shared, see department.js), never another tenant's.
-const { visibleWhere: visibleMasterWhere } = require('../../utils/ownedOrSharedScope')
+const {
+  visibleWhere: visibleMasterWhere,
+  canWrite,
+  storeForNew
+} = require('../../utils/ownedOrSharedScope')
+
+// Wave 4 (owner decision 2026-11-05): positions are per tenant like
+// departments. Reads: own outlets' positions + shared (store null) ones.
+// Writes: own only; shared ones only for a global super admin. A client
+// `store` is honoured only inside the caller's tenant.
+const sharedReadOnly = (res) =>
+  res.status(403).json({
+    success: false,
+    code: 'SHARED_POSITION_READ_ONLY',
+    message:
+      'Jabatan bawaan bersama hanya bisa diubah oleh super admin pusat. Buat jabatan untuk toko Anda sendiri.'
+  })
+const outsideStore = (res) =>
+  res.status(403).json({ success: false, message: 'Anda hanya dapat mengakses data di toko Anda' })
+const requestedStore = (value) =>
+  value === undefined || value === null || value === '' ? null : Number(value)
 const departmentVisible = async (req, departmentId) => {
   if (departmentId === undefined || departmentId === null || departmentId === '') return true
   const found = await db.department.findOne({
@@ -31,7 +51,7 @@ const unknownDepartment = (res) =>
 exports.getAllPosition = async (req, res) => {
   try {
     const getAllPosition = await Position.findAll({
-      where: { status: 'active' },
+      where: await visibleMasterWhere(req, { status: 'active' }),
       include: positionInclude,
       order: [['updatedAt', 'DESC']]
     }).then((records) =>
@@ -76,6 +96,7 @@ exports.getAllPositionInTable = async (req, res) => {
       }
     }
 
+    whereCondition = await visibleMasterWhere(req, whereCondition)
     const { rows: getAllPosition, count: totalItems } =
       await Position.findAndCountAll({
         where: whereCondition,
@@ -90,10 +111,10 @@ exports.getAllPositionInTable = async (req, res) => {
 
     const [activeCount, inactiveCount, draftCount, totalPositions] =
       await Promise.all([
-        Position.count({ where: { status: 'active' } }),
-        Position.count({ where: { status: 'inactive' } }),
-        Position.count({ where: { status: 'draft' } }),
-        Position.count()
+        Position.count({ where: await visibleMasterWhere(req, { status: 'active' }) }),
+        Position.count({ where: await visibleMasterWhere(req, { status: 'inactive' }) }),
+        Position.count({ where: await visibleMasterWhere(req, { status: 'draft' }) }),
+        Position.count({ where: await visibleMasterWhere(req, {}) })
       ])
 
     return res.status(200).json({
@@ -131,7 +152,7 @@ exports.getPositionById = async (req, res) => {
     // IDOR fix: was unscoped, and this route has no requireRole gate at
     // all, so any authenticated role could read another store's position.
     const position = await Position.findOne({
-      where: scalarStoreScope(req, { id }),
+      where: await visibleMasterWhere(req, { id }),
       include: positionInclude
     })
 
@@ -201,8 +222,16 @@ exports.addNewPosition = async (req, res) => {
 
   try {
     if (!(await departmentVisible(req, body?.departmentId))) return unknownDepartment(res)
+    let store = requestedStore(body?.store)
+    if (store !== null) {
+      if (!(await storesInCallerTenant(req, [store]))) return outsideStore(res)
+    } else {
+      const scope = await storeForNew(req)
+      if (scope.error) return outsideStore(res)
+      store = scope.store
+    }
     const findOnePosition = await Position?.findOne({
-      where: { name: body?.name }
+      where: await visibleMasterWhere(req, { name: body?.name })
     })
 
     if (!findOnePosition?.getDataValue) {
@@ -218,7 +247,7 @@ exports.addNewPosition = async (req, res) => {
                 ? 'inactive'
                 : body.status
             : 'active',
-        store: body.store || req.user?.store
+        store
       })
       createAudit(
         req,
@@ -258,7 +287,7 @@ exports.editPositionById = async (req, res) => {
     // IDOR fix: was Position.update({where:{id}}) with no store filter —
     // any admin could edit any store's position. Confirm ownership first.
     const existingPosition = await Position.findOne({
-      where: scalarStoreScope(req, { id })
+      where: await visibleMasterWhere(req, { id })
     })
     if (!existingPosition) {
       return res.status(404).json({
@@ -266,13 +295,21 @@ exports.editPositionById = async (req, res) => {
         message: 'Posisi tidak ditemukan'
       })
     }
+    if (!(await canWrite(req, existingPosition))) return sharedReadOnly(res)
 
     if (!(await departmentVisible(req, body?.departmentId))) return unknownDepartment(res)
+    // A position may move only to another outlet of the caller's tenant.
+    let nextStore = existingPosition.store
+    const moveTo = requestedStore(body?.store)
+    if (moveTo !== null && moveTo !== Number(existingPosition.store)) {
+      if (!(await storesInCallerTenant(req, [moveTo]))) return outsideStore(res)
+      nextStore = moveTo
+    }
     const getDuplicate = await Position.findOne({
-      where: {
+      where: await visibleMasterWhere(req, {
         name: body.name,
         id: { [Op.ne]: id }
-      }
+      })
     })
 
     if (!getDuplicate?.dataValues) {
@@ -289,11 +326,11 @@ exports.editPositionById = async (req, res) => {
                   ? 'inactive'
                   : body.status
               : 'active',
-          store: body.store || req.user?.store
+          store: nextStore
         },
         {
           returning: true,
-          where: scalarStoreScope(req, { id })
+          where: { id }
         }
       )
       const editPosition = rows[0]
@@ -333,7 +370,7 @@ exports.deletePositionById = async (req, res) => {
     // employees' position reference for a position id belonging to ANY
     // store, not just the caller's. Confirm ownership first.
     const position = await Position.findOne({
-      where: scalarStoreScope(req, { id: positionId })
+      where: await visibleMasterWhere(req, { id: positionId })
     })
     if (!position) {
       return res.status(404).json({
@@ -341,12 +378,13 @@ exports.deletePositionById = async (req, res) => {
         message: 'Position Tidak Ditemukan'
       })
     }
+    if (!(await canWrite(req, position))) return sharedReadOnly(res)
 
     // Set position reference to null for users that reference this position
     await User.update({ position: null }, { where: { position: positionId } })
 
     const getId = await Position.destroy({
-      where: scalarStoreScope(req, { id: positionId })
+      where: { id: positionId }
     })
     createAudit(
       req,
@@ -526,6 +564,7 @@ exports.downloadTemplate = async (req, res) => {
     })
 
     const positions = await Position.findAll({
+      where: await visibleMasterWhere(req, {}),
       include: [
         {
           model: db.department,
@@ -571,7 +610,7 @@ exports.downloadData = async (req, res) => {
     }
 
     const positions = await Position.findAll({
-      where: whereCondition,
+      where: await visibleMasterWhere(req, whereCondition),
       include: [
         {
           model: db.department,
@@ -767,15 +806,17 @@ exports.uploadExcel = async (req, res) => {
       })
     }
 
-    // Process creations
+    // Process creations (owned by the importing outlet)
+    const scope = await storeForNew(req)
+    if (scope.error) return outsideStore(res)
     const createdPositions = []
     for (const posData of positionsToCreate) {
       try {
         const existing = await Position.findOne({
-          where: { name: posData.name }
+          where: await visibleMasterWhere(req, { name: posData.name })
         })
         if (!existing) {
-          const pos = await Position.create(posData)
+          const pos = await Position.create({ ...posData, store: scope.store })
           createAudit(
             req,
             'create',
