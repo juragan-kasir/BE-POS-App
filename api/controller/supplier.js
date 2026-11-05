@@ -53,6 +53,20 @@ const inSuperAdminScope = async (req, supplierStores) => {
   return supplierStores.some((id) => scope.includes(Number(id)))
 }
 
+// Wave 4: a supplier may only point at a supplier category its caller can
+// see (own outlets' or shared), never another tenant's.
+const { visibleWhere } = require('../../utils/ownedOrSharedScope')
+const categoryVisible = async (req, categoryId) => {
+  if (categoryId === undefined || categoryId === null || categoryId === '') return true
+  const found = await db.supplier_category.findOne({
+    where: await visibleWhere(req, { id: categoryId }),
+    attributes: ['id']
+  })
+  return !!found
+}
+const unknownCategory = (res) =>
+  res.status(400).json({ success: false, message: 'Supplier category not found' })
+
 const supplierNotFound = (res) =>
   res.status(404).json({ success: false, message: 'Supplier not found' })
 
@@ -807,6 +821,7 @@ const supplierController = {
         bankAccounts
       } = req.body
       const createdBy = req.user?.id || null
+      if (!(await categoryVisible(req, categoryId))) return unknownCategory(res)
 
       const trimmedName = name?.trim()
 
@@ -987,6 +1002,7 @@ const supplierController = {
       // update threw a ReferenceError (500) instead of reaching the guard.
       const supplierStores = normalizeStores(supplier.store).map(Number)
       if (!(await inSuperAdminScope(req, supplierStores))) return supplierNotFound(res)
+      if (!(await categoryVisible(req, categoryId))) return unknownCategory(res)
 
       // C-9: `supplierStores.length > 0 &&` short-circuited for a global
       // supplier (store: null/[]) — any tenant admin could mutate it. Reads

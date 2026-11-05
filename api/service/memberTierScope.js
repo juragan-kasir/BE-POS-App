@@ -9,41 +9,19 @@
 // outlet has active tiers, otherwise on the shared defaults — so a tier
 // one tenant creates can never change another tenant's members.
 const { Op } = require('sequelize')
-const { callerStoreIds, storeIdsCondition } = require('../../utils/tenantScope')
+const {
+  visibleWhere,
+  canWrite,
+  storeForNew
+} = require('../../utils/ownedOrSharedScope')
 
 const ACTIVE_STATUS = { [Op.or]: ['active', 'true'] }
 
-// WHERE for the tiers a caller may read: its own outlets' tiers plus the
-// shared defaults. A global caller sees every tier.
-async function visibleTierWhere(req, where = {}) {
-  const ids = await callerStoreIds(req)
-  if (ids === null) return { ...where }
-  return {
-    ...where,
-    [Op.and]: [
-      { [Op.or]: [{ store: null }, { store: storeIdsCondition(ids) }] }
-    ]
-  }
-}
-
-// A caller may change a tier of one of its own outlets. Shared defaults are
-// read-only for everyone but a global caller.
-async function canWriteTier(req, tier) {
-  const ids = await callerStoreIds(req)
-  if (ids === null) return true
-  return tier.store != null && ids.includes(Number(tier.store))
-}
-
-// The outlet a new tier belongs to, or { error } when the caller may not
-// create one there. A global caller without an outlet creates a shared one.
-async function storeForNewTier(req) {
-  const ids = await callerStoreIds(req)
-  const requested = Number(req.storeId ?? req.user?.store)
-  const store = Number.isInteger(requested) && requested > 0 ? requested : null
-  if (ids === null) return { store }
-  if (store == null || !ids.includes(store)) return { error: true }
-  return { store }
-}
+// Read: own outlets' tiers + shared defaults. Write: own tiers only (shared
+// ones for a global caller). See utils/ownedOrSharedScope.js.
+const visibleTierWhere = (req, where = {}) => visibleWhere(req, where)
+const canWriteTier = (req, tier) => canWrite(req, tier)
+const storeForNewTier = (req) => storeForNew(req)
 
 // Active tiers that grade a member of `storeId`, highest minPoints first.
 async function activeLadder(

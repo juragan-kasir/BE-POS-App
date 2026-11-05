@@ -443,12 +443,6 @@ const KNOWN_LEAKS = new Set([
   'delete /stock-opname/delete/:id owner',
   'get /stock-opname/get-by-id/:id owner',
   'put /stock-opname/update/:id owner',
-  // supplier-category
-  'delete /supplier-category/:id admin',
-  'delete /supplier-category/:id owner',
-  'get /supplier-category/:id admin',
-  'get /supplier-category/:id owner',
-  'put /supplier-category/:id owner',
   // purchase-payment
   'get /purchase-payment/by-po/:poId owner',
   // purchase-return
