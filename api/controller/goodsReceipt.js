@@ -2,7 +2,7 @@ const db = require('../../db/models')
 const { Op } = require('sequelize')
 const { createAudit } = require('../../utils/auditLog')
 const { enrichAuditFields } = require('../../utils/auditFields')
-const { resolveStoreId } = require('../../utils/tenantScope')
+const { resolveStoreId, tenantStoreWhere } = require('../../utils/tenantScope')
 const {
   uploadToCloudinaryWithDedup
 } = require('../../utils/cloudinaryStorage')
@@ -543,7 +543,7 @@ const goodsReceiptController = {
 
       const where = {}
       if (queryStore && userRole === 'super_admin') where.store = queryStore
-      else if (store && userRole !== 'super_admin') where.store = store
+      else Object.assign(where, await tenantStoreWhere(req))
       if (status) where.status = status
       if (poId) where.purchaseOrderId = poId
       if (search) {
@@ -621,7 +621,7 @@ const goodsReceiptController = {
       const userRole = req.user?.roleType
 
       const where = { id }
-      if (store && userRole !== 'super_admin') where.store = store
+      Object.assign(where, await tenantStoreWhere(req))
 
       const receipt = await db.goodsReceipt.findOne({
         where,
@@ -683,7 +683,7 @@ const goodsReceiptController = {
       const userRole = req.user?.roleType
 
       const where = { purchaseOrderId: poId }
-      if (store && userRole !== 'super_admin') where.store = store
+      Object.assign(where, await tenantStoreWhere(req))
 
       const receipts = await db.goodsReceipt.findAll({
         where,
@@ -1207,7 +1207,7 @@ const goodsReceiptController = {
 
       const where = {}
       if (queryStore && userRole === 'super_admin') where.store = queryStore
-      else if (store && userRole !== 'super_admin') where.store = store
+      else Object.assign(where, await tenantStoreWhere(req))
       if (status) where.status = status
       if (startDate || endDate) {
         where.receivedDate = {}
@@ -1268,7 +1268,7 @@ const goodsReceiptController = {
       }
 
       const where = { id }
-      if (store && userRole !== 'super_admin') where.store = store
+      Object.assign(where, await tenantStoreWhere(req))
 
       const receipt = await db.goodsReceipt.findOne({
         where,
@@ -1763,7 +1763,7 @@ const goodsReceiptController = {
       const userRole = req.user?.roleType
 
       const where = { id }
-      if (store && userRole !== 'super_admin') where.store = store
+      Object.assign(where, await tenantStoreWhere(req))
 
       const receipt = await db.goodsReceipt.findOne({
         where,
@@ -1905,7 +1905,7 @@ const goodsReceiptController = {
       }
 
       const where = { id }
-      if (store && userRole !== 'super_admin') where.store = store
+      Object.assign(where, await tenantStoreWhere(req))
 
       const receipt = await db.goodsReceipt.findOne({
         where,

@@ -2,7 +2,7 @@ const db = require('../../db/models')
 const { Op } = require('sequelize')
 const { createAudit } = require('../../utils/auditLog')
 const { enrichAuditFields } = require('../../utils/auditFields')
-const { resolveStoreId } = require('../../utils/tenantScope')
+const { resolveStoreId, tenantStoreWhere } = require('../../utils/tenantScope')
 const { recipeYield } = require('../service/itemCostService')
 const { isInventoryItemMode } = require('../service/inventoryLinkService')
 
@@ -117,7 +117,7 @@ const productionOrderController = {
       const userRole = req.user?.roleType
 
       const where = { id }
-      if (store && userRole !== 'super_admin') where.store = store
+      Object.assign(where, await tenantStoreWhere(req))
 
       const order = await db.productionOrder.findOne({
         where,
@@ -251,7 +251,7 @@ const productionOrderController = {
         req.body
 
       const where = { id }
-      if (store && userRole !== 'super_admin') where.store = store
+      Object.assign(where, await tenantStoreWhere(req))
 
       const order = await db.productionOrder.findOne({ where })
       if (!order) {
@@ -305,7 +305,7 @@ const productionOrderController = {
       const userRole = req.user?.roleType
 
       const where = { id }
-      if (store && userRole !== 'super_admin') where.store = store
+      Object.assign(where, await tenantStoreWhere(req))
 
       const order = await db.productionOrder.findOne({ where })
       if (!order) {
@@ -362,7 +362,7 @@ const productionOrderController = {
       }
 
       const where = { id }
-      if (store && userRole !== 'super_admin') where.store = store
+      Object.assign(where, await tenantStoreWhere(req))
 
       const order = await db.productionOrder.findOne({
         where,
@@ -472,7 +472,7 @@ const productionOrderController = {
       const userRole = req.user?.roleType
 
       const where = { id }
-      if (store && userRole !== 'super_admin') where.store = store
+      Object.assign(where, await tenantStoreWhere(req))
 
       const order = await db.productionOrder.findOne({
         where,
@@ -678,7 +678,7 @@ const productionOrderController = {
       const userRole = req.user?.roleType
 
       const where = { id }
-      if (store && userRole !== 'super_admin') where.store = store
+      Object.assign(where, await tenantStoreWhere(req))
 
       const order = await db.productionOrder.findOne({
         where,
