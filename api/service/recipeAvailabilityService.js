@@ -3,6 +3,7 @@
 const db = require('../../db/models')
 const { recipeYield } = require('./itemCostService')
 const { resolveBomIngredientRequirements } = require('./stockMutationService')
+const { applyStoreInventoryModes } = require('./recipeModeService')
 
 // BRD Harga Modal/HPP/BOM/Stok BR-05/FR-09: a recipe product (inventoryMode
 // not 'stocked') has no stock of its own. The portions it can make at an
@@ -55,6 +56,9 @@ async function recipeAvailability(store, { productIds = null, transaction } = {}
     ],
     transaction
   })
+  // PGA-17: a 'stocked' product with an active recipe at this outlet sells by
+  // recipe here, so its portions count too (unless it is produced).
+  await applyStoreInventoryModes(boms.map((b) => b.productData), store, transaction)
   const recipeBoms = boms.filter((b) => (b.productData.inventoryMode || 'stocked') !== 'stocked')
   const ingredientIds = [...new Set(recipeBoms.flatMap((b) => b.lines.map((l) => l.ingredientId)))]
   const rows = ingredientIds.length

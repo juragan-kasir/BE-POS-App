@@ -108,4 +108,100 @@ const backfillRecipeMode = async ({ apply = false, productIds: only } = {}) => {
   return { applied: apply, switched, skipped }
 }
 
-module.exports = { recipeModeDecision, adoptRecipeMode, backfillRecipeMode }
+// PGA-17 (owner decision 2026-11-07: mode per outlet). inventoryMode is a
+// product-wide setting while a recipe (bom_header) belongs to one outlet, so
+// a product sold at two outlets with a recipe at only one stayed 'stocked'
+// everywhere (adoptRecipeMode waits for every outlet) and was refused as
+// INSUFFICIENT_STOCK at both. While that is the case, the mode is decided per
+// outlet: the outlet with an active BOM (with lines) sells by recipe, the
+// others keep selling the finished-good stock. Produced products (a
+// non-cancelled production order) stay 'stocked', as in recipeModeDecision,
+// and so does a 'stocked' product whose every selling outlet has a recipe
+// (explicit choice). 'hybrid' and 'make_to_order' never change.
+
+// Ids (of `productIds`) that sell by recipe at `store` although stored as
+// 'stocked'. Pass only 'stocked' products.
+const storeRecipeProductIds = async (productIds, store, transaction) => {
+  const ids = [...new Set((productIds || []).map(Number).filter((id) => id > 0))]
+  const out = new Set()
+  if (!ids.length || store == null) return out
+  const boms = await db.bom_header.findAll({
+    where: { productId: ids, store: Number(store), status: 'active' },
+    attributes: ['productId'],
+    include: [{ model: db.bom_line, as: 'lines', attributes: ['id'], required: true }],
+    transaction
+  })
+  const withRecipe = [...new Set(boms.map((b) => Number(b.productId)))]
+  if (!withRecipe.length) return out
+  const produced = await db.productionOrder.findAll({
+    where: { productItemId: withRecipe, status: { [Op.ne]: 'cancelled' } },
+    attributes: ['productItemId'],
+    transaction
+  })
+  const producedIds = new Set(produced.map((p) => Number(p.productItemId)))
+  const candidates = withRecipe.filter((id) => !producedIds.has(id))
+  if (!candidates.length) return out
+
+  // Only the PGA-17 trap: some selling outlet still has no recipe, which is
+  // what keeps adoptRecipeMode from switching the product. When EVERY
+  // selling outlet has one and the product is still 'stocked', that is the
+  // owner's explicit choice (or pre-adoption data) and stays honoured: the
+  // F7 contract "a stocked product ignores its BOM" holds there.
+  const assigned = await db.product_store.findAll({
+    where: { product: candidates },
+    attributes: ['product', 'store'],
+    transaction
+  })
+  const allBoms = await db.bom_header.findAll({
+    where: { productId: candidates, status: 'active' },
+    attributes: ['productId', 'store'],
+    include: [{ model: db.bom_line, as: 'lines', attributes: ['id'], required: true }],
+    transaction
+  })
+  let activeStores = null
+  for (const id of candidates) {
+    let selling = assigned.filter((r) => Number(r.product) === id).map((r) => Number(r.store))
+    if (!selling.length) {
+      activeStores = activeStores || (await db.location.findAll({ where: { status: 'active' }, attributes: ['id'], transaction })).map((l) => Number(l.id))
+      selling = activeStores
+    }
+    const withBom = new Set(allBoms.filter((b) => Number(b.productId) === id).map((b) => Number(b.store)))
+    if (selling.some((st) => !withBom.has(st))) out.add(id)
+  }
+  return out
+}
+
+const modeOf = (product) => product?.inventoryMode || 'stocked'
+
+// Sets the outlet's effective mode on loaded products IN MEMORY only
+// (dataValues for model instances, so a later save()/update() never writes
+// it). Returns the same array.
+const applyStoreInventoryModes = async (products, store, transaction) => {
+  const list = (products || []).filter(Boolean)
+  const stocked = list.filter((p) => modeOf(p) === 'stocked')
+  if (!stocked.length || store == null) return products
+  const recipeIds = await storeRecipeProductIds(stocked.map((p) => p.id), store, transaction)
+  for (const p of stocked) {
+    if (!recipeIds.has(Number(p.id))) continue
+    if (p.dataValues) p.dataValues.inventoryMode = 'make_to_order'
+    else p.inventoryMode = 'make_to_order'
+  }
+  return products
+}
+
+// Effective mode of one product at one outlet.
+const storeInventoryMode = async (product, store, transaction) => {
+  const mode = modeOf(product)
+  if (mode !== 'stocked' || !product || store == null) return mode
+  const ids = await storeRecipeProductIds([product.id], store, transaction)
+  return ids.has(Number(product.id)) ? 'make_to_order' : 'stocked'
+}
+
+module.exports = {
+  recipeModeDecision,
+  adoptRecipeMode,
+  backfillRecipeMode,
+  storeRecipeProductIds,
+  applyStoreInventoryModes,
+  storeInventoryMode
+}

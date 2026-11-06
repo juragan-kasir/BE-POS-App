@@ -198,6 +198,11 @@ describe('F7 — inventory modes', () => {
   test('stocked product WITH an active BOM: BOM is ignored entirely, only product stock deducted', async () => {
     const ing = await makeIngredient(storeA.id)
     const product = await makeProduct({ stock: 50, inventoryMode: 'stocked' })
+    // PGA-17 (2026-11-07): sold at storeA only, so every selling outlet has
+    // a recipe and 'stocked' is the owner's explicit choice — the BOM is
+    // ignored. (A product also sold where no recipe exists sells by recipe
+    // at the recipe outlet: pga17-recipe-mode-per-outlet.test.js.)
+    const assignment = await db.product_store.create({ product: product.id, store: storeA.id })
     await makeBom(storeA.id, product.id, [{ ingredientId: ing.id, qty: 5 }])
 
     const res = await createOrder(tokenA, {
@@ -211,6 +216,7 @@ describe('F7 — inventory modes', () => {
     expect(Number(afterProduct.stock)).toBe(48)
     const afterIng = await db.ingredient.findByPk(ing.id)
     expect(Number(afterIng.stock)).toBe(1000) // untouched
+    await assignment.destroy({ force: true })
   })
 
   test('make_to_order product: product stock NOT deducted, ingredients deducted', async () => {
@@ -1031,6 +1037,11 @@ describe('F7 — QR customer paid via trusted cashier transition (Phase 3.1)', (
   test('stocked: finished-good stock deducted, ingredient stock untouched (regression)', async () => {
     const ing = await makeIngredient(storeA.id, { stock: 100 })
     const product = await makeProduct({ stock: 50, inventoryMode: 'stocked' })
+    // PGA-17 (2026-11-07): sold at storeA only, so every selling outlet has
+    // a recipe and 'stocked' is the owner's explicit choice — the BOM is
+    // ignored. (A product also sold where no recipe exists sells by recipe
+    // at the recipe outlet: pga17-recipe-mode-per-outlet.test.js.)
+    const assignment = await db.product_store.create({ product: product.id, store: storeA.id })
     await makeBom(storeA.id, product.id, [{ ingredientId: ing.id, qty: 5 }])
 
     const { created, paid } = await createThenPaid({
@@ -1044,6 +1055,7 @@ describe('F7 — QR customer paid via trusted cashier transition (Phase 3.1)', (
     expect(paid.status).toBe(200)
     expect(Number((await db.product.findByPk(product.id)).stock)).toBe(47)
     expect(Number((await db.ingredient.findByPk(ing.id)).stock)).toBe(100) // BOM ignored
+    await assignment.destroy({ force: true })
   })
 
   test('bundle with a make_to_order BOM component: each component expanded & deducted per inventoryMode', async () => {
