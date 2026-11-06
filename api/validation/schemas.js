@@ -4,6 +4,35 @@ const { parseMinOrderQty } = require('../../utils/minOrderQty')
 const { isValidTimezone } = require('../../utils/businessDate')
 const { parsePhoneInput } = require('../../utils/memberIdentity')
 
+// Partial-update schemas must never invent values. Under zod 4, `.partial()`
+// keeps every `.default()` of the base schema, so an edit that omits a field
+// was parsed WITH that field's default and the controller wrote it: a partial
+// employee edit blanked fullName/phone/address and reset userType to 'user',
+// a partial member edit zeroed points, a status toggle reactivated rows.
+// partialUpdate makes every field optional AND drops its default, keeping the
+// base schema's unknown-key mode (passthrough / strict). Fields the caller
+// does not send stay undefined, and controllers keep the stored value.
+const stripDefault = (field) => {
+  let inner = field
+  let optionalOutside = false
+  if (inner instanceof z.ZodOptional && inner.unwrap() instanceof z.ZodDefault) {
+    inner = inner.unwrap()
+    optionalOutside = true
+  }
+  if (!(inner instanceof z.ZodDefault)) return null
+  const bare = inner.removeDefault()
+  return optionalOutside || !(bare instanceof z.ZodOptional) ? bare.optional() : bare
+}
+const partialUpdate = (schema) => {
+  const overrides = {}
+  for (const [key, field] of Object.entries(schema.shape)) {
+    const bare = stripDefault(field)
+    if (bare) overrides[key] = bare
+  }
+  return schema.partial().extend(overrides)
+}
+exports.partialUpdate = partialUpdate
+
 // D-05: member phone must be parseable to canonical E.164. Missing/empty/
 // whitespace-only values take the server-side guest path in the controller.
 // GUEST-* identifiers are server-generated only: never accepted on create;
@@ -252,7 +281,7 @@ exports.createCategorySchema = z.object({
   isActive: z.union([z.boolean(), z.string()]).optional()
 })
 
-exports.updateCategorySchema = exports.createCategorySchema.partial()
+exports.updateCategorySchema = partialUpdate(exports.createCategorySchema)
 
 // ===================== Order =====================
 const orderItemSchema = z
@@ -865,8 +894,7 @@ exports.createLocationSchema = z.object({
 // reason inventoryMode is — `.partial()` does not strip `.default()`, so an
 // omitted status on an edit parsed to 'active' and every partial edit silently
 // reactivated the store, defeating the lifecycle rules entirely.
-exports.updateLocationSchema = exports.createLocationSchema
-  .partial()
+exports.updateLocationSchema = partialUpdate(exports.createLocationSchema)
   .passthrough()
   .extend({ status: statusEnumBase.optional() })
 
@@ -1010,7 +1038,7 @@ exports.createSupplierSchema = z.object({
     .nullable()
 })
 
-exports.updateSupplierSchema = exports.createSupplierSchema.partial()
+exports.updateSupplierSchema = partialUpdate(exports.createSupplierSchema)
 
 // ===================== Supplier Category =====================
 exports.createSupplierCategorySchema = z.object({
@@ -1020,7 +1048,7 @@ exports.createSupplierCategorySchema = z.object({
 })
 
 exports.updateSupplierCategorySchema =
-  exports.createSupplierCategorySchema.partial()
+  partialUpdate(exports.createSupplierCategorySchema)
 
 // ===================== Ingredient =====================
 exports.createIngredientSchema = z.object({
@@ -1151,7 +1179,7 @@ exports.createEmployeeSchema = employeeBaseSchema.superRefine((d, ctx) => {
       })
   }
 })
-exports.updateUserSchema = userBaseSchema.partial().extend({
+exports.updateUserSchema = partialUpdate(userBaseSchema).extend({
   id: strToNum(),
   status: statusEnumBase.optional(),
   deletedDocuments: jsonField().optional().nullable()
@@ -1176,7 +1204,7 @@ exports.createDiscountSchema = z.object({
   description: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).nullable().optional()
 })
 
-exports.updateDiscountSchema = exports.createDiscountSchema.partial()
+exports.updateDiscountSchema = partialUpdate(exports.createDiscountSchema)
 
 // ===================== Purchase Order =====================
 const poItemSchema = z.object({
@@ -1276,7 +1304,7 @@ exports.createGoodsRequestSchema = z.object({
   notes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().default('')
 })
 
-exports.updateGoodsRequestSchema = exports.createGoodsRequestSchema.partial()
+exports.updateGoodsRequestSchema = partialUpdate(exports.createGoodsRequestSchema)
 
 // ===================== Reservation =====================
 exports.createReservationSchema = z.object({
@@ -1296,7 +1324,7 @@ exports.createReservationSchema = z.object({
     .default('pending')
 })
 
-exports.updateReservationSchema = exports.createReservationSchema.partial()
+exports.updateReservationSchema = partialUpdate(exports.createReservationSchema)
 
 // ===================== Table =====================
 exports.createTableSchema = z.object({
@@ -1310,7 +1338,7 @@ exports.createTableSchema = z.object({
   description: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().nullable()
 })
 
-exports.updateTableSchema = exports.createTableSchema.partial().extend({
+exports.updateTableSchema = partialUpdate(exports.createTableSchema).extend({
   id: strToNum()
 })
 
@@ -1336,7 +1364,7 @@ exports.createTaxConfigSchema = z.object({
   description: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().nullable()
 })
 
-exports.updateTaxConfigSchema = exports.createTaxConfigSchema.partial().extend({
+exports.updateTaxConfigSchema = partialUpdate(exports.createTaxConfigSchema).extend({
   // P1: `.partial()` does NOT strip the create-schema `.default()`s, so the
   // bare (defaultless) versions are restored here — same convention as
   // updateProductSchema/inventoryModeEnumBase above. Otherwise an omitted
@@ -1383,7 +1411,7 @@ exports.createExpenseSchema = z
 // undefined, so the controller's existing fallback correctly preserves
 // the expense's current status. createExpenseSchema itself is untouched —
 // create still defaults a missing status to 'pending'.
-exports.updateExpenseSchema = exports.createExpenseSchema.partial().extend({
+exports.updateExpenseSchema = partialUpdate(exports.createExpenseSchema).extend({
   status: z.enum(['draft', 'pending', 'approved', 'rejected']).optional()
 })
 
@@ -1459,7 +1487,7 @@ exports.createMemberSchema = z.object({
   status: z.string().optional().default('active')
 })
 
-exports.updateMemberSchema = exports.createMemberSchema.partial().extend({
+exports.updateMemberSchema = partialUpdate(exports.createMemberSchema).extend({
   phoneNumber: memberPhoneNumber({ allowGuest: true })
 })
 
@@ -1500,7 +1528,7 @@ exports.createGoodsReceiptSchema = z.object({
     .default('completed')
 })
 
-exports.updateGoodsReceiptSchema = exports.createGoodsReceiptSchema.partial().extend({
+exports.updateGoodsReceiptSchema = partialUpdate(exports.createGoodsReceiptSchema).extend({
   // F22-B9-01 (same trap as updateExpenseSchema): .partial() alone keeps
   // the base schema's `.default('completed')` on `status`, so an update
   // body without `status` had 'completed' silently injected — every
@@ -1524,7 +1552,7 @@ exports.createProductionOrderSchema = z.object({
 })
 
 exports.updateProductionOrderSchema =
-  exports.createProductionOrderSchema.partial()
+  partialUpdate(exports.createProductionOrderSchema)
 
 // ===================== Stock Opname =====================
 exports.createStockOpnameSchema = z.object({
@@ -1536,7 +1564,7 @@ exports.createStockOpnameSchema = z.object({
   items: z.array(z.record(z.any())).optional().default([])
 })
 
-exports.updateStockOpnameSchema = exports.createStockOpnameSchema.partial()
+exports.updateStockOpnameSchema = partialUpdate(exports.createStockOpnameSchema)
 
 // ===================== Shift =====================
 const { SHIFT_TYPES } = require('../../utils/shiftConstants')
@@ -1556,7 +1584,7 @@ exports.createShiftSchema = z.object({
   status: statusEnum
 })
 
-exports.updateShiftSchema = exports.createShiftSchema.partial().extend({
+exports.updateShiftSchema = partialUpdate(exports.createShiftSchema).extend({
   id: strToNum()
 })
 
@@ -1568,8 +1596,7 @@ exports.createDepartmentSchema = z.object({
   status: statusEnum
 })
 
-exports.updateDepartmentSchema = exports.createDepartmentSchema
-  .partial()
+exports.updateDepartmentSchema = partialUpdate(exports.createDepartmentSchema)
   .extend({
     id: strToNum()
   })
@@ -1584,8 +1611,7 @@ exports.createShiftTemplateSchema = z.object({
   status: statusEnum
 })
 
-exports.updateShiftTemplateSchema = exports.createShiftTemplateSchema
-  .partial()
+exports.updateShiftTemplateSchema = partialUpdate(exports.createShiftTemplateSchema)
   .extend({
     id: strToNum()
   })
@@ -1598,7 +1624,7 @@ exports.createPositionSchema = z.object({
   status: statusEnum
 })
 
-exports.updatePositionSchema = exports.createPositionSchema.partial().extend({
+exports.updatePositionSchema = partialUpdate(exports.createPositionSchema).extend({
   id: strToNum()
 })
 
@@ -1769,7 +1795,7 @@ exports.createTypePaymentSchema = z.object({
       return v.map(Number)
     })
 })
-exports.updateTypePaymentSchema = exports.createTypePaymentSchema.partial()
+exports.updateTypePaymentSchema = partialUpdate(exports.createTypePaymentSchema)
 
 // ===================== Expense Category =====================
 exports.createExpenseCategorySchema = z.object({
@@ -1780,7 +1806,7 @@ exports.createExpenseCategorySchema = z.object({
   status: statusEnum
 })
 exports.updateExpenseCategorySchema =
-  exports.createExpenseCategorySchema.partial()
+  partialUpdate(exports.createExpenseCategorySchema)
 
 // ===================== Ingredient Category =====================
 exports.createIngredientCategorySchema = z.object({
@@ -1789,7 +1815,7 @@ exports.createIngredientCategorySchema = z.object({
   status: z.enum(['active', 'inactive', 'draft']).optional().default('active')
 })
 exports.updateIngredientCategorySchema =
-  exports.createIngredientCategorySchema.partial()
+  partialUpdate(exports.createIngredientCategorySchema)
 
 // ===================== Member Tier =====================
 // Benefits historically arrived as a newline-joined string from the FE
@@ -1830,7 +1856,7 @@ exports.createMemberTierSchema = z.object({
   color: z.string().max(FIELD_MAX.HEX_COLOR, tooLong(FIELD_MAX.HEX_COLOR)).optional().default(''),
   status: statusEnum
 })
-exports.updateMemberTierSchema = exports.createMemberTierSchema.partial()
+exports.updateMemberTierSchema = partialUpdate(exports.createMemberTierSchema)
 
 // ===================== Role =====================
 // R-07 / DR-12 §35.4: accessMenu is a presentation list (never the security
@@ -1890,7 +1916,7 @@ exports.createPurchasePaymentSchema = z.object({
   idempotencyKey: z.string().max(255).optional().nullable()
 })
 exports.updatePurchasePaymentSchema =
-  exports.createPurchasePaymentSchema.partial()
+  partialUpdate(exports.createPurchasePaymentSchema)
 
 // ===================== Purchase Return =====================
 exports.createPurchaseReturnSchema = z.object({
@@ -1907,7 +1933,7 @@ exports.createPurchaseReturnSchema = z.object({
   notes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().nullable()
 })
 exports.updatePurchaseReturnSchema =
-  exports.createPurchaseReturnSchema.partial()
+  partialUpdate(exports.createPurchaseReturnSchema)
 
 // ===================== Split Bill =====================
 exports.createSplitBillSchema = z.object({
@@ -1936,7 +1962,7 @@ exports.createCurrencySchema = z.object({
     .optional()
     .default(false)
 })
-exports.updateCurrencySchema = exports.createCurrencySchema.partial()
+exports.updateCurrencySchema = partialUpdate(exports.createCurrencySchema)
 
 // ===================== Social Media =====================
 exports.createSocialMediaSchema = z.object({
@@ -1951,7 +1977,7 @@ exports.createSocialMediaSchema = z.object({
     .optional()
     .default(true)
 })
-exports.updateSocialMediaSchema = exports.createSocialMediaSchema.partial()
+exports.updateSocialMediaSchema = partialUpdate(exports.createSocialMediaSchema)
 
 // ===================== FAQ =====================
 exports.createFaqSchema = z.object({
@@ -1967,7 +1993,7 @@ exports.createFaqSchema = z.object({
     .optional()
     .default(true)
 })
-exports.updateFaqSchema = exports.createFaqSchema.partial()
+exports.updateFaqSchema = partialUpdate(exports.createFaqSchema)
 
 // ===================== Notification =====================
 exports.createNotificationSchema = z.object({
@@ -1990,7 +2016,7 @@ exports.createAccountsReceivableSchema = z.object({
   notes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().default('')
 })
 exports.updateAccountsReceivableSchema =
-  exports.createAccountsReceivableSchema.partial()
+  partialUpdate(exports.createAccountsReceivableSchema)
 
 // ===================== Invoice =====================
 exports.createInvoiceSchema = z.object({
@@ -1998,7 +2024,7 @@ exports.createInvoiceSchema = z.object({
   customerName: z.string().optional().default(''),
   notes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().default('')
 })
-exports.updateInvoiceSchema = exports.createInvoiceSchema.partial()
+exports.updateInvoiceSchema = partialUpdate(exports.createInvoiceSchema)
 
 // ===================== Invoice Setting =====================
 exports.updateInvoiceSettingSchema = z.object({
@@ -2097,7 +2123,7 @@ exports.createDriverSchema = z.object({
   status: statusEnum,
   notes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().nullable()
 })
-exports.updateDriverSchema = exports.createDriverSchema.partial()
+exports.updateDriverSchema = partialUpdate(exports.createDriverSchema)
 
 exports.createDeliveryOrderSchema = z.object({
   order: optionalStrToNum(),
