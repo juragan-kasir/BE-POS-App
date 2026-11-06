@@ -4,6 +4,7 @@ const { Op } = require('sequelize')
 const db = require('../../db/models')
 const { createAudit } = require('../../utils/auditLog')
 const { createNotification } = require('../../utils/createNotification')
+const { storesInCallerTenant, tenantStoreWhere } = require('../../utils/tenantScope')
 
 const Overtime = db.overtime
 const User = db.user
@@ -108,11 +109,14 @@ const timesOverlap = (aStart, aEnd, bStart, bEnd) => {
   return Math.max(wa1, wb1) < Math.min(wa2, wb2)
 }
 
-const getWhere = (req) => {
+const getWhere = async (req) => {
   const where = {}
   const { store } = req.query
   if (req.user?.roleType === 'super_admin') {
+    // Wave 4: without ?store a store-bound owner sees its tenant's outlets,
+    // never every tenant's (a global super admin still sees all).
     if (store) where.store = Number(store)
+    else Object.assign(where, await tenantStoreWhere(req))
   } else {
     where.store = req.user?.store ? Number(req.user.store) : req.storeId
   }
@@ -145,7 +149,7 @@ exports.getOvertimes = async (req, res, next) => {
     const page = parseInt(req.query.page) || 1
     const pageSize = parseInt(req.query.pageSize) || 10
     const offset = (page - 1) * pageSize
-    const where = getWhere(req)
+    const where = await getWhere(req)
 
     const [rows, count] = await Promise.all([
       Overtime.findAll({
@@ -377,6 +381,13 @@ exports.updateOvertimeStatus = async (req, res, next) => {
         message: 'Anda hanya dapat menyetujui lembur di toko Anda'
       })
     }
+    // Wave 4: resolveStoreId hands a super_admin the record's own store, so
+    // the check above always passed for a store-bound owner. Confine it to
+    // its tenant (a global super admin stays unrestricted).
+    if (!(await storesInCallerTenant(req, [ot.store]))) {
+      await t.rollback()
+      return res.status(404).json({ success: false, message: 'Pengajuan lembur tidak ditemukan' })
+    }
     // Aturan bisnis: data yang sudah di-post tidak boleh diubah
     if (ot.accounting_status === 'posted') {
       await t.rollback()
@@ -455,6 +466,13 @@ exports.cancelOvertime = async (req, res, next) => {
     if (scopeStore && Number(ot.store) !== Number(scopeStore)) {
       await t.rollback()
       return res.status(403).json({ success: false, message: 'Anda hanya dapat membatalkan lembur di toko Anda' })
+    }
+    // Wave 4: resolveStoreId hands a super_admin the record's own store, so
+    // the check above always passed for a store-bound owner. Confine it to
+    // its tenant (a global super admin stays unrestricted).
+    if (!(await storesInCallerTenant(req, [ot.store]))) {
+      await t.rollback()
+      return res.status(404).json({ success: false, message: 'Pengajuan lembur tidak ditemukan' })
     }
 
     const history = Array.isArray(ot.status_history) ? ot.status_history : []

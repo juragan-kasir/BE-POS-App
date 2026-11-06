@@ -2,7 +2,7 @@ const db = require('../../db/models')
 const { Op } = require('sequelize')
 const { enrichAuditFields } = require('../../utils/auditFields')
 const { emitToStore } = require('../service/socket')
-const { scalarStoreScope, nullableArrayStoreScope } = require('../../utils/tenantScope')
+const { scalarStoreScope, nullableArrayStoreScope, tenantArrayStoreWhere } = require('../../utils/tenantScope')
 const { authorizedStoreIds } = require('../../utils/storeValidation')
 
 const generateDeliveryNumber = () => {
@@ -307,7 +307,7 @@ const deliveryController = {
       // is a JSONB array with the same null/[]-is-global convention as
       // supplier.store (verified via getDrivers' own list query below).
       const driver = await db.driver.findOne({
-        where: nullableArrayStoreScope(req, { id: driverId })
+        where: await tenantArrayStoreWhere(req, { id: driverId }, { includeShared: true })
       })
       if (!driver) {
         return res
@@ -531,7 +531,7 @@ const deliveryController = {
       // IDOR fix: was findByPk(id) with no store filter, reachable by any
       // authenticated role (no requireRole on this route).
       const driver = await db.driver.findOne({
-        where: nullableArrayStoreScope(req, { id })
+        where: await tenantArrayStoreWhere(req, { id }, { includeShared: true })
       })
       if (!driver) {
         return res
@@ -639,7 +639,7 @@ const deliveryController = {
 
       // Same IDOR fix as getDriverById.
       const driver = await db.driver.findOne({
-        where: nullableArrayStoreScope(req, { id })
+        where: await tenantArrayStoreWhere(req, { id }, { includeShared: true })
       })
       if (!driver) {
         return res
@@ -698,7 +698,7 @@ const deliveryController = {
 
       // Same IDOR fix as getDriverById.
       const driver = await db.driver.findOne({
-        where: nullableArrayStoreScope(req, { id })
+        where: await tenantArrayStoreWhere(req, { id }, { includeShared: true })
       })
       if (!driver) {
         return res
@@ -740,7 +740,7 @@ const deliveryController = {
 
       // Same IDOR fix as getDriverById.
       const driver = await db.driver.findOne({
-        where: nullableArrayStoreScope(req, { id })
+        where: await tenantArrayStoreWhere(req, { id }, { includeShared: true })
       })
       if (!driver) {
         return res

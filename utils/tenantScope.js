@@ -357,7 +357,29 @@ function nullableArrayStoresWhere(storeIds) {
   }
 }
 
+// Wave 4 by-id sweep: arrayStoreScope / nullableArrayStoreScope leave every
+// super_admin unconfined, which let a store-bound owner reach another
+// tenant's queue entries, bundles and drivers. This async variant confines
+// a store-bound super_admin to its tenant's outlets (scalar or JSONB-array
+// `store`), keeps a global caller unrestricted and behaves exactly like the
+// sync helpers for everyone else. It is deliberately a separate function:
+// promo.js relies on the sync helper's super_admin pass-through and applies
+// its own tenant filter (promoTenantWhere).
+async function tenantArrayStoreWhere(req, where = {}, { includeShared = false } = {}) {
+  if (req?.authContext) return canonicalTenantFilter(req, where)
+  if (!isSuperAdmin(req)) {
+    return includeShared ? nullableArrayStoreScope(req, where) : arrayStoreScope(req, where)
+  }
+  const ids = await callerStoreIds(req)
+  if (ids === null) return { ...where }
+  const ors = ids.flatMap((id) => [{ store: id }, { store: { [Op.contains]: [id] } }])
+  if (includeShared) ors.push({ store: null }, { store: { [Op.eq]: [] } })
+  if (ors.length === 0) ors.push({ store: { [Op.contains]: [-1] } })
+  return { ...where, [Op.and]: [...(where[Op.and] || []), { [Op.or]: ors }] }
+}
+
 module.exports = {
+  tenantArrayStoreWhere,
   callerStoreIds,
   storeIdsCondition,
   tenantStoreWhere,

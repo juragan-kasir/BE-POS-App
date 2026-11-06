@@ -2,7 +2,7 @@ const db = require('../../db/models')
 const { Op } = require('sequelize')
 const { createAudit } = require('../../utils/auditLog')
 const { uploadToCloudinaryWithDedup } = require('../../utils/cloudinaryStorage')
-const { arrayStoreScope } = require('../../utils/tenantScope')
+const { tenantArrayStoreWhere } = require('../../utils/tenantScope')
 
 // ponytail: FE bisa kirim JSON langsung atau FormData (image + data JSON) —
 // sama seperti pola location add/edit
@@ -265,7 +265,7 @@ const bundleController = {
       // IDOR fix: was findByPk(id) with no store filter, leaking another
       // store's bundle pricing/composition.
       const bundle = await db.product_bundle.findOne({
-        where: arrayStoreScope(req, { id }),
+        where: await tenantArrayStoreWhere(req, { id }),
         include: [
           {
             model: db.product_bundle_item,
@@ -437,7 +437,7 @@ const bundleController = {
       const { id } = req.params
       // Same IDOR fix as getById.
       const bundle = await db.product_bundle.findOne({
-        where: arrayStoreScope(req, { id }),
+        where: await tenantArrayStoreWhere(req, { id }),
         include: [{ model: db.product_bundle_item, as: 'items' }]
       })
 
@@ -575,7 +575,7 @@ const bundleController = {
       const { id } = req.params
       // Same IDOR fix as getById.
       const bundle = await db.product_bundle.findOne({
-        where: arrayStoreScope(req, { id })
+        where: await tenantArrayStoreWhere(req, { id })
       })
 
       if (!bundle) {
@@ -611,7 +611,7 @@ const bundleController = {
 
       // Same IDOR fix as getById.
       const bundle = await db.product_bundle.findOne({
-        where: arrayStoreScope(req, { id })
+        where: await tenantArrayStoreWhere(req, { id })
       })
       if (!bundle) {
         return res.status(404).json({ message: 'Bundle tidak ditemukan' })
