@@ -5,7 +5,7 @@ const Table = db.table
 const Location = db.location
 const { createAudit } = require('../../utils/auditLog')
 const { enrichAuditFields } = require('../../utils/auditFields')
-const { scalarStoreScope } = require('../../utils/tenantScope')
+const { scalarStoreScope, tenantStoreWhere } = require('../../utils/tenantScope')
 
 exports.getAll = async (req, res) => {
   const store = req.query.store ||
@@ -16,7 +16,10 @@ exports.getAll = async (req, res) => {
 
   try {
     const where = {}
+    // Wave 4: without ?store a store-bound owner sees its tenant's outlets
+    // only (a global super admin still sees all).
     if (store) where.store = store
+    else Object.assign(where, await tenantStoreWhere(req))
     if (date) where.reservationDate = date
     if (status && status !== 'all') where.status = status
     if (search) {
@@ -74,8 +77,10 @@ exports.getById = async (req, res) => {
       (req.user?.roleType !== 'super_admin' ? req.user?.store : null)
 
   try {
+    // Wave 4: the caller's tenant scope always applies — a super_admin used
+    // to read any tenant's reservation by id.
     const reservation = await Reservation.findOne({
-      where: { id, ...(store ? { store } : {}) }
+      where: await tenantStoreWhere(req, { id, ...(store ? { store } : {}) })
     })
     if (!reservation) {
       return res

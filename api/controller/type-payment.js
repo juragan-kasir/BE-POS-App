@@ -4,6 +4,7 @@ const ExcelJS = require('exceljs')
 const TypePayment = db.type_payment
 const { createAudit } = require('../../utils/auditLog')
 const { scalarStoreScope } = require('../../utils/tenantScope')
+const { visibleWhere, canWrite } = require('../../utils/ownedOrSharedScope')
 const { authorizedStoreIds } = require('../../utils/storeValidation')
 
 // Resolves the store payload sent by the FE (single id, JSON string array, or 'all')
@@ -160,14 +161,11 @@ exports.getTypePaymentById = async (req, res) => {
     // everyone (a plain scalarStoreScope would incorrectly hide those from
     // non-super-admin), a type_payment with a real store is only visible
     // to that store's users.
-    const isSuperAdmin = req.user?.roleType === 'super_admin'
+    // Wave 4: the same rule for every role via ownedOrSharedScope — own
+    // outlets' entries plus the shared (store null) ones. A store-bound
+    // owner used to read any tenant's entry; a global caller still reads all.
     const typePayment = await TypePayment.findOne({
-      where: isSuperAdmin
-        ? { id: req.params.id }
-        : {
-            id: req.params.id,
-            [Op.or]: [{ store: null }, { store: req.user?.store }]
-          }
+      where: await visibleWhere(req, { id: req.params.id })
     })
 
     if (!typePayment) {
@@ -286,11 +284,22 @@ exports.editTypePaymentById = async (req, res) => {
     stores = authz.stores
   }
   try {
-    const existing = await TypePayment.findByPk(req.params.id)
+    const existing = await TypePayment.findOne({
+      where: await visibleWhere(req, { id: req.params.id })
+    })
     if (!existing) {
       return res.status(404).json({
         success: false,
         message: 'TypePayment not found'
+      })
+    }
+    // Wave 4: a store-bound owner may change only its own tenant's entries;
+    // a shared (store null) entry is used by every tenant, so only a global
+    // super admin may change it (tenant admins were already refused below).
+    if (req.user?.roleType === 'super_admin' && !(await canWrite(req, existing))) {
+      return res.status(403).json({
+        success: false,
+        message: 'Anda tidak memiliki akses untuk mengedit metode pembayaran ini'
       })
     }
     if (existing?.isSystem) {

@@ -1,6 +1,7 @@
 const { Op } = require('sequelize')
 const db = require('../../db/models')
 const { scalarStoreScope, isSuperAdmin } = require('../../utils/tenantScope')
+const { visibleWhere } = require('../../utils/ownedOrSharedScope')
 const Notification = db.notification
 
 // E2E audit (2026-10-31): only `admin` and `user` were filtered by store, so a
@@ -95,17 +96,9 @@ exports.markAsRead = async (req, res) => {
     // null-store notifications stay readable/markable by everyone, not
     // just super_admin. Only a notification actually scoped to a
     // DIFFERENT store is excluded.
-    const isSuperAdmin = req.user?.roleType === 'super_admin'
-    const userStore = Number(req.user?.store)
-    const where = isSuperAdmin
-      ? { id }
-      : {
-          id,
-          [Op.or]: [
-            { store: Number.isFinite(userStore) ? userStore : -1 },
-            { store: null }
-          ]
-        }
+    // Wave 4: own outlets' notifications + shared (store null) ones, for
+    // every role — a store-bound owner used to mark any tenant's read.
+    const where = await visibleWhere(req, { id })
 
     const notification = await Notification.findOne({ where })
     if (!notification) {

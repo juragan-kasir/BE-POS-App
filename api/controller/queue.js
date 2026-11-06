@@ -2,7 +2,7 @@ const db = require('../../db/models')
 const { Op } = require('sequelize')
 const { enrichAuditFields } = require('../../utils/auditFields')
 const { emitToStore } = require('../service/socket')
-const { arrayStoreScope } = require('../../utils/tenantScope')
+const { tenantArrayStoreWhere } = require('../../utils/tenantScope')
 
 const generateQueueNumber = () => {
   const date = new Date()
@@ -103,7 +103,7 @@ const queueController = {
       // Same IDOR fix as updateQueue: was findByPk(id) with no ownership
       // check, leaking another store's queue/customer data on a guessed id.
       const queue = await db.queue.findOne({
-        where: arrayStoreScope(req, { id }),
+        where: await tenantArrayStoreWhere(req, { id }),
         include: [
           {
             model: db.table,
@@ -200,7 +200,7 @@ const queueController = {
       // with no ownership check, so any authenticated store could update
       // another store's queue entry.
       const queue = await db.queue.findOne({
-        where: arrayStoreScope(req, { id })
+        where: await tenantArrayStoreWhere(req, { id })
       })
       if (!queue) {
         return res
@@ -247,7 +247,7 @@ const queueController = {
 
       // Same IDOR fix as updateQueue.
       const queue = await db.queue.findOne({
-        where: arrayStoreScope(req, { id })
+        where: await tenantArrayStoreWhere(req, { id })
       })
       if (!queue) {
         return res
@@ -308,7 +308,7 @@ const queueController = {
 
       // Same IDOR fix as updateQueue.
       const queue = await db.queue.findOne({
-        where: arrayStoreScope(req, { id })
+        where: await tenantArrayStoreWhere(req, { id })
       })
       if (!queue) {
         return res

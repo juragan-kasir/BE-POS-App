@@ -397,33 +397,11 @@ const containsVictim = (body, model, id) => {
   return typeof data === 'object' && Number(data.id) === Number(id)
 }
 
-// Leaks found by the first run of this sweep (2026-11-05). Each fix PR
-// removes its entries; the test fails on any leak NOT listed here and on
-// any listed entry that no longer leaks, so the list can only shrink.
+// Leaks found by the first run of this sweep (2026-11-05): 52 hits on 43
+// routes, closed by #318–#324. The list is now empty, so any cross-tenant
+// read or write on a by-id route fails this test. Never add an entry to make
+// a new leak pass — fix the route.
 const KNOWN_LEAKS = new Set([
-  // delivery
-  'delete /delivery/drivers/:id owner',
-  'get /delivery/drivers/:id owner',
-  'put /delivery/drivers/:id owner',
-  'put /delivery/drivers/:id/status owner',
-  // product-bundle
-  'delete /product-bundle/delete/:id owner',
-  'get /product-bundle/get-by-id/:id owner',
-  'patch /product-bundle/status/:id owner',
-  'put /product-bundle/update/:id owner',
-  // queue
-  'delete /queue/:id owner',
-  'get /queue/:id owner',
-  'put /queue/:id owner',
-  // reservation
-  'get /reservation/:id owner',
-  // type-payment
-  'get /type-payment/get-by-id/:id owner',
-  'put /type-payment/edit-type-payment/:id owner',
-  // notification
-  'put /notification/:id/read owner',
-  // overtime
-  'put /overtime/cancel/:id owner'
 ])
 
 const results = []
