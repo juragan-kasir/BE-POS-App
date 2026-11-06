@@ -110,11 +110,16 @@ Object.keys(db).forEach((modelName) => {
   if (typeof model !== 'function' || !model.rawAttributes) return
   const rawAttrs = model.rawAttributes
   if (!rawAttrs.createdBy && !rawAttrs.modifiedBy) return
-  model.addHook('afterFind', async (result) => {
+  // PGA-05: the user lookup runs on the find's own transaction. It used to
+  // run outside it, so every find inside a transaction (FOR UPDATE locks
+  // included) took a SECOND pool connection; under concurrent sales the
+  // transactions held all 20 connections while waiting for that second one,
+  // and requests failed after the 30 s acquire timeout (HTTP 500).
+  model.addHook('afterFind', async (result, options) => {
     try {
       if (!result) return
       const records = Array.isArray(result) ? result : [result]
-      await enrichAuditFields(db, records)
+      await enrichAuditFields(db, records, { transaction: options?.transaction })
     } catch (e) {
       console.error(`afterFind hook error for ${model.name}:`, e.message)
     }

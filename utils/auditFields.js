@@ -2,7 +2,7 @@ const { Op } = require('sequelize')
 
 const USER_ATTRS = ['id', 'userName', 'fullName']
 
-async function enrichAuditFields(db, records) {
+async function enrichAuditFields(db, records, { transaction } = {}) {
   if (!records || !Array.isArray(records)) return
 
   const idSet = new Set()
@@ -31,7 +31,8 @@ async function enrichAuditFields(db, records) {
     const users = await db.user.findAll({
       where: { id: { [Op.in]: [...idSet] } },
       attributes: USER_ATTRS,
-      paranoid: false
+      paranoid: false,
+      transaction
     })
     users.forEach((u) => {
       usersById.set(String(u.id), {
@@ -46,7 +47,8 @@ async function enrichAuditFields(db, records) {
     const users = await db.user.findAll({
       where: { userName: { [Op.in]: [...userNameSet] } },
       attributes: USER_ATTRS,
-      paranoid: false
+      paranoid: false,
+      transaction
     })
     users.forEach((u) => {
       usersByUserName.set(String(u.userName), {
