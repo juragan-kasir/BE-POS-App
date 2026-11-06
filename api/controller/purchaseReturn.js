@@ -1,4 +1,5 @@
 const db = require('../../db/models')
+const { tenantStoreWhere, storesInCallerTenant } = require('../../utils/tenantScope')
 const { Op } = require('sequelize')
 const { createAudit } = require('../../utils/auditLog')
 const { adjustProductStock } = require('../service/stockMutationService')
@@ -222,7 +223,7 @@ const purchaseReturnController = {
       }
 
       const where = { id }
-      if (store && userRole !== 'super_admin') where.store = store
+      Object.assign(where, await tenantStoreWhere(req))
 
       const ret = await db.purchase_return.findOne({
         where,
@@ -331,7 +332,7 @@ const purchaseReturnController = {
       }
 
       const where = { id }
-      if (store && userRole !== 'super_admin') where.store = store
+      Object.assign(where, await tenantStoreWhere(req))
 
       // Batch 32-A (PR-02): approval must be atomic. The status used to be
       // read unlocked and flipped before any financial work, so two
@@ -588,7 +589,7 @@ const purchaseReturnController = {
       }
 
       const where = { id }
-      if (store && userRole !== 'super_admin') where.store = store
+      Object.assign(where, await tenantStoreWhere(req))
 
       // Batch 32-A (PR-03): rejection must be atomic like approval. The
       // return used to be read unlocked and its status checked before any
@@ -766,7 +767,7 @@ const purchaseReturnController = {
         })
       }
       const where = { purchaseOrder: poId }
-      if (store && userRole !== 'super_admin') where.store = store
+      Object.assign(where, await tenantStoreWhere(req))
 
       const returns = await db.purchase_return.findAll({
         where,
@@ -879,6 +880,14 @@ const purchaseReturnController = {
       // The return is always written against the caller's own tenant. A
       // non-super admin may only return from a purchase order that belongs
       // to their own store.
+      // Wave 4: a store-bound owner may only return from its own tenant's PO
+      // (a global super admin keeps unrestricted access).
+      if (req.user?.roleType === 'super_admin' && !(await storesInCallerTenant(req, [po.store]))) {
+        return res.status(403).json({
+          success: false,
+          message: 'Anda hanya dapat mengelola retur di toko Anda'
+        })
+      }
       if (req.user?.roleType !== 'super_admin') {
         if (!store || Number(po.store) !== Number(store)) {
           return res.status(403).json({

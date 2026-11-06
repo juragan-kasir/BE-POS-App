@@ -1,7 +1,7 @@
 const db = require('../../db/models')
 const { Op } = require('sequelize')
 const { createAudit } = require('../../utils/auditLog')
-const { scalarStoreScope } = require('../../utils/tenantScope')
+const { scalarStoreScope, tenantStoreWhere } = require('../../utils/tenantScope')
 const { assertIntegerRupiah } = require('../../utils/moneyGuard')
 const {
   getDaysUntilDue,
@@ -59,7 +59,7 @@ const purchasePaymentController = {
       const userRole = req.user?.roleType
 
       const where = { purchaseOrder: poId }
-      if (store && userRole !== 'super_admin') where.store = store
+      Object.assign(where, await tenantStoreWhere(req))
 
       const payments = await db.purchase_payment.findAll({
         where,
@@ -114,7 +114,7 @@ const purchasePaymentController = {
         id: { [Op.in]: poIds },
         status: { [Op.notIn]: ['cancelled', 'draft'] }
       }
-      if (store && userRole !== 'super_admin') poWhere.store = store
+      Object.assign(poWhere, await tenantStoreWhere(req))
 
       const purchaseOrders = await db.purchase_order.findAll({
         where: poWhere,
@@ -443,7 +443,7 @@ const purchasePaymentController = {
       const userRole = req.user?.roleType
 
       const poWhere = { status: { [Op.notIn]: ['cancelled', 'draft'] } }
-      if (store && userRole !== 'super_admin') poWhere.store = store
+      Object.assign(poWhere, await tenantStoreWhere(req))
 
       const purchaseOrders = await db.purchase_order.findAll({
         where: poWhere,
