@@ -401,9 +401,6 @@ const containsVictim = (body, model, id) => {
 // removes its entries; the test fails on any leak NOT listed here and on
 // any listed entry that no longer leaks, so the list can only shrink.
 const KNOWN_LEAKS = new Set([
-  // accounts-receivable
-  'delete /accounts-receivable/:id owner',
-  'get /accounts-receivable/:id owner',
   // delivery
   'delete /delivery/drivers/:id owner',
   'get /delivery/drivers/:id owner',
@@ -418,12 +415,6 @@ const KNOWN_LEAKS = new Set([
   'delete /queue/:id owner',
   'get /queue/:id owner',
   'put /queue/:id owner',
-  // purchase-payment
-  'get /purchase-payment/by-po/:poId owner',
-  // purchase-return
-  'get /purchase-return/get-by-id/:id owner',
-  'patch /purchase-return/approve/:id owner',
-  'patch /purchase-return/reject/:id owner',
   // reservation
   'get /reservation/:id owner',
   // type-payment

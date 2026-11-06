@@ -1,4 +1,5 @@
 const db = require('../../db/models')
+const { tenantStoreWhere } = require('../../utils/tenantScope')
 const { Op } = require('sequelize')
 const { createAudit } = require('../../utils/auditLog')
 const { assertIntegerRupiah } = require('../../utils/moneyGuard')
@@ -17,7 +18,7 @@ const accountsReceivableController = {
       } = req.query
 
       const where = {}
-      if (req.storeId && userRole !== 'super_admin') where.store = req.storeId
+      Object.assign(where, await tenantStoreWhere(req))
       if (status) where.status = status
       if (customerId) where.customerId = customerId
       if (startDate || endDate) {
@@ -92,9 +93,7 @@ const accountsReceivableController = {
     try {
       const { id } = req.params
       const where = { id }
-      if (req.storeId && req.user?.roleType !== 'super_admin') {
-        where.store = req.storeId
-      }
+      Object.assign(where, await tenantStoreWhere(req))
       const ar = await db.accounts_receivable.findOne({
         where,
         include: [
@@ -161,9 +160,7 @@ const accountsReceivableController = {
       // the AR row. Foreign orders return 403 before any DB write.
       // super_admin: intentional unrestricted access, no store constraint.
       const orderWhere = { id: orderId }
-      if (store && req.user?.roleType !== 'super_admin') {
-        orderWhere.store = store
-      }
+      Object.assign(orderWhere, await tenantStoreWhere(req))
       const order = await db.order.findOne({ where: orderWhere })
       if (!order) {
         // Return 403 for tenant callers (store ownership failed) so the
@@ -259,9 +256,7 @@ const accountsReceivableController = {
       // overwrote paidAmount with their own value, so applied payments could
       // exceed the balance while the AR row showed far less was paid.
       const where = { id }
-      if (req.storeId && req.user?.roleType !== 'super_admin') {
-        where.store = req.storeId
-      }
+      Object.assign(where, await tenantStoreWhere(req))
 
       const t = await db.sequelize.transaction()
       let payment
@@ -388,7 +383,7 @@ const accountsReceivableController = {
       const userRole = req.user?.roleType
 
       const where = { status: { [Op.ne]: 'PAID' } }
-      if (req.storeId && userRole !== 'super_admin') where.store = req.storeId
+      Object.assign(where, await tenantStoreWhere(req))
 
       const arList = await db.accounts_receivable.findAll({
         where,
@@ -454,9 +449,7 @@ const accountsReceivableController = {
       const { dueDate, creditTerm, notes, status } = req.body
 
       const where = { id }
-      if (req.storeId && req.user?.roleType !== 'super_admin') {
-        where.store = req.storeId
-      }
+      Object.assign(where, await tenantStoreWhere(req))
       const ar = await db.accounts_receivable.findOne({ where })
       if (!ar) {
         return res.status(404).json({ success: false, message: 'AR not found' })
@@ -510,9 +503,7 @@ const accountsReceivableController = {
     try {
       const { id } = req.params
       const where = { id }
-      if (req.storeId && req.user?.roleType !== 'super_admin') {
-        where.store = req.storeId
-      }
+      Object.assign(where, await tenantStoreWhere(req))
 
       const t = await db.sequelize.transaction()
       let deletedInvoiceNo = null
