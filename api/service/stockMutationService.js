@@ -3,6 +3,7 @@
 const db = require('../../db/models')
 const { assertDecimalQuantity } = require('../../utils/decimalQuantityGuard')
 const { recipeYield } = require('./itemCostService')
+const { applyStoreInventoryModes } = require('./recipeModeService')
 
 /**
  * Single authoritative path for mutating a product's stock (product.stock
@@ -548,6 +549,9 @@ async function getIngredientStockRecording(ingredientIds) {
 // rejection here rolls back the whole enclosing transaction.
 async function resolveBomIngredientRequirements(flatItems, store, productById, t) {
   const requirements = []
+  // PGA-17: decide each product's mode for THIS outlet (a 'stocked' product
+  // with an active recipe here sells by recipe). Idempotent and in memory.
+  await applyStoreInventoryModes([...productById.values()], store, t)
   for (const { productId, quantity } of flatItems) {
     const product = productById.get(productId)
     if (!product) continue

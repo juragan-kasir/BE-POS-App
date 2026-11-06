@@ -31,6 +31,7 @@ const {
   adjustIngredientStockBatch,
   resolveBomIngredientRequirements
 } = require('../service/stockMutationService')
+const { applyStoreInventoryModes, storeInventoryMode } = require('../service/recipeModeService')
 const { recipeAvailability, recipeShortages } = require('../service/recipeAvailabilityService')
 // make_to_order and inventory_item products are limited by their outlet
 // BOM's ingredients (a linked inventory item is a one-line BOM), never by
@@ -1026,7 +1027,7 @@ const loadAndPriceOrderItems = async (items, store, user = null) => {
         // its recipe ingredients are checked (and refused with
         // INGREDIENT_STOCK_CONFLICT) inside the sale transaction. Same rule
         // as the customer (QR) path.
-        if (!usesOwnStock(prod.inventoryMode)) continue
+        if (!usesOwnStock(await storeInventoryMode(prod, store))) continue
         const needed = bi.quantity * bundleQty
         const avail = await getEffectiveStock(prod, store)
         if (avail !== null && avail < needed) {
@@ -1115,7 +1116,7 @@ const loadAndPriceOrderItems = async (items, store, user = null) => {
 
     // F7: see the bundle branch — a make_to_order product is limited by its
     // recipe ingredients, never by its own (usually zero) product stock.
-    const avail = usesOwnStock(prod.inventoryMode) ? await getEffectiveStock(prod, store) : null
+    const avail = usesOwnStock(await storeInventoryMode(prod, store)) ? await getEffectiveStock(prod, store) : null
     if (avail !== null && avail < qty) {
       return {
         ok: false,
@@ -2056,6 +2057,9 @@ const deductStockForOrder = async (
           lock: t.LOCK.UPDATE
         })
       : []
+    // PGA-17: each product's mode at THIS outlet decides whether its own
+    // stock or its recipe ingredients are deducted.
+    await applyStoreInventoryModes(products, store, t)
     const productById = new Map(products.map((p) => [p.id, p]))
 
     const stockHistoryRows = []
@@ -2830,6 +2834,8 @@ const withItemInventoryModes = async (order) => {
     attributes: ['id', 'inventoryMode'],
     paranoid: false
   })
+  // PGA-17: the mode at the order's outlet (drives the return restock form).
+  await applyStoreInventoryModes(products, data.store)
   const modeById = new Map(products.map((product) => [product.id, product.inventoryMode]))
   data.items = data.items.map((item) => ({ ...item, inventoryMode: modeById.get(item.product) ?? null }))
   return data
@@ -2918,6 +2924,8 @@ const deductStockForPaidOrder = async (
     transaction: t,
     lock: t.LOCK.UPDATE
   })
+  // PGA-17: the mode at this outlet (see deductStockForOrder).
+  await applyStoreInventoryModes(products, effectiveStore, t)
   const productById = new Map(products.map((p) => [p.id, p]))
 
   const stockHistoryRows = []
@@ -4227,6 +4235,8 @@ exports.getCustomerMenu = async (req, res) => {
       order: [['name', 'ASC']]
     })
 
+    // PGA-17: show each product with its mode at this outlet.
+    await applyStoreInventoryModes(products, storeId)
     const customerProducts = products.map((p) => {
       const plain = p.get({ plain: true })
       const dto = {}
@@ -4682,7 +4692,7 @@ exports.createCustomerOrder = async (req, res) => {
           // F7: a make_to_order product's finished-good stock is not
           // authoritative — ingredients (resolved at deduction time) are.
           // Skip the finished-good availability pre-check for that mode.
-          if (!usesOwnStock(prod.inventoryMode)) continue
+          if (!usesOwnStock(await storeInventoryMode(prod, store))) continue
           const needed = bi.quantity * bundleQty
           const avail = await getEffectiveStock(prod, store)
           if (avail !== null && avail < needed) {
@@ -4708,7 +4718,7 @@ exports.createCustomerOrder = async (req, res) => {
       // F7: a make_to_order product's finished-good stock is not
       // authoritative — ingredients (resolved at deduction time) are.
       // Skip the finished-good availability pre-check for that mode.
-      if (!usesOwnStock(prod.inventoryMode)) continue
+      if (!usesOwnStock(await storeInventoryMode(prod, store))) continue
       const avail = await getEffectiveStock(prod, store)
       if (avail !== null && avail < Number(item.quantity)) {
         return res.status(400).json({

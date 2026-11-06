@@ -124,6 +124,10 @@ async function resolveProductUnitCosts(productIds, store, transaction) {
     attributes: ['id', 'costPrice', 'inventoryMode'],
     transaction
   })
+  // PGA-17: a 'stocked' product with an active recipe at this outlet sells
+  // (and is costed) by that recipe here.
+  const { applyStoreInventoryModes } = require('./recipeModeService')
+  await applyStoreInventoryModes(products, store, transaction)
   const recipeProductIds = products
     .filter((p) => (p.inventoryMode || 'stocked') !== 'stocked')
     .map((p) => p.id)

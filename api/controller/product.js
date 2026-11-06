@@ -1,4 +1,5 @@
 const db = require('../../db/models')
+const { applyStoreInventoryModes } = require('../service/recipeModeService')
 const { recipeAvailability } = require('../service/recipeAvailabilityService')
 const { findScopedNameConflict } = require('../service/scopedNameConflict')
 const {
@@ -327,6 +328,9 @@ exports.getProductByLocationSuperAdmin = async (req, res) => {
     })
     const hasMore = rows.length > limit
     const pageRows = rows.slice(0, limit)
+    // PGA-17: report each product's mode at this outlet, so the cashier
+    // treats a 'stocked' product with a recipe here as a recipe product.
+    await applyStoreInventoryModes(pageRows, store != null ? Number(store) : null)
     // W3-4 K1 (DR-11): expose the outlet-authoritative catalog price with the
     // same batched W3-1 rule as checkout (outlet row wins, otherwise base
     // price), resolved for the returned page only. Raw `price` is unchanged;
