@@ -303,7 +303,8 @@ const getEffectiveStockMap = async (products, store) => {
 // utils/outletPricing (single authoritative rule shared with checkout).
 const {
   resolveCatalogBase,
-  getEffectivePriceMap
+  getEffectivePriceMap,
+  quantityTierPrice
 } = require('../../utils/outletPricing')
 
 // AUD-2 (security): store-tenancy guards for the public customer-order
@@ -354,7 +355,11 @@ const isBundleOrderableAtStore = (bundle, store) => {
 // pre-resolved catalogBase (from resolveCatalogBase) to avoid a second
 // lookup; otherwise it is resolved here.
 const getServerItemPrice = async (prod, item, store, catalogBase) => {
-  const base = catalogBase !== undefined ? catalogBase : await resolveCatalogBase(prod, store)
+  const catalog = catalogBase !== undefined ? catalogBase : await resolveCatalogBase(prod, store)
+  // Retail R1: a quantity price break (grosir) replaces the catalog base for
+  // the whole line; option/modifier markup still applies on top.
+  const tierPrice = quantityTierPrice(prod.priceTiers, item.quantity)
+  const base = tierPrice !== null ? tierPrice : catalog
   let extra = 0
 
   const optNames = (item.options || []).map((o) => o && o.name).filter(Boolean)

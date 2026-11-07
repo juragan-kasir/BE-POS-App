@@ -74,8 +74,45 @@ const getEffectivePriceMap = async (products, store) => {
   return map
 }
 
+// Retail R1 (owner decision 2026-11-08): quantity price breaks (grosir).
+// A product's priceTiers entry may carry `minQty`; for a line of `qty` units
+// the tier with the HIGHEST minQty that is <= qty sets the unit price. Tiers
+// without a valid minQty are named price lists (member, grosir label) and
+// are never applied automatically. Returns null when no break applies.
+const quantityTierPrice = (tiers, qty) => {
+  const quantity = Number(qty)
+  if (!Array.isArray(tiers) || !(quantity > 0)) return null
+  let best = null
+  for (const t of tiers) {
+    const minQty = Number(t && t.minQty)
+    const price = Number(t && t.price)
+    if (!(minQty > 0) || !Number.isFinite(price) || price < 0) continue
+    if (minQty <= quantity && (!best || minQty > best.minQty)) best = { minQty, price }
+  }
+  return best ? Math.round(best.price) : null
+}
+
+// Cleans priceTiers on save: keeps name/price, and minQty only when it is a
+// positive number (a tier without one stays a named price list).
+const normalizePriceTiers = (tiers) => {
+  if (!Array.isArray(tiers)) return []
+  return tiers
+    .filter((t) => t && typeof t === 'object')
+    .map((t) => {
+      const out = { ...t }
+      const price = Number(t.price)
+      out.price = Number.isFinite(price) && price >= 0 ? Math.round(price) : 0
+      const minQty = Number(t.minQty)
+      if (minQty > 0) out.minQty = minQty
+      else delete out.minQty
+      return out
+    })
+}
+
 module.exports = {
   resolveOutletBasePrice,
   resolveCatalogBase,
-  getEffectivePriceMap
+  getEffectivePriceMap,
+  quantityTierPrice,
+  normalizePriceTiers
 }
