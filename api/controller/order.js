@@ -20,7 +20,7 @@ const batchService = require('../service/batchService')
 const { adjustMemberPoints, maybeUpgradeMemberTier, computeEarnedPoints, awardEarnedPointsOnce, reverseEarnedPoints } = require('../service/loyaltyService')
 const { incrementPromoUsage } = require('../service/promoUsageService')
 const { buyXGetYCondition, spendThreshold } = require('../../utils/promoRuleCondition')
-const { getStoreClock } = require('../../utils/businessDate')
+const { getStoreClock, getStoreLocalDate } = require('../../utils/businessDate')
 const { resolveStoreTimezone } = require('../../utils/storeTimezone')
 const {
   enqueueAccountingJob,
@@ -406,8 +406,11 @@ const getServerItemPrice = async (prod, item, store, catalogBase) => {
 // statement Postgres serializes per (store, date) row, so concurrent callers
 // are queued, not raced. Pass the same transaction used to create the order
 // so a rolled-back order (e.g. insufficient stock) doesn't burn a number.
-const generateCustomerNumber = async (store, t) => {
-  const counterDate = new Date().toISOString().slice(0, 10)
+// PGA-29: the counter key is the store's own calendar date — keying it on
+// the UTC date reset a Jakarta store's sequence at 07:00 local rather than
+// at the store's midnight (BR-SALES-011, BR-ORG-004).
+const generateCustomerNumber = async (store, t, now = new Date()) => {
+  const counterDate = getStoreLocalDate(await resolveStoreTimezone(store), now)
   const rows = await db.sequelize.query(
     `INSERT INTO order_daily_counter (store, "counterDate", "lastValue", "updatedAt")
      VALUES ($1, $2, 1, NOW())
@@ -422,6 +425,7 @@ const generateCustomerNumber = async (store, t) => {
   )
   return rows[0]?.lastValue || 1
 }
+exports.generateCustomerNumber = generateCustomerNumber
 
 // F-SMOKE-01: a store-scoped equality (`where: { store, ... }`) silently
 // drops global (store: null) configs — GET /tax-config already matches
