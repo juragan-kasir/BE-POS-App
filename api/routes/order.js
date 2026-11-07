@@ -148,6 +148,7 @@ router.put(
   orderController.updateOrderItemStatus
 )
 // Customer-facing (no auth)
+router.get('/customer-table', orderController.getCustomerTable)
 router.get('/customer-menu', orderController.getCustomerMenu)
 router.get('/customer-orders', orderController.getCustomerOrders)
 // :token is the order's opaque publicToken (not its database id) —
