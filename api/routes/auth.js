@@ -4,9 +4,14 @@ const authController = require('../controller/auth')
 
 // ponytail: 30 login attempts per 15min window (per-IP; POS terminals behind
 // NAT share one IP, so a store-wide shift change must not lock everyone out)
+const loginKeyGenerator = (req, res) => {
+  const userName = typeof req.body?.userName === 'string' ? req.body.userName.trim().toLowerCase() : ''
+  return `login:${req.ip}:${userName}`
+}
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 30,
+  keyGenerator: loginKeyGenerator,
   message: {
     success: false,
     message: 'Too many login attempts, try again later.'
