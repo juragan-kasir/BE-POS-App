@@ -246,6 +246,13 @@ describe('E1-E cancellation consistency', () => {
     const txns = await refundTxns(order.id)
     expect(txns.filter((t) => Number(t.amount) < 0).length).toBe(1)
     expect(await reversalJobs(order.id)).toHaveLength(1)
+
+    // PGA-30: the repeat void is an idempotent no-op, so the single VOID
+    // audit row (and only the single refund above) is the final state.
+    const voidAudits = await db.auditLog.findAll({
+      where: { entity: 'order', entityId: order.id, action: 'void' }
+    })
+    expect(voidAudits).toHaveLength(1)
   })
 
   test('Test C — injected mid-void failure rolls everything back', async () => {
