@@ -31,7 +31,7 @@ const {
   downloadProductTemplate,
   parseProductTemplate
 } = require('../../utils/excelTemplate')
-const { isSuperAdmin, storesInCallerTenant } = require('../../utils/tenantScope')
+const { isSuperAdmin, storesInCallerTenant, callerStoreIds } = require('../../utils/tenantScope')
 const { assertSellableProductAssignment } = require('../validation/schemas')
 // W3-1 (DR-11): shared authoritative outlet-price resolution (checkout +
 // display use one rule).
@@ -1808,12 +1808,26 @@ exports.importProduct = async (req, res) => {
     const TaxConfig = db.taxConfig
     const Location = db.location
 
-    const [categories, suppliers, taxConfigs, stores] = await Promise.all([
-      Category.findAll({ attributes: ['id', 'name'] }),
-      Supplier.findAll({ attributes: ['id', 'name'] }),
-      TaxConfig.findAll({ attributes: ['id', 'name', 'rate'] }),
+    // PGA-23 (2026-11-08): every name in the sheet resolves only against
+    // what the caller may use — its own outlets, and categories / suppliers /
+    // tax configs that are shared or assigned to one of those outlets. A
+    // store-bound owner used to resolve names across every tenant.
+    const scopeIds = await callerStoreIds(req) // null = global caller
+    const inScope = (ids) => scopeIds === null || ids.some((id) => scopeIds.includes(Number(id)))
+    const [categoriesAll, suppliersAll, taxConfigsAll, storesAll] = await Promise.all([
+      Category.findAll({ attributes: ['id', 'name'], include: [{ model: db.category_store, as: 'storeAssignments', attributes: ['store'], required: false }] }),
+      Supplier.findAll({ attributes: ['id', 'name', 'store'] }),
+      TaxConfig.findAll({ attributes: ['id', 'name', 'rate', 'store'] }),
       Location.findAll({ attributes: ['id', 'name'] })
     ])
+    const storeListOf = (v) => (Array.isArray(v) ? v : v == null || v === '' ? [] : [v]).map(Number).filter((n) => n > 0)
+    const categories = categoriesAll.filter((c) => {
+      const assigned = (c.storeAssignments || []).map((r) => Number(r.store))
+      return assigned.length === 0 || inScope(assigned)
+    })
+    const suppliers = suppliersAll.filter((x) => { const st = storeListOf(x.store); return st.length === 0 || inScope(st) })
+    const taxConfigs = taxConfigsAll.filter((x) => x.store == null || inScope([x.store]))
+    const stores = scopeIds === null ? storesAll : storesAll.filter((l) => scopeIds.includes(Number(l.id)))
 
     const categoryMap = categories.reduce((acc, cat) => {
       acc[cat.name.toLowerCase()] = cat.id
@@ -1946,22 +1960,20 @@ exports.importProduct = async (req, res) => {
             ? null
             : storeByName[storeNameLower] || null
 
-          // HIGH-7: Tenant admin store boundary during import
-          let effectiveImportStoreId = storeId
-          if (!isSuperAdmin(req)) {
-            const callerStore = Number(req.storeId ?? req.user?.store)
-            if (
-              storeName &&
-              !isAllStores &&
-              storeId &&
-              storeId !== callerStore
-            ) {
-              throw new Error(
-                `Anda tidak memiliki izin untuk mengimport produk ke toko "${storeName}"`
-              )
-            }
-            effectiveImportStoreId = callerStore
+          // HIGH-7 / PGA-23: a named outlet must be one of the caller's (the
+          // lookup above only holds those); "Semua Toko" means every outlet
+          // of the caller — only a global super admin leaves it unassigned.
+          if (storeName && !isAllStores && !storeId) {
+            throw new Error(
+              `Anda tidak memiliki izin untuk mengimport produk ke toko "${storeName}"`
+            )
           }
+          const rowStores = storeId
+            ? [storeId]
+            : scopeIds === null
+              ? []
+              : scopeIds.map(Number)
+          const effectiveImportStoreId = rowStores.length === 1 ? rowStores[0] : null
 
           const productData = {
             nameProduct: product.nameProduct,
@@ -2006,7 +2018,7 @@ exports.importProduct = async (req, res) => {
               transaction: t,
               paranoid: false
             })
-            if (!existingProduct && !isSuperAdmin(req)) {
+            if (!existingProduct && scopeIds !== null) {
               const existsGlobally = await Product.findByPk(no, {
                 transaction: t,
                 paranoid: false
@@ -2024,7 +2036,7 @@ exports.importProduct = async (req, res) => {
               transaction: t
             })
             if (bySku) {
-              if (!isSuperAdmin(req)) {
+              if (scopeIds !== null) {
                 const inScope = await findProductInScope(req, bySku.id, {
                   transaction: t,
                   paranoid: false
@@ -2043,9 +2055,13 @@ exports.importProduct = async (req, res) => {
             if (existingProduct.deletedAt) {
               await existingProduct.restore({ transaction: t })
             }
+            // PGA-23: an import update never rewrites stock — the sheet value
+            // used to overwrite product.stock only, leaving it unequal to the
+            // outlet rows. Stock changes go through adjustment / opname.
+            const { stock: _ignoredStock, ...updateData } = productData
             await existingProduct.update(
               {
-                ...productData,
+                ...updateData,
                 image: imageUrl || existingProduct.image,
                 modifiedBy: req.user?.id || null
               },
@@ -2053,12 +2069,8 @@ exports.importProduct = async (req, res) => {
             )
 
             // Sync junction table
-            if (effectiveImportStoreId) {
-              await syncProductStores(
-                existingProduct.id,
-                [effectiveImportStoreId],
-                t
-              )
+            if (rowStores.length > 0) {
+              await syncProductStores(existingProduct.id, rowStores, t)
             }
 
             results.updated.push({
@@ -2076,12 +2088,33 @@ exports.importProduct = async (req, res) => {
             )
 
             // Create junction rows
-            if (effectiveImportStoreId) {
-              await syncProductStores(
-                newProduct.id,
-                [effectiveImportStoreId],
-                t
+            if (rowStores.length > 0) {
+              await syncProductStores(newProduct.id, rowStores, t)
+            }
+
+            // PGA-23: the opening stock lives in the outlet rows (DR-14 —
+            // a missing row reads 0), split across the row's outlets like
+            // add-product does. Without an outlet it has nowhere to live.
+            const openingStock = Number(productData.stock) || 0
+            if (openingStock > 0 && rowStores.length === 0) {
+              throw new Error(
+                'Stok awal hanya bisa disimpan ke toko tertentu. Isi kolom Store, atau kosongkan Stok.'
               )
+            }
+            if (rowStores.length > 0) {
+              const perStore = Math.floor(openingStock / rowStores.length)
+              const remainder = openingStock - perStore * rowStores.length
+              for (let i = 0; i < rowStores.length; i++) {
+                await db.product_store_stock.create(
+                  {
+                    product: newProduct.id,
+                    store: rowStores[i],
+                    stock: i === 0 ? perStore + remainder : perStore,
+                    updatedAt: new Date()
+                  },
+                  { transaction: t }
+                )
+              }
             }
 
             if (productData.stock > 0) {
