@@ -156,6 +156,15 @@ const picInclude = {
 // every call site already wraps its transaction in try/rollback/re-throw,
 // so the whole receipt fails atomically rather than completing with a
 // quietly-missed mutation.
+class GoodsReceiptIngredientStoreError extends Error {
+  constructor(ingredientId) {
+    super(
+      `Goods receipt references ingredient #${ingredientId}, which was not found for this store (deleted, or store mismatch)`
+    )
+    this.statusCode = 400
+  }
+}
+
 const resolveIngredientForItem = async ({ item, poItem, store, transaction }) => {
   const authoritativeId =
     Number(item?.ingredient) ||
@@ -170,9 +179,7 @@ const resolveIngredientForItem = async ({ item, poItem, store, transaction }) =>
       transaction
     })
     if (!ingredient) {
-      throw new Error(
-        `Goods receipt references ingredient #${authoritativeId}, which was not found for this store (deleted, or store mismatch)`
-      )
+      throw new GoodsReceiptIngredientStoreError(authoritativeId)
     }
     return ingredient
   }
@@ -721,11 +728,34 @@ const goodsReceiptController = {
         shippingCost
       } = req.body
 
-      if (!purchaseOrderId || !items || items.length === 0) {
+      if (!items || items.length === 0) {
         return res.status(400).json({
           success: false,
-          message: 'Purchase order and items are required'
+          message: 'At least one item is required'
         })
+      }
+
+      // DR-15: a receipt without a purchase order is a direct ingredient
+      // delivery. It needs an explicit store (there is no PO to inherit one
+      // from) and may not receive products — product stock is owned by the
+      // catalog/PO flow, while direct deliveries are ingredient receipts.
+      if (!purchaseOrderId) {
+        if (!store) {
+          return res.status(400).json({
+            success: false,
+            message: 'Store is required for a goods receipt without a purchase order'
+          })
+        }
+        const productLine = items.find(
+          (item) => item.product && !item.ingredient && !item.ingredientName
+        )
+        if (productLine) {
+          return res.status(400).json({
+            success: false,
+            message:
+              'A goods receipt without a purchase order can only receive ingredients'
+          })
+        }
       }
 
       // ponytail: documentation photos -> Cloudinary (JSON array)
@@ -756,8 +786,15 @@ const goodsReceiptController = {
       const { idempotencyKey } = req.body
       // T-10 idempotency: same key returns same GR without duplicating stock/journal
       if (idempotencyKey) {
+        const idempotencyWhere = { idempotencyKey }
+        if (purchaseOrderId) {
+          idempotencyWhere.purchaseOrderId = purchaseOrderId
+        } else {
+          idempotencyWhere.purchaseOrderId = null
+          idempotencyWhere.store = store
+        }
         const existing = await db.goodsReceipt.findOne({
-          where: { purchaseOrderId, idempotencyKey },
+          where: idempotencyWhere,
           include: [{ model: db.goodsReceiptItem, as: 'items' }]
         })
         if (existing) {
@@ -775,43 +812,52 @@ const goodsReceiptController = {
         }
       }
 
-      const poWhere = { id: purchaseOrderId }
-      if (store) poWhere.store = store
+      let po = null
+      if (purchaseOrderId) {
+        const poWhere = { id: purchaseOrderId }
+        if (store) poWhere.store = store
 
-      const po = await db.purchase_order.findOne({
-        where: poWhere
-      })
+        po = await db.purchase_order.findOne({
+          where: poWhere
+        })
 
-      if (!po) {
-        return res
-          .status(404)
-          .json({ success: false, message: 'Purchase order not found' })
-      }
+        if (!po) {
+          return res
+            .status(404)
+            .json({ success: false, message: 'Purchase order not found' })
+        }
 
-      if (po.status === 'cancelled') {
-        return res
-          .status(400)
-          .json({ success: false, message: 'Cannot receive cancelled order' })
-      }
+        if (po.status === 'cancelled') {
+          return res
+            .status(400)
+            .json({ success: false, message: 'Cannot receive cancelled order' })
+        }
 
-      // ponytail: credit control - block GR until DP is fully paid
-      if (po.paymentMethod === 'credit') {
-        const dpAmount =
-          (Number(po.dpPercent || 0) / 100) * Number(po.finalAmount || 0)
-        const paidToPO =
-          (await db.purchase_payment.sum('amount', {
-            where: { purchaseOrder: purchaseOrderId, deletedAt: null }
-          })) || 0
-        if (paidToPO < dpAmount) {
-          return res.status(400).json({
-            success: false,
-            message: `DP belum lunas. DP: Rp ${dpAmount.toLocaleString('id-ID')}, Dibayar: Rp ${paidToPO.toLocaleString('id-ID')}`
-          })
+        // ponytail: credit control - block GR until DP is fully paid
+        if (po.paymentMethod === 'credit') {
+          const dpAmount =
+            (Number(po.dpPercent || 0) / 100) * Number(po.finalAmount || 0)
+          const paidToPO =
+            (await db.purchase_payment.sum('amount', {
+              where: { purchaseOrder: purchaseOrderId, deletedAt: null }
+            })) || 0
+          if (paidToPO < dpAmount) {
+            return res.status(400).json({
+              success: false,
+              message: `DP belum lunas. DP: Rp ${dpAmount.toLocaleString('id-ID')}, Dibayar: Rp ${paidToPO.toLocaleString('id-ID')}`
+            })
+          }
         }
       }
 
       const receiptNumber = generateReceiptNo()
-      const effectiveStore = store || po.store
+      const effectiveStore = store || po?.store
+      if (!effectiveStore) {
+        return res.status(400).json({
+          success: false,
+          message: 'Store is required for a goods receipt'
+        })
+      }
 
       const transaction = await db.sequelize.transaction()
 
@@ -825,7 +871,7 @@ const goodsReceiptController = {
           {
             store: effectiveStore,
             receiptNumber,
-            purchaseOrderId,
+            purchaseOrderId: purchaseOrderId || null,
             receivedDate: receivedDate || new Date(),
             status: req.body.status || 'completed',
             stockPosted: postNow,
@@ -842,8 +888,8 @@ const goodsReceiptController = {
         )
 
         const receiptItems = []
-        const additionalCost = Number(po.additionalCost) || 0
-        const tolerance = Number.isFinite(Number(po.overDeliveryTolerance))
+        const additionalCost = Number(po?.additionalCost) || 0
+        const tolerance = Number.isFinite(Number(po?.overDeliveryTolerance))
           ? Number(po.overDeliveryTolerance)
           : 10
         // F22-B10-05: this read feeds the over-delivery validation below
@@ -858,11 +904,13 @@ const goodsReceiptController = {
         // sees the now-current receivedQuantity. Same lock idiom already
         // used elsewhere (purchaseOrder.js, batchService.js,
         // stockMutationService.js, promoUsageService.js, loyaltyService.js).
-        const allPoItems = await db.purchase_order_item.findAll({
-          where: { purchaseOrder: purchaseOrderId },
-          lock: transaction.LOCK.UPDATE,
-          transaction
-        })
+        const allPoItems = purchaseOrderId
+          ? await db.purchase_order_item.findAll({
+              where: { purchaseOrder: purchaseOrderId },
+              lock: transaction.LOCK.UPDATE,
+              transaction
+            })
+          : []
         const totalPOValue = allPoItems.reduce(
           (sum, pi) => sum + Number(pi.quantity) * Number(pi.price),
           0
@@ -951,14 +999,36 @@ const goodsReceiptController = {
           const costPrice = baseCost + landed + shippingShare
           const qtyStock = qty * conversion
 
+          // goods_receipt_item has no ingredient FK — it persists the name.
+          // Resolve an id-only line now, even for drafts: otherwise a later
+          // draft -> completed transition has nothing to resolve stock back
+          // to (the raw request item is gone).
+          let persistedIngredientName = item.ingredientName || null
+          if (item.ingredient) {
+            const ingredientRow = await db.ingredient.findOne({
+              where: { id: item.ingredient, store: effectiveStore },
+              transaction
+            })
+            if (!ingredientRow) {
+              await transaction.rollback()
+              return res.status(400).json({
+                success: false,
+                message: `Ingredient #${item.ingredient} was not found for this store`
+              })
+            }
+            persistedIngredientName = ingredientRow.name
+          }
+
           receiptItems.push({
             goodsReceipt: receipt.id,
-            purchaseOrderItem: item.purchaseOrderItem || poItem?.id || null,
+            purchaseOrderItem: purchaseOrderId
+              ? item.purchaseOrderItem || poItem?.id || null
+              : null,
             product: item.product || null,
             qtyReceived: qty,
             unit: item.unit || 'pcs',
             conditionNotes: item.conditionNotes || null,
-            ingredientName: item.ingredientName || null,
+            ingredientName: persistedIngredientName,
             batchNumber: item.batchNumber || null,
             expiryDate: item.expiryDate || null,
             costPrice,
@@ -1013,7 +1083,7 @@ const goodsReceiptController = {
                   quantityChange: qtyStock,
                   quantityAfter: qtyBefore + qtyStock,
                   unit: product.unit || item.unit || 'pcs',
-                  notes: `GR: ${receiptNumber} (PO: ${po.orderNumber})`,
+                  notes: `GR: ${receiptNumber} (PO: ${po?.orderNumber || 'NO-PO'})`,
                   createdBy: req.user?.id || null
                 },
                 { transaction }
@@ -1029,7 +1099,7 @@ const goodsReceiptController = {
                 batchCode:
                   item.batchNumber || `${receiptNumber}-${index + 1}`,
                 expiryDate: item.expiryDate || null,
-                supplier: po.supplier || null,
+                supplier: po?.supplier || req.body.supplier || null,
                 receivedDate: receivedDate || new Date(),
                 transaction
               })
@@ -1068,7 +1138,7 @@ const goodsReceiptController = {
                   quantityChange: qtyStock,
                   quantityAfter: qtyBefore + qtyStock,
                   unit: ingredient.unit || item.unit || 'pcs',
-                  notes: `GR: ${receiptNumber} (PO: ${po.orderNumber})`,
+                  notes: `GR: ${receiptNumber} (PO: ${po?.orderNumber || 'NO-PO'})`,
                   createdBy: req.user?.id || null
                 },
                 { transaction }
@@ -1093,15 +1163,17 @@ const goodsReceiptController = {
         // F22-B10-02: fulfillment is return-aware — approved Purchase
         // Returns reduce net fulfillment without ever decrementing
         // receivedQuantity itself. See purchaseOrderFulfillmentService.js.
-        const fulfillmentStatus = await calculatePurchaseOrderFulfillmentStatus({
-          purchaseOrderId,
-          transaction
-        })
-        if (fulfillmentStatus === 'received') {
-          await po.update(
-            { receivedDate: receivedDate || new Date() },
-            { transaction }
-          )
+        if (purchaseOrderId) {
+          const fulfillmentStatus = await calculatePurchaseOrderFulfillmentStatus({
+            purchaseOrderId,
+            transaction
+          })
+          if (fulfillmentStatus === 'received') {
+            await po.update(
+              { receivedDate: receivedDate || new Date() },
+              { transaction }
+            )
+          }
         }
 
         // Durable inside the same transaction as the receipt/stock rows
@@ -1118,10 +1190,10 @@ const goodsReceiptController = {
               store: effectiveStore,
               receiptId: receipt.id,
               receiptNumber,
-              poNumber: po.orderNumber,
-              totalAmount: po.totalAmount,
-              discount: po.discount,
-              taxAmount: po.taxAmount,
+              poNumber: po?.orderNumber || null,
+              totalAmount: po?.totalAmount ?? 0,
+              discount: po?.discount ?? 0,
+              taxAmount: po?.taxAmount ?? 0,
               items: receiptItems.map((i) => ({
                 costPrice: i.costPrice,
                 qtyReceived: i.qtyReceived
@@ -1167,6 +1239,11 @@ const goodsReceiptController = {
     } catch (error) {
       if (error instanceof InventoryLinkError) {
         return res.status(error.statusCode).json(inventoryLinkErrorBody(error))
+      }
+      if (error.statusCode) {
+        return res
+          .status(error.statusCode)
+          .json({ success: false, message: error.message })
       }
       // Destructured locals (idempotencyKey, items) live inside the try
       // above — re-read them from the request body here.
@@ -1438,8 +1515,54 @@ const goodsReceiptController = {
             },
             { transaction }
           )
+
+          // J1 (metadata-only completion): the stock effect above is a
+          // real draft -> completed posting, so it needs the same purchase
+          // journal as the items-replacement and changeStatus paths. Before
+          // this, flipping a draft to completed without editing its lines
+          // moved stock while silently skipping the journal.
+          if (nextStatus === 'completed') {
+            const journalPO = locked.purchaseOrderId
+              ? await db.purchase_order.findByPk(locked.purchaseOrderId, {
+                  transaction
+                })
+              : null
+            journalJob = await enqueueAccountingJob({
+              jobType: 'purchase_journal',
+              store: locked.store,
+              referenceType: 'goods_receipt',
+              referenceId: locked.id,
+              payload: {
+                store: locked.store,
+                receiptId: locked.id,
+                receiptNumber: locked.receiptNumber,
+                poNumber: journalPO?.orderNumber || null,
+                totalAmount: journalPO?.totalAmount ?? 0,
+                discount: journalPO?.discount ?? 0,
+                taxAmount: journalPO?.taxAmount ?? 0,
+                items: lockedOldItems.map((i) => ({
+                  costPrice: i.costPrice,
+                  qtyReceived: i.qtyReceived
+                })),
+                date: new Date(receivedDate || Date.now()).toISOString(),
+                createdBy: req.user?.id
+              },
+              transaction
+            })
+          }
+
           await syncPurchaseOrderStatus(receipt.purchaseOrderId, transaction)
           await transaction.commit()
+          if (journalJob) {
+            const journalResult = await attemptJob(journalJob)
+            await recordImmediateAttempt(journalJob, journalResult)
+            if (!journalResult.ok) {
+              console.error(
+                'Purchase journal deferred to retry queue:',
+                journalResult.error
+              )
+            }
+          }
           const untouched = await db.goodsReceipt.findByPk(locked.id, {
             include: [{ model: db.goodsReceiptItem, as: 'items' }]
           })
@@ -1621,14 +1744,32 @@ const goodsReceiptController = {
             )
             const costPrice = baseCost + landed + shippingShare
 
+            let persistedIngredientName = item.ingredientName || null
+            if (!persistedIngredientName && item.ingredient) {
+              const ingredientRow = await db.ingredient.findOne({
+                where: { id: item.ingredient, store: store || locked.store },
+                transaction
+              })
+              if (!ingredientRow) {
+                await transaction.rollback()
+                return res.status(400).json({
+                  success: false,
+                  message: `Ingredient #${item.ingredient} was not found for this store`
+                })
+              }
+              persistedIngredientName = ingredientRow.name
+            }
+
             newItems.push({
               goodsReceipt: id,
-              purchaseOrderItem: item.purchaseOrderItem || poItem?.id || null,
+              purchaseOrderItem: receipt.purchaseOrderId
+                ? item.purchaseOrderItem || poItem?.id || null
+                : null,
               product: item.product || null,
               qtyReceived: qty,
               unit: item.unit || 'pcs',
               conditionNotes: item.conditionNotes || null,
-              ingredientName: item.ingredientName || null,
+              ingredientName: persistedIngredientName,
               batchNumber: item.batchNumber || null,
               expiryDate: item.expiryDate || null,
               costPrice,
@@ -1748,6 +1889,11 @@ const goodsReceiptController = {
     } catch (error) {
       if (error instanceof InventoryLinkError) {
         return res.status(error.statusCode).json(inventoryLinkErrorBody(error))
+      }
+      if (error.statusCode) {
+        return res
+          .status(error.statusCode)
+          .json({ success: false, message: error.message })
       }
       console.error(error)
       return res
@@ -1935,15 +2081,20 @@ const goodsReceiptController = {
           .json({ success: false, message: 'Goods receipt not found' })
       }
 
-      if (receipt.status !== 'draft') {
+      const allowedTransition =
+        (receipt.status === 'draft' &&
+          (status === 'completed' || status === 'cancelled')) ||
+        (receipt.status === 'completed' && status === 'cancelled')
+      if (!allowedTransition) {
         return res.status(400).json({
           success: false,
-          message: `Cannot change status from "${receipt.status}"`
+          message: `Cannot change status from "${receipt.status}" to "${status}"`
         })
       }
 
       const transaction = await db.sequelize.transaction()
       let journalJob = null
+      let reversalJob = null
       try {
         // F-STOCK-1: lock the header and re-check the draft guard inside
         // the transaction — the outer read is stale, so concurrent
@@ -1960,11 +2111,15 @@ const goodsReceiptController = {
             .status(404)
             .json({ success: false, message: 'Goods receipt not found' })
         }
-        if (locked.status !== 'draft') {
+        const lockedTransition =
+          (locked.status === 'draft' &&
+            (status === 'completed' || status === 'cancelled')) ||
+          (locked.status === 'completed' && status === 'cancelled')
+        if (!lockedTransition) {
           await transaction.rollback()
           return res.status(400).json({
             success: false,
-            message: `Cannot change status from "${locked.status}"`
+            message: `Cannot change status from "${locked.status}" to "${status}"`
           })
         }
         const lockedItems = await db.goodsReceiptItem.findAll({
@@ -2022,10 +2177,12 @@ const goodsReceiptController = {
           }
           // Completion only flips the status, recalculates PO fulfillment,
           // and enqueues the purchase journal.
-          await calculatePurchaseOrderFulfillmentStatus({
-            purchaseOrderId: locked.purchaseOrderId,
-            transaction
-          })
+          if (locked.purchaseOrderId) {
+            await calculatePurchaseOrderFulfillmentStatus({
+              purchaseOrderId: locked.purchaseOrderId,
+              transaction
+            })
+          }
         }
 
         if (status === 'cancelled') {
@@ -2049,6 +2206,48 @@ const goodsReceiptController = {
               transaction
             })
           }
+
+          // A receipt cancelled after completion must reverse its purchase
+          // journal. Cancel any not-yet-posted purchase job first (so a
+          // delayed retry cannot post the original after cancellation), then
+          // enqueue the reversal only when the original entry exists.
+          await db.accounting_outbox.update(
+            { status: 'cancelled' },
+            {
+              where: {
+                store: locked.store,
+                referenceType: 'goods_receipt',
+                referenceId: locked.id,
+                jobType: 'purchase_journal',
+                status: 'pending'
+              },
+              transaction
+            }
+          )
+          const originalJournal = await db.journal_entry.findOne({
+            where: {
+              store: locked.store,
+              sourceType: 'purchase',
+              referenceId: locked.id
+            },
+            transaction
+          })
+          if (originalJournal) {
+            reversalJob = await enqueueAccountingJob({
+              jobType: 'purchase_journal_reversal',
+              store: locked.store,
+              referenceType: 'goods_receipt',
+              referenceId: locked.id,
+              payload: {
+                store: locked.store,
+                receiptId: locked.id,
+                description: `Cancellation of goods receipt ${locked.receiptNumber}`,
+                date: new Date().toISOString(),
+                createdBy: req.user?.id
+              },
+              transaction
+            })
+          }
         }
 
         await locked.update(
@@ -2064,28 +2263,39 @@ const goodsReceiptController = {
           { transaction }
         )
 
+        // A cancellation reverses receivedQuantity above, so the PO's
+        // fulfillment status must be recomputed from the post-reversal
+        // values (a fully-received PO returns to 'ordered').
+        if (status === 'cancelled' && locked.purchaseOrderId) {
+          await calculatePurchaseOrderFulfillmentStatus({
+            purchaseOrderId: locked.purchaseOrderId,
+            transaction
+          })
+        }
+
         // Durable inside the same transaction as the status/stock update
         // above — a posting failure below is retried, not silently
         // discarded (same pattern as purchasePayment.js).
         if (status === 'completed') {
-          const po = await db.purchase_order.findByPk(
-            receipt.purchaseOrderId,
-            { transaction }
-          )
+          const po = locked.purchaseOrderId
+            ? await db.purchase_order.findByPk(locked.purchaseOrderId, {
+                transaction
+              })
+            : null
           journalJob = await enqueueAccountingJob({
             jobType: 'purchase_journal',
-            store: receipt.store,
+            store: locked.store,
             referenceType: 'goods_receipt',
-            referenceId: receipt.id,
+            referenceId: locked.id,
             payload: {
-              store: receipt.store,
-              receiptId: receipt.id,
-              receiptNumber: receipt.receiptNumber,
-              poNumber: po?.orderNumber,
-              totalAmount: po?.totalAmount,
-              discount: po?.discount,
-              taxAmount: po?.taxAmount,
-              items: (receipt.items || []).map((i) => ({
+              store: locked.store,
+              receiptId: locked.id,
+              receiptNumber: locked.receiptNumber,
+              poNumber: po?.orderNumber || null,
+              totalAmount: po?.totalAmount ?? 0,
+              discount: po?.discount ?? 0,
+              taxAmount: po?.taxAmount ?? 0,
+              items: lockedItems.map((i) => ({
                 costPrice: i.costPrice,
                 qtyReceived: i.qtyReceived
               })),
@@ -2110,9 +2320,9 @@ const goodsReceiptController = {
         'Changed goods_receipt status to ' + status + ': ' + id
       )
 
-      if (journalJob) {
-        const journalResult = await attemptJob(journalJob)
-        await recordImmediateAttempt(journalJob, journalResult)
+      for (const job of [journalJob, reversalJob].filter(Boolean)) {
+        const journalResult = await attemptJob(job)
+        await recordImmediateAttempt(job, journalResult)
         if (!journalResult.ok) {
           console.error('Purchase journal deferred to retry queue:', journalResult.error)
         }
@@ -2128,6 +2338,11 @@ const goodsReceiptController = {
     } catch (error) {
       if (error instanceof InventoryLinkError) {
         return res.status(error.statusCode).json(inventoryLinkErrorBody(error))
+      }
+      if (error.statusCode) {
+        return res
+          .status(error.statusCode)
+          .json({ success: false, message: error.message })
       }
       console.error(error)
       return res

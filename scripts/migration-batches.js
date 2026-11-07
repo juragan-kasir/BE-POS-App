@@ -205,10 +205,27 @@ const E2_BATCHES = Object.freeze({
     // No governance gate. The BE code reads the columns, so B12 must be
     // recorded before it deploys.
     openGates: []
+  }),
+  B13: deepFreeze({
+    id: 'B13',
+    title: 'Direct ingredient goods receipt + one global super admin',
+    expectedCount: 2,
+    migrations: [
+      '20261107000001-goods-receipt-no-purchase-order.js',
+      '20261107000002-one-global-super-admin.js'
+    ],
+    // DR-15 (product owner, 2026-11-07): a goods receipt may be recorded
+    // without a purchase order for direct ingredient deliveries. up drops
+    // the purchaseOrderId NOT NULL constraint and adds the store-scoped
+    // no-PO idempotency index; down refuses to restore NOT NULL while
+    // no-PO rows exist. The same decision keeps one platform-wide
+    // super_admin: the second migration retires extra NULL-store
+    // super_admins and never touches store-bound ones. Both replay safely.
+    openGates: []
   })
 })
 
-const BATCH_ORDER = Object.freeze(['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B9', 'B10', 'B11', 'B12'])
+const BATCH_ORDER = Object.freeze(['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B9', 'B10', 'B11', 'B12', 'B13'])
 
 // D-08 B1 resume contracts. A resume finishes a batch whose earlier members
 // were recorded by an interrupted run; it never redefines the batch (the

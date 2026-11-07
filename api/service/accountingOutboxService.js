@@ -36,6 +36,7 @@ const JOB_HANDLERS = {
   reverse_order_journals: accountingService.reverseOrderJournals,
   sales_return_journal: accountingService.postSalesReturnJournal,
   purchase_journal: accountingService.postPurchaseJournal,
+  purchase_journal_reversal: accountingService.reversePurchaseJournal,
   purchase_payment_journal: accountingService.postPurchasePaymentJournal,
   purchase_return_journal: accountingService.postPurchaseReturnJournal,
   expense_journal: accountingService.postExpenseJournal,

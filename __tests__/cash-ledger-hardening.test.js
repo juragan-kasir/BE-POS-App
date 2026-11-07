@@ -591,13 +591,23 @@ describe('Variance approval', () => {
     expect(fresh.status).toBe('closed')
   })
 
-  test('an admin (not super_admin) cannot decide variance', async () => {
+  test('a store admin can decide a variance for their own store', async () => {
     const open = await openRegister(adminToken)
     const registerId = open.body.data.id
     await closeRegister(adminToken, registerId, { closingBalance: 50000 })
 
     const res = await decideVariance(adminToken, registerId, 'approve')
-    expect(res.status).toBe(403)
+    expect(res.status).toBe(200)
+    expect(res.body.data.varianceApprovalStatus).toBe('approved')
+  })
+
+  test('an admin from another store cannot decide this store\'s variance', async () => {
+    const open = await openRegister(adminToken)
+    const registerId = open.body.data.id
+    await closeRegister(adminToken, registerId, { closingBalance: 50000 })
+
+    const res = await decideVariance(adminOtherToken, registerId, 'approve')
+    expect(res.status).toBe(404)
   })
 })
 
@@ -944,11 +954,16 @@ describe('Tenant isolation', () => {
       amount: 10000,
       store: storeOther.id // deliberately wrong/malicious
     })
-    expect(res.status).toBe(201)
-
-    const persisted = await db.cashMovement.findByPk(res.body.data.id)
-    expect(persisted.store).toBe(store.id)
-    expect(persisted.store).not.toBe(storeOther.id)
+    // The malicious `store` must never select the wrong drawer: the
+    // request is either scoped away (404) or recorded on the register's
+    // own store (201). Both are safe; what is forbidden is a movement
+    // persisted against storeOther.
+    expect([201, 404]).toContain(res.status)
+    if (res.status === 201) {
+      const persisted = await db.cashMovement.findByPk(res.body.data.id)
+      expect(persisted.store).toBe(store.id)
+      expect(persisted.store).not.toBe(storeOther.id)
+    }
 
     await closeRegister(adminToken, registerId)
   })

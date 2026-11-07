@@ -472,6 +472,25 @@ module.exports = async () => {
     } catch {}
   }
 
+  // DR-15 (migration 20261107000001): goods receipts may omit a purchase
+  // order. The committed dev-schema snapshot still has the column NOT NULL
+  // (and no null-PO idempotency index), so converge snapshot-built test DBs
+  // exactly as the migration does.
+  try {
+    psqlTest(
+      'ALTER TABLE "goods_receipt" ALTER COLUMN "purchaseOrderId" DROP NOT NULL'
+    )
+    psqlTest(
+      `CREATE UNIQUE INDEX IF NOT EXISTS goods_receipt_store_idempotency_no_po_unique
+         ON "goods_receipt" ("store", "idempotencyKey")
+       WHERE "purchaseOrderId" IS NULL AND "idempotencyKey" IS NOT NULL`
+    )
+  } catch (error) {
+    throw new Error(
+      `[setup-test-db] failed to provision no-PO goods receipt support: ${error.message}`
+    )
+  }
+
   // BA DR-28 step 4 (migration 20261024000001, batch B5): widen the columns
   // narrower than the field-length standard, for snapshot-built test DBs.
   // Widen only — a no-op once a column is as wide.
@@ -668,6 +687,12 @@ module.exports = async () => {
     `SELECT count(*) FROM pg_indexes WHERE indexname = 'goods_receipt_po_idempotency_unique'`
   ]).trim()
   if (grIdxCount !== '1') missingIndexes.push('goods_receipt_po_idempotency_unique')
+  const grNoPoIdxCount = run('psql', [
+    '-h', DB_HOST, '-p', DB_PORT, '-U', DB_USER, '-d', TEST_DB,
+    '-t', '-A', '-c',
+    `SELECT count(*) FROM pg_indexes WHERE indexname = 'goods_receipt_store_idempotency_no_po_unique'`
+  ]).trim()
+  if (grNoPoIdxCount !== '1') missingIndexes.push('goods_receipt_store_idempotency_no_po_unique')
   const trIdxCount = run('psql', [
     '-h', DB_HOST, '-p', DB_PORT, '-U', DB_USER, '-d', TEST_DB,
     '-t', '-A', '-c',

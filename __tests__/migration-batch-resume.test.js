@@ -23,7 +23,7 @@ const M1 = '20261013000001-p1-transaction-attribution.js'
 const B1 = batches.E2_BATCHES.B1.migrations
 const B2 = batches.E2_BATCHES.B2.migrations
 const B3 = batches.E2_BATCHES.B3.migrations
-const ALL_E2 = [...B1, ...B2, ...B3, ...batches.E2_BATCHES.B4.migrations]
+const ALL_E2 = batches.BATCH_ORDER.flatMap((id) => batches.E2_BATCHES[id].migrations)
 const B1_FIRST_12 = B1.slice(0, 12)
 
 // Migrations added after the 2026-10-08 incident are not part of the

@@ -111,7 +111,7 @@ router.put(
   '/:id/decide-variance',
   authorization,
   validateStoreAccess,
-  requireRole('super_admin'),
+  requireRole('super_admin', 'admin'),
   validate(decideVarianceSchema),
   cashRegisterController.decideVariance
 )

@@ -364,10 +364,12 @@ async function createReversalEntry({
   sourceType,
   referenceId,
   date,
-  createdBy
+  createdBy,
+  transaction
 }) {
   const lines = await db.journal_entry_line.findAll({
-    where: { journalEntry: originalEntry.id }
+    where: { journalEntry: originalEntry.id },
+    transaction
   })
   const reversed = lines.map((l) => ({
     account: l.account,
@@ -384,7 +386,38 @@ async function createReversalEntry({
     sourceType,
     referenceId: referenceId ?? originalEntry.referenceId,
     lines: reversed,
-    createdBy
+    createdBy,
+    transaction
+  })
+}
+
+// Cancelling an already-completed goods receipt must unwind its purchase
+// journal (Dr Inventory / Cr AP) exactly once. The reversal is keyed by the
+// same receipt id, so a retried outbox job replays the existing entry rather
+// than posting a second one.
+async function reversePurchaseJournal({
+  store,
+  receiptId,
+  description,
+  date,
+  createdBy,
+  transaction
+}) {
+  if (!store || !receiptId) return null
+  const original = await db.journal_entry.findOne({
+    where: { store, sourceType: 'purchase', referenceId: receiptId },
+    transaction
+  })
+  if (!original) return null
+  return createReversalEntry({
+    store,
+    originalEntry: original,
+    sourceType: 'purchase_reversal',
+    referenceId: receiptId,
+    description: description || `Reversal of goods receipt ${receiptId}`,
+    date,
+    createdBy,
+    transaction
   })
 }
 
@@ -578,6 +611,16 @@ async function postPurchaseJournal({
   date,
   createdBy
 }) {
+  // A receipt cancelled after completion must not gain a purchase journal
+  // from a delayed/retried outbox attempt. Cancellation enqueues the
+  // reversal instead (reversePurchaseJournal).
+  if (receiptId) {
+    const receipt = await db.goodsReceipt.findByPk(receiptId, {
+      attributes: ['status']
+    })
+    if (receipt?.status === 'cancelled') return null
+  }
+
   const gross = items.reduce(
     (s, i) =>
       s + Math.round((Number(i.costPrice) || 0) * (Number(i.qtyReceived) || 0)),
@@ -1248,6 +1291,7 @@ module.exports = {
   postOrderCogsJournal,
   computeOrderCogs,
   postPurchaseJournal,
+  reversePurchaseJournal,
   postPurchasePaymentJournal,
   postPurchaseReturnJournal,
   postSalesReturnJournal,

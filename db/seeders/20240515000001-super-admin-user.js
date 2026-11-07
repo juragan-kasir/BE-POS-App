@@ -18,51 +18,47 @@ module.exports = {
 
     const superAdminRoleId = roles[0].id
 
-    // DR-06: never a known password — SEED_SUPER_ADMIN_PASSWORD, or a random
-    // one per account (set it with a password reset). Never logged.
-    const hashSeed = async () => bcrypt.hash(seedPassword('SEED_SUPER_ADMIN_PASSWORD').password, 10)
-    const hashedPasswordAngga = await hashSeed()
-    const hashedPasswordFebi = await hashSeed()
-    const hashedPasswordSurya = await hashSeed()
-    const hashedPasswordTegar = await hashSeed()
-    const hashedPasswordLuthfi = await hashSeed()
-    const hashedPasswordSuperAdmin = await hashSeed()
+    // Product decision (2026-11-07): one platform-wide super admin account.
+    // Store-bound super_admin accounts remain a separate tenant-scoped role
+    // and are never seeded here.
+    const user = {
+      userName: 'super_admin',
+      fullName: 'Super Admin',
+      password: await bcrypt.hash(
+        seedPassword('SEED_SUPER_ADMIN_PASSWORD').password,
+        10
+      ),
+      email: 'superadmin@posapp.com',
+      employeeID: 'EMP-0001'
+    }
 
-    const allUsers = [
-      { userName: 'angga', fullName: 'angga', password: hashedPasswordAngga, email: 'angga@posapp.com', employeeID: 'EMP-0002' },
-      { userName: 'luthfi', fullName: 'luthfi', password: hashedPasswordLuthfi, email: 'luthfi@posapp.com', employeeID: 'EMP-0003' },
-      { userName: 'febi', fullName: 'febi', password: hashedPasswordFebi, email: 'febi@posapp.com', employeeID: 'EMP-0004' },
-      { userName: 'surya', fullName: 'surya', password: hashedPasswordSurya, email: 'surya@posapp.com', employeeID: 'EMP-0005' },
-      { userName: 'tegar', fullName: 'tegar', password: hashedPasswordTegar, email: 'tegar@posapp.com', employeeID: 'EMP-0006' },
-      { userName: 'super_admin', fullName: 'Super Admin', password: hashedPasswordSuperAdmin, email: 'superadmin@posapp.com', employeeID: 'EMP-0001' }
-    ]
-
-    const [existing] = await queryInterface.sequelize.query(
-      `SELECT "userName" FROM "user" WHERE "roleType" = 'super_admin'`
+    const existing = await queryInterface.sequelize.query(
+      `SELECT "userName" FROM "user" WHERE "userName" = :userName LIMIT 1`,
+      {
+        replacements: { userName: user.userName },
+        type: Sequelize.QueryTypes.SELECT
+      }
     )
-    const existingNames = existing.map((r) => r.userName)
 
-    const toInsert = allUsers
-      .filter((u) => !existingNames.includes(u.userName))
-      .map((u) => ({
-        ...u,
-        roleType: 'super_admin',
-        roleId: superAdminRoleId,
-        userType: 'super_admin',
-        status: 'active',
-        createdAt: new Date(),
-        updatedAt: new Date()
-      }))
-
-    if (toInsert.length > 0) {
-      await queryInterface.bulkInsert('user', toInsert)
-      console.log(`Created ${toInsert.length} super admin user(s): ${toInsert.map((u) => u.userName).join(', ')}`)
+    if (existing.length === 0) {
+      await queryInterface.bulkInsert('user', [
+        {
+          ...user,
+          roleType: 'super_admin',
+          roleId: superAdminRoleId,
+          userType: 'super_admin',
+          status: 'active',
+          createdAt: new Date(),
+          updatedAt: new Date()
+        }
+      ])
+      console.log('Created the platform super admin user: super_admin')
     } else {
-      console.log('All super admin users already exist.')
+      console.log('Platform super admin user already exists.')
     }
   },
 
-  down: async (queryInterface, Sequelize) => {
-    await queryInterface.bulkDelete('user', { roleType: 'super_admin' }, {})
+  down: async (queryInterface) => {
+    await queryInterface.bulkDelete('user', { userName: ['super_admin'] }, {})
   }
 }

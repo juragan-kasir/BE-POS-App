@@ -17,7 +17,7 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.STRING
       },
       purchaseOrderId: {
-        allowNull: false,
+        allowNull: true,
         type: DataTypes.INTEGER
       },
       receivedDate: {
