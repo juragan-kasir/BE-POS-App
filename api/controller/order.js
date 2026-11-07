@@ -4180,6 +4180,40 @@ const CUSTOMER_MENU_CATEGORY_ATTRIBUTES = [
   'status'
 ]
 
+exports.getCustomerTable = async (req, res) => {
+  const { store, tableId } = req.query
+  const storeId = Number(store)
+  const tableIdNum = Number(tableId)
+  if (!store || !tableId || !Number.isInteger(storeId) || storeId <= 0 || !Number.isInteger(tableIdNum) || tableIdNum <= 0) {
+    return res.status(400).json({
+      success: false,
+      code: 'VALIDATION_ERROR',
+      message: 'store and tableId are required'
+    })
+  }
+  try {
+    const table = await Table.findOne({
+      where: { id: tableIdNum, store: storeId },
+      attributes: ['id', 'name']
+    })
+    if (!table) {
+      return res.status(404).json({
+        success: false,
+        code: 'TABLE_NOT_FOUND',
+        message: 'Table not found'
+      })
+    }
+    return res.status(200).json({
+      success: true,
+      message: 'Success',
+      data: { id: table.id, name: table.name }
+    })
+  } catch (error) {
+    console.error('Error:', error)
+    return res.status(500).json({ success: false, message: 'Internal server error' })
+  }
+}
+
 exports.getCustomerMenu = async (req, res) => {
   const { store } = req.query
 
