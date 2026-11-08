@@ -3,7 +3,11 @@ const Member = db.member
 const { Op } = require('sequelize')
 const { createAudit } = require('../../utils/auditLog')
 const { enrichAuditFields } = require('../../utils/auditFields')
-const { callerStoreIds, storeIdsCondition } = require('../../utils/tenantScope')
+const {
+  callerStoreIds,
+  storeIdsCondition,
+  storeTenantId
+} = require('../../utils/tenantScope')
 const {
   canonicalPhone,
   isGuestPhone,
@@ -348,12 +352,16 @@ exports.addNewMember = async (req, res) => {
     })
 
     if (createdMember.getDataValue) {
-      createAudit(
+      await createAudit(
         req,
         'create',
         'member',
         createdMember.id,
-        `Created member: ${createdMember.name}`
+        `Created member: ${createdMember.name}`,
+        undefined,
+        undefined,
+        undefined,
+        await storeTenantId(createdMember.store)
       )
       return res.status(201).json({
         success: true,
@@ -488,14 +496,16 @@ exports.editMember = async (req, res) => {
 
     const updatedMember = await member.update(updateData)
 
-    createAudit(
+    await createAudit(
       req,
       'update',
       'member',
       id,
       `Updated member: ${id}`,
       member.dataValues,
-      updateData
+      updateData,
+      undefined,
+      await storeTenantId(member.store)
     )
 
     return res.status(200).json({
@@ -539,9 +549,20 @@ exports.deleteMember = async (req, res) => {
       })
     }
 
+    const auditTenantId = await storeTenantId(member.store)
     await member.destroy()
 
-    createAudit(req, 'delete', 'member', id, `Deleted member: ${member.name}`)
+    await createAudit(
+      req,
+      'delete',
+      'member',
+      id,
+      `Deleted member: ${member.name}`,
+      undefined,
+      undefined,
+      undefined,
+      auditTenantId
+    )
 
     return res.status(200).json({
       success: true,

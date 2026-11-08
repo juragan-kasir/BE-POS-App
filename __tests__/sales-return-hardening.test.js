@@ -203,6 +203,13 @@ afterAll(async () => {
     where: { id: [adminUser?.id, adminOtherUser?.id].filter(Boolean) },
     force: true
   })
+  // A global super_admin has no store, so the store-scoped delete below
+  // never removed it. It then polluted global-super-admin-singleton in a
+  // later shard.
+  await db.user.destroy({
+    where: { userName: 'superadmin_sr_hardening' },
+    force: true
+  })
   await db.user.destroy({ where: { store: storeOther.id }, force: true })
   await db.location.destroy({ where: { id: [store.id, storeOther.id] }, force: true })
 })

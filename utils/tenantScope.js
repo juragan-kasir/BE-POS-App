@@ -302,6 +302,33 @@ async function superAdminStoreIds(req) {
 const positiveIds = (list) =>
   (list || []).map(Number).filter((n) => Number.isInteger(n) && n > 0)
 
+// The tenant of one outlet: its tenantId, or null for an outlet without a
+// tenant or an unknown id. Shared by promo scoping and audit attribution.
+async function storeTenantId(storeId) {
+  const id = Number(storeId)
+  if (!Number.isInteger(id) || id <= 0) return null
+  const db = require('../db/models')
+  const row = await db.location.findByPk(id, {
+    attributes: ['tenantId'],
+    paranoid: false
+  })
+  return row?.tenantId ?? null
+}
+
+// The distinct tenants of a set of outlets ([null] when none has a tenant).
+async function storesTenantIds(storeIds) {
+  const ids = [...new Set(positiveIds(storeIds))]
+  if (ids.length === 0) return []
+  const db = require('../db/models')
+  const rows = await db.location.findAll({
+    where: { id: ids },
+    attributes: ['tenantId'],
+    paranoid: false,
+    raw: true
+  })
+  return [...new Set(rows.map((r) => r.tenantId ?? null))]
+}
+
 async function callerStoreIds(req) {
   const ctx = req?.authContext
   if (ctx) {
@@ -400,6 +427,8 @@ async function tenantArrayStoreWhere(req, where = {}, { includeShared = false } 
 }
 
 module.exports = {
+  storeTenantId,
+  storesTenantIds,
   tenantArrayStoreWhere,
   productInCallerScope,
   callerStoreIds,

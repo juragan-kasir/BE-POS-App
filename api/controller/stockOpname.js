@@ -10,7 +10,12 @@ const {
   InventoryLinkError,
   inventoryLinkErrorBody
 } = require('../service/inventoryLinkService')
-const { scalarStoreScope, resolveStoreId, tenantStoreWhere } = require('../../utils/tenantScope')
+const {
+  scalarStoreScope,
+  resolveStoreId,
+  storeTenantId,
+  tenantStoreWhere
+} = require('../../utils/tenantScope')
 const { assertDecimalQuantity } = require('../../utils/decimalQuantityGuard')
 
 // Phase 34: the six primary stock-opname quantity fields, all DECIMAL(10,4).
@@ -229,9 +234,6 @@ const stockOpnameController = {
   async getById(req, res) {
     try {
       const { id } = req.params
-      const store = resolveStoreId(req)
-      const userRole = req.user?.roleType
-
       const whereClause = { id }
       Object.assign(whereClause, await tenantStoreWhere(req))
 
@@ -621,8 +623,6 @@ const stockOpnameController = {
   async update(req, res) {
     try {
       const { id } = req.params
-      const store = resolveStoreId(req)
-      const userRole = req.user?.roleType
       const { items, notes, date, auditDate, auditor } = req.body
 
       const whereClause = { id }
@@ -730,7 +730,11 @@ const stockOpnameController = {
         'update',
         'stock_opname',
         id,
-        'Updated stock_opname: ' + id
+        'Updated stock_opname: ' + id,
+        undefined,
+        undefined,
+        undefined,
+        await storeTenantId(opname.store)
       )
 
       return res.status(200).json({
@@ -750,9 +754,6 @@ const stockOpnameController = {
   async delete(req, res) {
     try {
       const { id } = req.params
-      const store = resolveStoreId(req)
-      const userRole = req.user?.roleType
-
       const whereClause = { id }
       Object.assign(whereClause, await tenantStoreWhere(req))
 
@@ -778,6 +779,7 @@ const stockOpnameController = {
         where: { stockOpname: id }
       })
 
+      const auditTenantId = await storeTenantId(opname.store)
       await opname.destroy()
 
       await createAudit(
@@ -785,7 +787,11 @@ const stockOpnameController = {
         'delete',
         'stock_opname',
         id,
-        'Deleted stock_opname: ' + id
+        'Deleted stock_opname: ' + id,
+        undefined,
+        undefined,
+        undefined,
+        auditTenantId
       )
 
       return res.status(200).json({
@@ -1030,7 +1036,11 @@ const stockOpnameController = {
             'update',
             'stock_opname',
             id,
-            'Updated stock_opname status to ' + status + ': ' + id
+            'Updated stock_opname status to ' + status + ': ' + id,
+            undefined,
+            undefined,
+            undefined,
+            await storeTenantId(opname.store)
           )
 
           const updatedWithItems = await db.stockOpname.findByPk(id, {
@@ -1058,7 +1068,11 @@ const stockOpnameController = {
         'update',
         'stock_opname',
         id,
-        'Updated stock_opname status to ' + status + ': ' + id
+        'Updated stock_opname status to ' + status + ': ' + id,
+        undefined,
+        undefined,
+        undefined,
+        await storeTenantId(opname.store)
       )
 
       const updated = await db.stockOpname.findByPk(id)
@@ -1081,9 +1095,6 @@ const stockOpnameController = {
 
   async downloadExcel(req, res) {
     try {
-      const store = resolveStoreId(req)
-      const userRole = req.user?.roleType
-
       // Wave 4: only the caller's outlets — a store-bound owner used to get
       // every tenant's outlet names here.
       const locationWhere = await tenantStoreWhere(req, { status: 'active' }, 'id')
@@ -1404,7 +1415,11 @@ const stockOpnameController = {
         'import',
         'stock_opname',
         null,
-        'Imported stock_opname from file'
+        'Imported stock_opname from file',
+        undefined,
+        undefined,
+        undefined,
+        await storeTenantId(result.store)
       )
 
       return res.status(201).json({

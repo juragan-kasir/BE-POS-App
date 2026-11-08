@@ -15,6 +15,7 @@ const {
   resolveStoreId,
   callerStoreIds,
   productInCallerScope,
+  storeTenantId,
   storeIdsCondition,
   storesInCallerTenant,
   tenantStoreWhere
@@ -3353,6 +3354,13 @@ order: [['updatedAt', 'DESC']],
         }
       }
 
+      const auditStoreId =
+        storePrices.map((sp) => sp.storeId).find((sid) => sid !== 'base') ??
+        req.storeId ??
+        req.user?.store ??
+        null
+      const auditTenantId = await storeTenantId(auditStoreId)
+
       const result = await db.sequelize.transaction(async (t) => {
         const priorStorePrices = []
         const baseRow = storePrices.find((sp) => sp.storeId === 'base')
@@ -3389,7 +3397,8 @@ order: [['updatedAt', 'DESC']],
           description: 'Updated per-store pricing',
           oldValues: { storePrices: priorStorePrices },
           newValues: { storePrices },
-          transaction: t
+          transaction: t,
+          tenantId: auditTenantId
         })
 
         return product

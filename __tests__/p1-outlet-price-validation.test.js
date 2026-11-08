@@ -24,6 +24,9 @@ jest.mock('../db/models', () => ({
     findOne: jest.fn(),
     upsert: jest.fn()
   },
+  location: {
+    findByPk: jest.fn().mockResolvedValue(null)
+  },
   sequelize: {
     transaction: jest.fn((cb) => cb({}))
   }
@@ -210,7 +213,7 @@ describe('updatePriceByStore — price validation', () => {
 
     try {
       await posController.updatePriceByStore(req, res)
-    } catch (e) {
+    } catch {
       // Schema validation fails before controller
     }
 
