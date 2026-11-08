@@ -14,6 +14,7 @@ const {
   isSuperAdmin,
   resolveStoreId,
   callerStoreIds,
+  productInCallerScope,
   storeIdsCondition,
   storesInCallerTenant,
   tenantStoreWhere
@@ -3185,9 +3186,12 @@ order: [['updatedAt', 'DESC']],
         })
       }
 
-      const product = await db.product.findByPk(productId, {
-        attributes: ['id', 'nameProduct', 'price']
-      })
+      // Sweep stage 2: another tenant's product answers like a missing one.
+      const product = (await productInCallerScope(req, productId))
+        ? await db.product.findByPk(productId, {
+            attributes: ['id', 'nameProduct', 'price']
+          })
+        : null
 
       if (!product) {
         return res.status(404).json({

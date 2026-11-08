@@ -4,7 +4,7 @@ const ExcelJS = require('exceljs')
 const { createAudit } = require('../../utils/auditLog')
 const batchService = require('../service/batchService')
 const { withDeadlockRetry } = require('../../utils/deadlockRetry')
-const { resolveStoreId } = require('../../utils/tenantScope')
+const { resolveStoreId, callerStoreIds } = require('../../utils/tenantScope')
 const {
   calculatePurchaseOrderFulfillmentStatus
 } = require('../service/purchaseOrderFulfillmentService')
@@ -121,11 +121,24 @@ const purchaseOrderController = {
       if (search) {
         where[Op.or] = [{ orderNumber: { [Op.iLike]: `%${search}%` } }]
       }
-      let storeIds = null
-      if (isSuperAdmin && stores) {
-        storeIds = stores.split(',').map(Number).filter(Boolean)
-      } else if (!isSuperAdmin && req.storeId) {
-        storeIds = [parseInt(req.storeId)]
+      // Sweep stage 2: always inside the caller's roster. A store-bound
+      // super_admin (client owner) with no ?stores= used to list every
+      // tenant's purchase orders, and could name another tenant's outlet.
+      const allowed = await callerStoreIds(req)
+      let storeIds = allowed
+      if (!isSuperAdmin && req.storeId) {
+        // Staff keep their active outlet, as before.
+        const active = parseInt(req.storeId)
+        storeIds = allowed === null || allowed.includes(active) ? [active] : [-1]
+      } else if (isSuperAdmin && stores) {
+        const requested = stores.split(',').map(Number).filter(Boolean)
+        storeIds =
+          allowed === null
+            ? requested
+            : requested.filter((id) => allowed.includes(id))
+        if (storeIds.length === 0) storeIds = [-1]
+      } else if (storeIds && storeIds.length === 0) {
+        storeIds = [-1]
       }
       if (storeIds && storeIds.length === 1) {
         where.store = storeIds[0]

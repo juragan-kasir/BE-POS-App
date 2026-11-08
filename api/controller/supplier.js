@@ -7,7 +7,8 @@ const ExcelJS = require('exceljs')
 const { parseMinOrderQty } = require('../../utils/minOrderQty')
 const {
   superAdminStoreIds,
-  nullableArrayStoresWhere
+  nullableArrayStoresWhere,
+  productInCallerScope
 } = require('../../utils/tenantScope')
 const Location = db.location
 
@@ -36,11 +37,14 @@ const supplierListScope = async (req, requestedStore) => {
     return nullableArrayStoresWhere([Number.isFinite(ownStore) ? ownStore : -1])
   }
   const storeId = Number(requestedStore)
+  const scope = await superAdminStoreIds(req)
   if (requestedStore !== undefined && requestedStore !== null && requestedStore !== '' &&
       Number.isFinite(storeId) && storeId > 0) {
+    // Sweep stage 2: a store-bound super_admin may narrow to one of its own
+    // outlets, never name another tenant's.
+    if (scope && !scope.includes(storeId)) return nullableArrayStoresWhere([-1])
     return nullableArrayStoresWhere([storeId])
   }
-  const scope = await superAdminStoreIds(req)
   return scope ? nullableArrayStoresWhere(scope) : null
 }
 
@@ -1712,6 +1716,14 @@ const supplierController = {
           message: 'Supplier product table not available',
           data: []
         })
+      }
+
+      // Sweep stage 2: comparing by product reveals the product and its
+      // supplier prices, so the product must belong to the caller's stores.
+      if (productId && !(await productInCallerScope(req, productId))) {
+        return res
+          .status(404)
+          .json({ success: false, message: 'Product not found' })
       }
 
       const where = {}
