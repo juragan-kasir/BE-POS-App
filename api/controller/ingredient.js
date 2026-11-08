@@ -2,7 +2,11 @@ const db = require('../../db/models')
 const { Op } = require('sequelize')
 const { createAudit } = require('../../utils/auditLog')
 const { enrichAuditFields } = require('../../utils/auditFields')
-const { resolveStoreId, tenantStoreWhere } = require('../../utils/tenantScope')
+const {
+  resolveStoreId,
+  storeTenantId,
+  tenantStoreWhere
+} = require('../../utils/tenantScope')
 const { visibleWhere } = require('../../utils/ownedOrSharedScope')
 
 // Wave 4: an ingredient may only be filed under a category its caller can
@@ -270,12 +274,16 @@ const ingredientController = {
         }
         return created.reload({ transaction: t })
       })
-      createAudit(
+      await createAudit(
         req,
         'create',
         'ingredient',
         ingredient.id,
-        'Created ingredient: ' + (ingredient.name || ingredient.id)
+        'Created ingredient: ' + (ingredient.name || ingredient.id),
+        undefined,
+        undefined,
+        undefined,
+        await storeTenantId(ingredient.store)
       )
 
       return res.status(201).json({
@@ -376,7 +384,17 @@ const ingredientController = {
           message: 'Ingredient not found'
         })
       }
-      createAudit(req, 'update', 'ingredient', id, 'Updated ingredient: ' + id)
+      await createAudit(
+        req,
+        'update',
+        'ingredient',
+        id,
+        'Updated ingredient: ' + id,
+        undefined,
+        undefined,
+        undefined,
+        await storeTenantId(updated.store)
+      )
 
       return res.status(200).json({
         success: true,
@@ -422,14 +440,16 @@ const ingredientController = {
         })
       }
       const { ingredient, quantityBefore, quantityChange, quantityAfter } = outcome
-      createAudit(
+      await createAudit(
         req,
         'update',
         'ingredient',
         ingredient.id,
         `Adjusted ingredient stock (${type}): ${ingredient.name} ${quantityBefore} -> ${quantityAfter}`,
         { stock: quantityBefore },
-        { stock: quantityAfter, type, notes: notes || null }
+        { stock: quantityAfter, type, notes: notes || null },
+        undefined,
+        await storeTenantId(ingredient.store)
       )
 
       return res.status(200).json({
@@ -626,8 +646,19 @@ const ingredientController = {
         })
       }
 
+      const auditTenantId = await storeTenantId(ingredient.store)
       await ingredient.destroy()
-      createAudit(req, 'delete', 'ingredient', id, 'Deleted ingredient: ' + id)
+      await createAudit(
+        req,
+        'delete',
+        'ingredient',
+        id,
+        'Deleted ingredient: ' + id,
+        undefined,
+        undefined,
+        undefined,
+        auditTenantId
+      )
 
       return res.status(200).json({
         success: true,

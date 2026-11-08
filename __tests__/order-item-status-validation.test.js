@@ -11,6 +11,7 @@ const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 // Phase 31 Batch 2 (B-3): invalid itemStatus must be rejected at the API
 // validation boundary (400) instead of reaching PostgreSQL and surfacing
 // as a 500 enum error. Valid lifecycle values must keep working.
+let tenant = null
 let store = null
 let category = null
 let product = null
@@ -19,7 +20,15 @@ let item = null
 let token = null
 
 beforeAll(async () => {
-  store = await db.location.create({ name: 'ITEMSTATUS_STORE', status: 'active' })
+  tenant = await db.tenant.create({
+    code: `ITEMSTATUS_T_${Date.now()}`,
+    name: 'ITEMSTATUS_TENANT'
+  })
+  store = await db.location.create({
+    name: 'ITEMSTATUS_STORE',
+    status: 'active',
+    tenantId: tenant.id
+  })
   category = await db.category.create({ name: 'ITEMSTATUS_CAT', status: 'active' })
   product = await db.product.create({
     nameProduct: 'ITEMSTATUS_PRODUCT',
@@ -66,6 +75,7 @@ afterAll(async () => {
   await db.product.destroy({ where: { id: product?.id }, force: true })
   await db.category.destroy({ where: { id: category?.id }, force: true })
   await db.location.destroy({ where: { id: store?.id }, force: true })
+  await db.tenant.destroy({ where: { id: tenant?.id }, force: true })
 })
 
 async function setItemStatus(itemStatus) {
@@ -119,7 +129,11 @@ describe('PUT /order/update-item-status — request-boundary validation', () => 
 // PGA-22 (product-grade audit 2026-11-02): kitchen item-status flips left
 // no audit row.
 describe('PUT /order/update-item-status — audit trail', () => {
-  const audits = () => db.auditLog.findAll({ where: { entity: 'order_item', entityId: item.id } })
+  const audits = () =>
+    db.auditLog.findAll({
+      where: { entity: 'order_item', entityId: item.id },
+      order: [['id', 'DESC']]
+    })
 
   test('a status change writes one audit row with old and new status', async () => {
     await db.order_item.update({ status: 'pending' }, { where: { id: item.id } })
@@ -128,9 +142,10 @@ describe('PUT /order/update-item-status — audit trail', () => {
     expect(res.status).toBe(200)
     const rows = await audits()
     expect(rows).toHaveLength(before + 1)
-    const last = rows[rows.length - 1]
+    const last = rows[0]
     expect(last.oldValues).toEqual(expect.objectContaining({ status: 'pending' }))
     expect(last.newValues).toEqual(expect.objectContaining({ status: 'ready' }))
+    expect(last.tenantId).toBe(tenant.id)
   })
 
   test('setting the same status again writes nothing', async () => {

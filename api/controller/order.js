@@ -4066,7 +4066,9 @@ exports.updateOrderItemStatus = async (req, res) => {
         item.id,
         `Item ${item.productName || item.id} of order ${parentOrder.orderNumber || id}: ${previousItemStatus || '-'} → ${itemStatus}`,
         { status: previousItemStatus, order: Number(id) },
-        { status: itemStatus, order: Number(id) }
+        { status: itemStatus, order: Number(id) },
+        undefined,
+        await storeTenantId(parentOrder.store)
       )
     }
 

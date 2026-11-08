@@ -1,5 +1,6 @@
 const db = require('../db/models')
 const crypto = require('crypto')
+const { storeTenantId } = require('./tenantScope')
 
 const toTenantId = (value) => {
   if (value === null || value === undefined || value === '') return null
@@ -134,7 +135,7 @@ const auditLog = async ({
 // they do today. Since AUD-2 the payload is redacted at the auditLog()
 // choke point above, so legacy callers are safe by default. New call sites
 // that already hold redacted values may still prefer redactAndAudit().
-const createAudit = (
+const createAudit = async (
   req,
   action,
   entity,
@@ -142,13 +143,31 @@ const createAudit = (
   description,
   oldValues,
   newValues,
-  transaction
+  transaction,
+  tenantId
 ) => {
+  // Trusted context only. The raw `store` cookie is client-controlled; where
+  // validateStoreAccess runs it has already been checked and copied into
+  // req.storeId, and where it does not run it must not reach the audit row.
+  const store = req.storeId || req.user?.store || null
+  // An explicit tenantId is server-side resource ownership (the row the
+  // audit event is about) and wins over the actor's context. It also lets a
+  // caller force null for a genuinely tenant-less event. Without one, keep
+  // the actor context, then fall back to the persisted store's tenant so a
+  // store-less vendor action on a tenant-owned store is never recorded as
+  // tenantId NULL (BR-AUD-009 / PGA-22).
+  let resolvedTenantId
+  if (tenantId !== undefined) {
+    resolvedTenantId = tenantId
+  } else {
+    resolvedTenantId =
+      req.authContext?.activeTenantId ?? req.user?.tenantId ?? null
+    if (resolvedTenantId == null && store != null) {
+      resolvedTenantId = await storeTenantId(store)
+    }
+  }
   return auditLog({
-    // Trusted context only. The raw `store` cookie is client-controlled; where
-    // validateStoreAccess runs it has already been checked and copied into
-    // req.storeId, and where it does not run it must not reach the audit row.
-    store: req.storeId || req.user?.store || null,
+    store,
     userId: req.user?.id,
     // req.user (utils/authorization.js) carries userName/fullName, never
     // name/username, so this used to store null on every row. Same actor
@@ -162,7 +181,7 @@ const createAudit = (
     newValues,
     ipAddress: req.ip,
     userAgent: req.get('User-Agent'),
-    tenantId: req.authContext?.activeTenantId ?? req.user?.tenantId ?? null,
+    tenantId: resolvedTenantId,
     transaction
   })
 }
@@ -173,7 +192,16 @@ const createAudit = (
 // ever serialized to JSONB.
 const redactAndAudit = (
   req,
-  { action, entity, entityId, description, oldValues, newValues, transaction }
+  {
+    action,
+    entity,
+    entityId,
+    description,
+    oldValues,
+    newValues,
+    transaction,
+    tenantId
+  }
 ) => {
   return createAudit(
     req,
@@ -183,7 +211,8 @@ const redactAndAudit = (
     description,
     redactValue(toPlain(oldValues), new WeakSet()),
     redactValue(toPlain(newValues), new WeakSet()),
-    transaction
+    transaction,
+    tenantId
   )
 }
 

@@ -263,6 +263,56 @@ describe('AUD-1 compatibility', () => {
   })
 })
 
+describe('AUD-1 tenant resolution', () => {
+  test('legacy createAudit resolves tenant from the store when the request has none', async () => {
+    const tenantStore = await db.location.create({
+      name: `${P}STORE_T`,
+      status: 'active',
+      tenantId: tenantA.id
+    })
+    try {
+      await createAudit(
+        {
+          storeId: tenantStore.id,
+          user: { id: 4243, userName: `${P}TENANT_USER` },
+          ip: '127.0.0.1',
+          get: () => 'jest-agent'
+        },
+        'update',
+        `${P}TENANT_LEGACY`,
+        1,
+        `${P}tenant-legacy`
+      )
+      const row = await db.auditLog.findOne({
+        where: { description: `${P}tenant-legacy` }
+      })
+      expect(row.tenantId).toBe(tenantA.id)
+    } finally {
+      await db.location.destroy({ where: { id: tenantStore.id }, force: true })
+    }
+  })
+
+  test('explicit resource tenant wins over request context', async () => {
+    const req = baseReq()
+    req.authContext = { activeTenantId: tenantA.id }
+    await createAudit(
+      req,
+      'update',
+      `${P}TENANT_EXPLICIT`,
+      1,
+      `${P}tenant-explicit`,
+      undefined,
+      undefined,
+      undefined,
+      tenantB.id
+    )
+    const row = await db.auditLog.findOne({
+      where: { entity: `${P}TENANT_EXPLICIT` }
+    })
+    expect(row.tenantId).toBe(tenantB.id)
+  })
+})
+
 describe('AUD-1 transaction readiness', () => {
   test('participates in caller transaction: rollback removes the row', async () => {
     const t = await db.sequelize.transaction()

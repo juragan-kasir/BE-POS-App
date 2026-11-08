@@ -7,29 +7,7 @@ const { normalizeStoreIds } = require('./storeValidation')
 // outlets that have no tenant either (pre-tenant deployments), never by an
 // outlet of a tenant.
 
-const db = () => require('../db/models')
-
-// The tenant of one outlet: its tenantId, or null for an outlet without a
-// tenant or an unknown id.
-async function storeTenantId(storeId) {
-  const id = Number(storeId)
-  if (!Number.isInteger(id) || id <= 0) return null
-  const row = await db().location.findByPk(id, { attributes: ['tenantId'], paranoid: false })
-  return row?.tenantId ?? null
-}
-
-// The distinct tenants of a set of outlets ([null] when none has a tenant).
-async function storesTenantIds(storeIds) {
-  const ids = [...new Set(storeIds.map(Number).filter((n) => Number.isInteger(n) && n > 0))]
-  if (ids.length === 0) return []
-  const rows = await db().location.findAll({
-    where: { id: ids },
-    attributes: ['tenantId'],
-    paranoid: false,
-    raw: true
-  })
-  return [...new Set(rows.map((r) => r.tenantId ?? null))]
-}
+const { storeTenantId, storesTenantIds } = require('./tenantScope')
 
 // The caller's tenant boundary for promo campaigns:
 //   { global: true }          store-less vendor super_admin / platform actor

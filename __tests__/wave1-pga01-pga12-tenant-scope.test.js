@@ -193,6 +193,21 @@ describe('member edit and delete (PGA-01)', () => {
     expect((await db.member.findByPk(member.id)).name).toBe(member.name)
   })
 
+  test('a store-less vendor write records the resource tenant on the audit row', async () => {
+    const member = await makeMember(s.a2)
+    const res = await request(app)
+      .put(`/member/edit-member/${member.id}`)
+      .set(as(t.global))
+      .send({ nameMember: unique('VENDORNAME') })
+    expect(res.status).toBe(200)
+    const row = await db.auditLog.findOne({
+      where: { entity: 'member', entityId: String(member.id), action: 'update' },
+      order: [['id', 'DESC']]
+    })
+    expect(row).not.toBeNull()
+    expect(row.tenantId).toBe(ids.tenants[0])
+  })
+
   test('the member list without ?store= shows the owner\'s tenant only', async () => {
     const mine = await makeMember(s.a2)
     const theirs = await makeMember(s.b1)
