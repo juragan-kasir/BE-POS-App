@@ -222,10 +222,22 @@ const E2_BATCHES = Object.freeze({
     // super_admin: the second migration retires extra NULL-store
     // super_admins and never touches store-bound ones. Both replay safely.
     openGates: []
+  }),
+  B14: deepFreeze({
+    id: 'B14',
+    title: 'Retail R1: sell by weight (decimal quantities)',
+    expectedCount: 1,
+    migrations: ['20261108000001-retail-r1-decimal-quantity.js'],
+    // Retail R1 (product owner, 2026-11-08): up adds product.allowDecimalQty
+    // (default false) and widens the sale / return / sales-report quantity
+    // columns to NUMERIC; whole numbers convert exactly and nothing else is
+    // rewritten. down refuses while any fractional quantity exists. The BE
+    // code writes the new column, so B14 must be recorded before it deploys.
+    openGates: []
   })
 })
 
-const BATCH_ORDER = Object.freeze(['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B9', 'B10', 'B11', 'B12', 'B13'])
+const BATCH_ORDER = Object.freeze(['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B9', 'B10', 'B11', 'B12', 'B13', 'B14'])
 
 // D-08 B1 resume contracts. A resume finishes a batch whose earlier members
 // were recorded by an interrupted run; it never redefines the batch (the

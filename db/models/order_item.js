@@ -22,7 +22,13 @@ module.exports = (sequelize, DataTypes) => {
       },
       quantity: {
         allowNull: false,
-        type: DataTypes.INTEGER
+        type: DataTypes.DECIMAL(12, 3),
+        // Retail R1: sold-by-weight quantities keep three decimals; read
+        // back as a number (Postgres NUMERIC arrives as a string).
+        get() {
+          const v = this.getDataValue('quantity')
+          return v === null || v === undefined ? v : Number(v)
+        }
       },
       price: {
         allowNull: false,

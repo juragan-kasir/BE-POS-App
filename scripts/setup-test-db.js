@@ -491,6 +491,31 @@ module.exports = async () => {
     )
   }
 
+  // Retail R1 (migration 20261108000001, batch B14): sell by weight. Test
+  // DBs cloned before the migration keep integer quantities, so converge
+  // them exactly as the migration does (widening is a no-op once numeric).
+  try {
+    psqlTest(
+      'ALTER TABLE "product" ADD COLUMN IF NOT EXISTS "allowDecimalQty" BOOLEAN NOT NULL DEFAULT false'
+    )
+    for (const [table, column, type] of [
+      ['order_item', 'quantity', 'NUMERIC(12,3)'],
+      ['order', 'totalQuantity', 'NUMERIC(14,3)'],
+      ['sales_return_item', 'qty', 'NUMERIC(12,3)'],
+      ['product_sales_summary', 'quantity_sold', 'NUMERIC(14,3)'],
+      ['category_sales_summary', 'quantity_sold', 'NUMERIC(14,3)'],
+      ['best_selling', 'totalSelling', 'NUMERIC(14,3)']
+    ]) {
+      psqlTest(
+        `ALTER TABLE "${table}" ALTER COLUMN "${column}" TYPE ${type} USING "${column}"::${type}`
+      )
+    }
+  } catch (error) {
+    throw new Error(
+      `[setup-test-db] failed to provision decimal quantities: ${error.message}`
+    )
+  }
+
   // BA DR-28 step 4 (migration 20261024000001, batch B5): widen the columns
   // narrower than the field-length standard, for snapshot-built test DBs.
   // Widen only — a no-op once a column is as wide.

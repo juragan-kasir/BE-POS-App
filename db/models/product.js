@@ -160,6 +160,13 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.STRING(20),
         allowNull: false,
         defaultValue: 'stocked'
+      },
+      // Retail R1 (owner decision 2026-11-08): sold by weight or volume, so
+      // a sale may be a fraction (up to three decimals, e.g. 1.25 kg).
+      allowDecimalQty: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false
       }
     },
     {

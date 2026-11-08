@@ -3,6 +3,7 @@
 const db = require('../../db/models')
 const { assertDecimalQuantity } = require('../../utils/decimalQuantityGuard')
 const { recipeYield } = require('./itemCostService')
+const { roundQty } = require('../../utils/quantity')
 const { applyStoreInventoryModes } = require('./recipeModeService')
 
 /**
@@ -557,7 +558,7 @@ async function resolveBomIngredientRequirements(flatItems, store, productById, t
     if (!product) continue
     const mode = product.inventoryMode || 'stocked'
     if (mode === 'stocked') continue
-    const orderQty = Math.floor(Number(quantity)) || 0
+    const orderQty = roundQty(quantity) || 0
     if (orderQty <= 0) continue
 
     const bomHeader = await db.bom_header.findOne({

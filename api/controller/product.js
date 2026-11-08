@@ -734,6 +734,7 @@ exports.postAddProduct = async (req, res) => {
     tipeProduk,
     inventoryMode,
     inventoryLinks,
+    allowDecimalQty,
     redeemPoints,
     estimationTime
   } = req.body
@@ -956,6 +957,7 @@ exports.postAddProduct = async (req, res) => {
       createdBy,
       tipeProduk,
       inventoryMode,
+      allowDecimalQty: allowDecimalQty === true,
       image: imageUrl || image,
       images: gallery,
       supplier: normalizedSupplier,
@@ -1083,6 +1085,7 @@ exports.editProductByLocationAndId = async (req, res) => {
     tipeProduk,
     inventoryMode,
     inventoryLinks,
+    allowDecimalQty,
     redeemPoints,
     estimationTime
   } = req.body
@@ -1307,6 +1310,7 @@ exports.editProductByLocationAndId = async (req, res) => {
       ...(sent(currencyCode) ? { currencyCode: currencyCode || null } : {}),
       ...(sent(tipeProduk) ? { tipeProduk } : {}),
       ...(inventoryMode !== undefined ? { inventoryMode } : {}),
+      ...(allowDecimalQty !== undefined ? { allowDecimalQty: allowDecimalQty === true } : {}),
       // BA finding #3: composition is not editable here — it is the BOM's
       // recipe snapshot (bom.js refreshProductCosting). An edit that sent a
       // manual list used to overwrite it, leaving two diverging recipes.

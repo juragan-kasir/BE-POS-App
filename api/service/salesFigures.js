@@ -79,7 +79,7 @@ const profitFigures = async (opts) => {
     ),
     select(
       `SELECT COALESCE(SUM(COALESCE(oi."hppSnapshot", 0) * oi."quantity"), 0)::bigint AS cogs,
-              COALESCE(SUM(oi."quantity") FILTER (WHERE oi."hppSnapshot" IS NULL), 0)::bigint AS "qtyWithoutCost"
+              ROUND(COALESCE(SUM(oi."quantity") FILTER (WHERE oi."hppSnapshot" IS NULL), 0), 3) AS "qtyWithoutCost"
          FROM order_item oi
          JOIN "order" o ON o.id = oi."order"
         WHERE ${completedSaleSql('o.')} AND o."deletedAt" IS NULL
