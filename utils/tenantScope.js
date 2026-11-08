@@ -335,6 +335,27 @@ async function tenantStoreWhere(req, where = {}, column = 'store') {
   return condition === undefined ? { ...where } : { ...where, [column]: condition }
 }
 
+// True when the product is sold by at least one store in the caller's
+// roster, or by no store at all (the PGA-01 family convention: an
+// unassigned product is available everywhere). Always true for a global
+// caller. A product sold only by another tenant's outlets is not the
+// caller's to read or price.
+async function productInCallerScope(req, productId) {
+  const ids = await callerStoreIds(req)
+  if (ids === null) return true
+  const pid = Number(productId)
+  if (!Number.isInteger(pid) || pid <= 0) return false
+  const db = require('../db/models')
+  const stores = (
+    await db.product_store.findAll({
+      where: { product: pid },
+      attributes: ['store'],
+      raw: true
+    })
+  ).map((r) => Number(r.store))
+  return stores.length === 0 || stores.some((sid) => ids.includes(sid))
+}
+
 // True when every id is inside the caller's tenant roster (always true for
 // a global caller).
 async function storesInCallerTenant(req, storeIds) {
@@ -380,6 +401,7 @@ async function tenantArrayStoreWhere(req, where = {}, { includeShared = false } 
 
 module.exports = {
   tenantArrayStoreWhere,
+  productInCallerScope,
   callerStoreIds,
   storeIdsCondition,
   tenantStoreWhere,

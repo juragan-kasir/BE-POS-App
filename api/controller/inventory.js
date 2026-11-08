@@ -1,8 +1,14 @@
 const db = require('../../db/models')
+const { Op } = require('sequelize')
 const inventoryService = require('../service/inventoryService')
 const reconcileService = require('../service/reconcileService')
 const batchService = require('../service/batchService')
-const { scalarStoreScope, isSuperAdmin } = require('../../utils/tenantScope')
+const {
+  scalarStoreScope,
+  isSuperAdmin,
+  callerStoreIds,
+  productInCallerScope
+} = require('../../utils/tenantScope')
 
 // HIGH-5: The original `getStoreId(req)` helper accepted untrusted inputs:
 //   req.query.storeId  — validateStoreAccess is blind to `query.storeId`
@@ -17,6 +23,36 @@ const { scalarStoreScope, isSuperAdmin } = require('../../utils/tenantScope')
 //
 // getTenantStoreId() is the ONLY authoritative store source in this file.
 const getTenantStoreId = (req) => req.storeId ?? req.user?.store ?? null
+
+// Sweep stage 2: the active products a caller may forecast or value — those
+// sold by a store in its roster, or unassigned (the PGA-01 family
+// convention); every product for a global caller.
+const scopedActiveProducts = async (req) => {
+  const ids = await callerStoreIds(req)
+  const where = { status: 'active' }
+  if (ids !== null) {
+    const rows = ids.length
+      ? await db.product_store.findAll({
+          where: { store: ids },
+          attributes: ['product'],
+          raw: true
+        })
+      : []
+    where[Op.or] = [
+      { id: [...new Set(rows.map((r) => Number(r.product)))] },
+      db.sequelize.literal(
+        'NOT EXISTS (SELECT 1 FROM product_store ps WHERE ps.product = "product".id AND ps."deletedAt" IS NULL)'
+      )
+    ]
+  }
+  return db.product.findAll({
+    where,
+    attributes: ['id', 'nameProduct', 'stock', 'minStock', 'costPrice']
+  })
+}
+
+const productNotFound = (res) =>
+  res.status(404).json({ success: false, message: 'Product not found' })
 
 const inventoryController = {
   async getForecasts(req, res) {
@@ -79,15 +115,14 @@ const inventoryController = {
         : null
 
       if (productId) {
+        if (!(await productInCallerScope(req, productId)))
+          return productNotFound(res)
         const f = await inventoryService.buildForecast(productId, storeId)
         await inventoryService.saveForecast(f)
         return res.status(200).json({ success: true, data: f })
       }
 
-      const products = await db.product.findAll({
-        where: { status: 'active' },
-        attributes: ['id', 'nameProduct', 'stock', 'minStock']
-      })
+      const products = await scopedActiveProducts(req)
       // Bulk path: a fixed handful of batch queries instead of ~5 sequential
       // queries per product, which timed out once the catalog grew past a
       // few hundred SKUs.
@@ -130,8 +165,11 @@ const inventoryController = {
       // HIGH-5 fix: use trusted server-side store only.
       const storeId = getTenantStoreId(req)
       const withinDays = parseInt(req.query.days || 30)
+      // Sweep stage 2: the batches of the active store, or of the caller's
+      // whole roster; the service no longer reads every tenant's batches.
+      const storeIds = storeId ? [Number(storeId)] : await callerStoreIds(req)
       const results = await inventoryService.getExpiringBatches(
-        storeId,
+        storeIds,
         withinDays
       )
       return res
@@ -153,6 +191,8 @@ const inventoryController = {
         : null
 
       if (productId) {
+        if (!(await productInCallerScope(req, productId)))
+          return productNotFound(res)
         const result = await inventoryService.calculateValuation(
           productId,
           storeId,
@@ -161,7 +201,11 @@ const inventoryController = {
         return res.status(200).json({ success: true, data: result })
       }
 
-      const result = await inventoryService.aggregateValuation(storeId, method)
+      const result = await inventoryService.aggregateValuation(
+        storeId,
+        method,
+        await scopedActiveProducts(req)
+      )
       return res.status(200).json({ success: true, data: result })
     } catch (error) {
       console.error('Error:', error)

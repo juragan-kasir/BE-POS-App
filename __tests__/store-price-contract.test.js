@@ -28,10 +28,14 @@ jest.mock('../db/models', () => {
   const location = {
     findByPk: jest.fn()
   }
+  // Sweep stage 2: the product is sold at store 1.
+  const product_store = {
+    findAll: jest.fn().mockResolvedValue([{ store: 1 }])
+  }
   const sequelize = {
     transaction: jest.fn((cb) => cb({}))
   }
-  return { product, product_store_price, location, sequelize }
+  return { product, product_store_price, product_store, location, sequelize }
 })
 
 jest.mock('../utils/auditLog', () => ({
@@ -130,7 +134,7 @@ describe('GET /pos/product/price-by-store — canonical contract', () => {
 
   test('non-super-admin scopes storeIds to their own store before querying', async () => {
     const req = {
-      user: { roleType: 'admin', id: 7 },
+      user: { roleType: 'admin', id: 7, store: 1 },
       storeId: 1,
       query: { productId: '5', storeIds: '1,2' }
     }

@@ -43,6 +43,9 @@ const RUN =
 const MARK = `VB${RUN}`
 let seq = 0
 const mark = () => `${MARK}${(seq++).toString(36)}`
+// Attacker request strings carry their own marker: rows the attacker creates
+// in its own store (and its own audit trail) must not read as a victim leak.
+const atk = () => `ATK${RUN}${(seq++).toString(36)}`
 
 // ---------------------------------------------------------------------------
 // Route inventory with each route's validation schema
@@ -407,10 +410,10 @@ const sampleFrom = (js, key, ctx) => {
         sampleFrom(js.items || {}, null, ctx)
       )
     case 'string':
-      if (js.format === 'email') return `${mark().toLowerCase()}@sweep.test`
+      if (js.format === 'email') return `${atk().toLowerCase()}@sweep.test`
       if (js.format === 'date-time' || js.format === 'date')
         return new Date().toISOString().slice(0, js.format === 'date' ? 10 : 24)
-      return ('SWEEP' + mark())
+      return ('SWEEP' + atk())
         .padEnd(js.minLength || 1, 'x')
         .slice(0, js.maxLength || 60)
     case 'number':
@@ -586,32 +589,24 @@ afterAll(async () => {
   )
 }, 300000)
 
-// Leaks found by the first run of this sweep. Each fix removes its entries;
-// the test fails on any leak NOT listed and on any listed entry that no
-// longer leaks.
+// Rows that are global by design, so another tenant's victim row is
+// legitimately visible. The test fails if any of these stops showing up
+// (then drop it here) and on any leak not listed.
+//  - get-location-public: the unauthenticated outlet list used by the
+//    customer QR app (PGA-09 kept it; signed-in pickers use get-location-mine).
+//  - regions: Indonesian region master data, shared by every tenant.
+//  - report-config: report settings are platform-wide (one row per report
+//    key), not per tenant.
+// The first run (2026-11-07) listed 25 leaks; the real ones are fixed and
+// the audit-log, dashboard and tables/status hits were the attacker's own
+// rows carrying the victim marker (attacker strings now use their own).
 const KNOWN_LEAKS = new Set([
-  'get /audit-log/ owner',
-  'get /inventory/expiring-soon admin',
-  'get /inventory/expiring-soon owner',
-  'get /inventory/valuation admin',
-  'get /inventory/valuation owner',
   'get /location/get-location-public admin',
   'get /location/get-location-public owner',
-  'get /pos/dashboard/super-admin owner',
-  'get /pos/product/price-by-store admin',
-  'get /pos/product/price-by-store owner',
-  'get /pos/tables/status admin',
-  'get /pos/tables/status owner',
-  'get /purchase-order/get-all owner',
   'get /regions/regions admin',
   'get /regions/regions owner',
   'get /report-config/ admin',
-  'get /report-config/ owner',
-  'get /supplier-bank-account/supplier/:supplierId owner',
-  'get /supplier-contact/supplier/:supplierId owner',
-  'get /supplier/compare admin',
-  'get /supplier/compare owner',
-  'post /inventory/forecast/run owner'
+  'get /report-config/ owner'
 ])
 
 const results = []
@@ -700,7 +695,20 @@ describe('tenant body/query-id sweep (stage 2)', () => {
           who,
           status: res.status,
           leak,
-          validated: !!route.schema
+          validated: !!route.schema,
+          // For triage in SWEEP_REPORT: what was sent, and where the victim
+          // marker surfaced in the response.
+          ...(leak
+            ? {
+                url,
+                sent: route.method === 'get' ? req._query : payload,
+                markAt: (() => {
+                  const body = JSON.stringify(res.body ?? null)
+                  const at = body.indexOf(MARK)
+                  return at < 0 ? null : body.slice(Math.max(0, at - 160), at + 40)
+                })()
+              }
+            : {})
         })
         for (const m of changed) delete victims[m]
       }

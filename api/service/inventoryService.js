@@ -297,7 +297,9 @@ const inventoryService = {
     return results
   },
 
-  async getExpiringBatches(storeId, withinDays = EXPIRY_ALERT_DAYS) {
+  // storeIds: the stores whose batches to list, or null for every store
+  // (a global caller only).
+  async getExpiringBatches(storeIds, withinDays = EXPIRY_ALERT_DAYS) {
     const today = new Date()
     const limit = new Date()
     limit.setDate(limit.getDate() + withinDays)
@@ -309,6 +311,9 @@ const inventoryService = {
       },
       status: 'active'
     }
+    if (storeIds !== null && storeIds !== undefined) {
+      where.store = storeIds.length ? storeIds : -1
+    }
 
     const batches = await db.product_batch.findAll({
       where,
@@ -318,15 +323,11 @@ const inventoryService = {
           as: 'productData',
           attributes: ['id', 'nameProduct']
         },
-        ...(storeId
-          ? [
-              {
-                model: db.location,
-                as: 'storeData',
-                attributes: ['id', 'name']
-              }
-            ]
-          : [])
+        {
+          model: db.location,
+          as: 'storeData',
+          attributes: ['id', 'name']
+        }
       ],
       order: [['expiryDate', 'ASC']]
     })
@@ -421,11 +422,16 @@ const inventoryService = {
     return valuation
   },
 
-  async aggregateValuation(storeId, method = 'FIFO') {
-    const products = await db.product.findAll({
-      where: { status: 'active' },
-      attributes: ['id', 'nameProduct', 'costPrice', 'stock']
-    })
+  // scopedProducts: the active products the caller may value (see
+  // scopedActiveProducts in the inventory controller); every active product
+  // when omitted.
+  async aggregateValuation(storeId, method = 'FIFO', scopedProducts = null) {
+    const products =
+      scopedProducts ||
+      (await db.product.findAll({
+        where: { status: 'active' },
+        attributes: ['id', 'nameProduct', 'costPrice', 'stock']
+      }))
 
     // Batch-fetch per-store stock for every product in one query instead of
     // one product_store_stock.findOne per product.
