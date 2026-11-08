@@ -35,7 +35,7 @@ const { isSuperAdmin, storesInCallerTenant } = require('../../utils/tenantScope'
 const { assertSellableProductAssignment } = require('../validation/schemas')
 // W3-1 (DR-11): shared authoritative outlet-price resolution (checkout +
 // display use one rule).
-const { getEffectivePriceMap } = require('../../utils/outletPricing')
+const { getEffectivePriceMap, normalizePriceTiers } = require('../../utils/outletPricing')
 
 const normalizeStores = (stores) => {
   if (!Array.isArray(stores)) return []
@@ -846,7 +846,7 @@ exports.postAddProduct = async (req, res) => {
     if (priceTiers) {
       try {
         parsedPriceTiers =
-          typeof priceTiers === 'string' ? JSON.parse(priceTiers) : priceTiers
+          normalizePriceTiers(typeof priceTiers === 'string' ? JSON.parse(priceTiers) : priceTiers)
       } catch {
         parsedPriceTiers = []
       }
@@ -1224,7 +1224,7 @@ exports.editProductByLocationAndId = async (req, res) => {
     if (priceTiers) {
       try {
         parsedPriceTiers =
-          typeof priceTiers === 'string' ? JSON.parse(priceTiers) : priceTiers
+          normalizePriceTiers(typeof priceTiers === 'string' ? JSON.parse(priceTiers) : priceTiers)
       } catch {
         parsedPriceTiers = []
       }
