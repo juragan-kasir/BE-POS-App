@@ -116,6 +116,11 @@ describe('C-11 base price (product.price) cross-tenant write', () => {
   })
 
   test('store A admin can still update their OWN store-specific price row (no cross-tenant effect)', async () => {
+    // Sweep stage 2: an outlet price is only for a product that outlet
+    // sells, so store A now sells it too (the base price still reaches B).
+    await db.product_store.findOrCreate({
+      where: { product: product.id, store: storeA.id }
+    })
     await db.product_store_price.findOrCreate({
       where: { product: product.id, store: storeA.id },
       defaults: { price: 2000 }
