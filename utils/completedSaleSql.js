@@ -7,10 +7,10 @@
 // sales return: its gross figures stay on the sale and the refund is
 // reported separately, exactly like its +/- ledger rows.
 //
-// The legacy paymentStatus enum (MC-2 pending) carries two states in
-// 'partial': PARTIALLY_REFUNDED (an approved return on a paid sale) and
-// PARTIALLY_PAID (an unfinished split bill). Only the first is a completed
-// sale, so 'partial' counts only when an approved sales return explains it.
+// A partially refunded sale is a completed sale; a partially paid bill is
+// not. New rows carry the precise enum value. Historical 'partial' rows can
+// be either state, so 'partial' counts only when an approved sales return
+// explains it.
 //
 // `q` qualifies the order columns: 'o.' for an aliased "order", '' when the
 // query reads "order" unaliased (the EXISTS then needs the table name).
@@ -23,14 +23,16 @@ function approvedReturnExistsSql(q = '') {
 
 function completedSaleSql(q = '') {
   return `(${q}"status" NOT IN ('cancelled', 'void')
-    AND (${q}"paymentStatus" IN ('paid', 'refunded')
+    AND (${q}"paymentStatus" IN ('paid', 'refunded', 'partially_refunded')
       OR (${q}"paymentStatus" = 'partial' AND ${approvedReturnExistsSql(q)})))`
 }
 
-// Unsettled = not yet fully collected: 'unpaid', or 'partial' that is an
-// unfinished split bill rather than a partial refund.
+// Unsettled = not yet fully collected: 'unpaid', 'partially_paid', or a
+// historical 'partial' that is an unfinished split bill rather than a
+// partial refund.
 function unsettledSaleSql(q = '') {
   return `(${q}"paymentStatus" = 'unpaid'
+    OR ${q}"paymentStatus" = 'partially_paid'
     OR (${q}"paymentStatus" = 'partial' AND NOT ${approvedReturnExistsSql(q)}))`
 }
 

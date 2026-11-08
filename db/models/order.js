@@ -112,7 +112,14 @@ module.exports = (sequelize, DataTypes) => {
         allowNull: true
       },
       paymentStatus: {
-        type: DataTypes.ENUM('unpaid', 'partial', 'paid', 'refunded'),
+        type: DataTypes.ENUM(
+          'unpaid',
+          'partial',
+          'partially_paid',
+          'partially_refunded',
+          'paid',
+          'refunded'
+        ),
         defaultValue: 'unpaid'
       },
       splitCount: {

@@ -268,12 +268,12 @@ describe('DR-23 §C/§G — payment state after an approved return', () => {
     expect((await db.order.findByPk(sale.body.data.id)).paymentStatus).toBe('refunded')
   })
 
-  test('a partial return is partially refunded (legacy "partial")', async () => {
+  test('a partial return is partially refunded', async () => {
     const sale = await counterSale('admin', 2)
 
     await returnAndApprove(sale.body.data.id, 1)
 
-    expect((await db.order.findByPk(sale.body.data.id)).paymentStatus).toBe('partial')
+    expect((await db.order.findByPk(sale.body.data.id)).paymentStatus).toBe('partially_refunded')
   })
 
   // FE services/sales-return.js: the id travels only in the URL; approve

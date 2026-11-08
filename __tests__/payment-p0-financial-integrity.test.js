@@ -244,8 +244,7 @@ describe('P0 state model — partial payment is first-class', () => {
     const { order } = await makePartiallyPaid()
     const o = await oracle(order.id)
     expect(o).toMatchObject({ G, C: 20000, R: 0, O: 80000, state: 'PARTIALLY_PAID' })
-    // Legacy cache carrier (no migration): PARTIALLY_PAID ↦ 'partial'.
-    expect(o.order.paymentStatus).toBe('partial')
+    expect(o.order.paymentStatus).toBe('partially_paid')
   })
 })
 

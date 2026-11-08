@@ -822,10 +822,9 @@ const salesReturnController = {
 
         // 4. Recompute Order Payment Status — DR-23 §C/§G: derived from the
         // ledger under this transaction, so a full return ends REFUNDED
-        // (never 'unpaid') and a partial return PARTIALLY_REFUNDED. The
-        // persisted enum is legacy (MC-2 pending): PARTIALLY_REFUNDED maps
-        // to 'partial'. An INVALID (unreconciled legacy) state has no legacy
-        // mapping and is left untouched — never auto-rewritten.
+        // (never 'unpaid') and a partial return PARTIALLY_REFUNDED, persisted
+        // as 'partially_refunded'. An INVALID (unreconciled legacy) state has
+        // no mapping and is left untouched — never auto-rewritten.
         const updatedOrder = await db.order.findByPk(ret.order, { transaction })
         if (updatedOrder) {
           const fin = await computeOrderFinancials(updatedOrder, transaction)

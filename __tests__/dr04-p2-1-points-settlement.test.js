@@ -402,7 +402,7 @@ describe('DR-04 P2-1 points settlement — idempotency', () => {
 
     const pre = await db.order.findByPk(order.id)
     expect(pre.status).toBe('pending')
-    expect(pre.paymentStatus).toBe('partial') // PARTIALLY_PAID (legacy carrier)
+    expect(pre.paymentStatus).toBe('partially_paid')
     const pointsBefore = await memberPoints(member.id)
     expect(pointsBefore).toBe(PRICE * 3)
     const historyBefore = (await historyRows(member.id)).length
@@ -415,7 +415,7 @@ describe('DR-04 P2-1 points settlement — idempotency', () => {
     expect(await memberPoints(member.id)).toBe(pointsBefore)
     expect(await historyRows(member.id)).toHaveLength(historyBefore)
     expect(await txnRows(order.id)).toHaveLength(1)
-    expect((await db.order.findByPk(order.id)).paymentStatus).toBe('partial')
+    expect((await db.order.findByPk(order.id)).paymentStatus).toBe('partially_paid')
 
     // Exact remainder → points redeem exactly the outstanding amount.
     const remainder = await settlePaid({

@@ -22,7 +22,7 @@ const OPEN_ORDER_STATUSES = [
   'ready',
   'served'
 ]
-const UNPAID_PAYMENT_STATUSES = ['unpaid', 'partial']
+const UNPAID_PAYMENT_STATUSES = ['unpaid', 'partial', 'partially_paid']
 const ELEVATED_ROLES = ['super_admin', 'admin']
 
 const isElevated = (req) => ELEVATED_ROLES.includes(req.user?.roleType)
