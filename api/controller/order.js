@@ -304,7 +304,8 @@ const getEffectiveStockMap = async (products, store) => {
 const {
   resolveCatalogBase,
   getEffectivePriceMap,
-  quantityTierPrice
+  quantityTierPrice,
+  quantityBreaksOf
 } = require('../../utils/outletPricing')
 
 // AUD-2 (security): store-tenancy guards for the public customer-order
@@ -4262,7 +4263,9 @@ exports.getCustomerMenu = async (req, res) => {
 
     const products = await db.product.findAll({
       where: productWhere,
-      attributes: CUSTOMER_MENU_PRODUCT_ATTRIBUTES,
+      // priceTiers is read only to derive quantityBreaks below; the tiers
+      // themselves (member / named price lists) are never published.
+      attributes: [...CUSTOMER_MENU_PRODUCT_ATTRIBUTES, 'priceTiers'],
       include: [
         { model: db.category, as: 'categoryData', attributes: ['name'] }
       ],
@@ -4287,6 +4290,9 @@ exports.getCustomerMenu = async (req, res) => {
         dto[key] = plain[key]
       }
       dto.categoryData = plain.categoryData || null
+      // Retail R1: the grosir breaks the server applies at checkout, so the
+      // menu can show and echo the price a larger quantity will pay.
+      dto.quantityBreaks = quantityBreaksOf(plain.priceTiers)
       return dto
     })
 

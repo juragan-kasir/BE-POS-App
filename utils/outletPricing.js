@@ -109,7 +109,26 @@ const normalizePriceTiers = (tiers) => {
     })
 }
 
+// Public view of a product's grosir breaks: [{ minQty, price }] sorted by
+// minQty, only tiers quantityTierPrice would ever apply (named tiers such as
+// member prices are left out).
+const quantityBreaksOf = (tiers) => {
+  if (!Array.isArray(tiers)) return []
+  return tiers
+    .map((t) => ({ minQty: Number(t?.minQty), price: Number(t?.price) }))
+    .filter(
+      (t) =>
+        Number.isFinite(t.minQty) &&
+        t.minQty > 0 &&
+        Number.isFinite(t.price) &&
+        t.price >= 0
+    )
+    .map((t) => ({ minQty: t.minQty, price: Math.round(t.price) }))
+    .sort((a, b) => a.minQty - b.minQty)
+}
+
 module.exports = {
+  quantityBreaksOf,
   resolveOutletBasePrice,
   resolveCatalogBase,
   getEffectivePriceMap,
