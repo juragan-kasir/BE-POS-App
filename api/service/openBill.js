@@ -1,6 +1,7 @@
 'use strict'
 
 const { financialError } = require('./orderFinancials')
+const { roundQty } = require('../../utils/quantity')
 
 // E2E audit #8 open bill (product owner, 2026-11-01): an unpaid order stays
 // open for more rounds of items until it is paid. Stock and BOM are deducted
@@ -52,7 +53,7 @@ const addRoundTotals = (order, addedItems) => {
   )
   return {
     subTotal,
-    totalQuantity: Number(order.totalQuantity || 0) + addedQuantity,
+    totalQuantity: roundQty(Number(order.totalQuantity || 0) + addedQuantity),
     discountAmount,
     taxAmount,
     serviceChargeAmount,

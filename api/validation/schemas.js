@@ -1,3 +1,4 @@
+const { hasQtyPrecision } = require('../../utils/quantity')
 const { z } = require('zod')
 const { FIELD_MAX, tooLong } = require('./fieldLimits')
 const { parseMinOrderQty } = require('../../utils/minOrderQty')
@@ -232,6 +233,12 @@ exports.createProductSchema = z.object({
   currencyCode: z.string().max(FIELD_MAX.CURRENCY_CODE, tooLong(FIELD_MAX.CURRENCY_CODE)).optional().nullable(),
   tipeProduk: z.string().optional().default('menu'),
   inventoryMode: inventoryModeEnum,
+  // Retail R1: sold by weight / volume, so a sale may be a fraction.
+  allowDecimalQty: z
+    .union([z.boolean(), z.enum(['true', 'false'])])
+    .transform((v) => v === true || v === 'true')
+    .optional()
+    .default(false),
   // [{ store, ingredientId, qty }] for an 'inventory_item' product;
   // checked in inventoryLinkService.parseInventoryLinks.
   inventoryLinks: jsonField().optional().nullable(),
@@ -289,11 +296,11 @@ const orderItemSchema = z
     product: strToNum(),
     productId: strToNum().optional(),
     productName: z.string().optional(),
-    // PGA-19: order quantities are stored as integers, so 1.5 used to reach
-    // Postgres and fail with a 500. Whole units only until Q-INV-05
-    // (weight-based selling) is decided.
-    quantity: strToNum().refine((v) => Number.isInteger(v), {
-      message: 'quantity must be a whole number'
+    // PGA-19 / retail R1: at most three decimals (gram / milliliter). Whether
+    // a fraction is allowed is the product's call (allowDecimalQty), checked
+    // by the order service once the product is loaded.
+    quantity: strToNum().refine((v) => hasQtyPrecision(v), {
+      message: 'quantity allows at most three decimals'
     }),
     price: strToNum().optional().default(0),
     // W3-2: optional client echo of the final charged unit price for

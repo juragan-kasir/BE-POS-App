@@ -353,7 +353,7 @@ async function buildReportData({
       .query(
         `SELECT oi."productName" as "productName",
                 p."sku" as sku,
-                COALESCE(SUM(oi."quantity"), 0)::int as quantity,
+                ROUND(COALESCE(SUM(oi."quantity"), 0), 3) as quantity,
                 ROUND(COALESCE(SUM(oi."totalPrice"), 0)::numeric / NULLIF(SUM(oi."quantity"), 0)) as "unitPrice",
                 COALESCE(SUM(oi."totalPrice"), 0) as "totalSales"
            FROM "order_item" oi
@@ -551,7 +551,7 @@ async function buildCloseSnapshot({ registerId, store, user, openedAt, endAt, op
       .query(
         `SELECT oi."productName" as "productName",
                 p."sku" as sku,
-                COALESCE(SUM(oi."quantity"), 0)::int as quantity,
+                ROUND(COALESCE(SUM(oi."quantity"), 0), 3) as quantity,
                 ROUND(COALESCE(SUM(oi."totalPrice"), 0)::numeric / NULLIF(SUM(oi."quantity"), 0)) as "unitPrice",
                 COALESCE(SUM(oi."totalPrice"), 0) as "totalSales"
            FROM "order_item" oi

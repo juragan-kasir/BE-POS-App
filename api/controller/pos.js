@@ -19,6 +19,7 @@ const {
   storesInCallerTenant,
   tenantStoreWhere
 } = require('../../utils/tenantScope')
+const { roundQty, isSellableQuantity } = require('../../utils/quantity')
 const { IRREVERSIBLE_STORE_STATUSES } = require('../validation/schemas')
 const { canonicalPhone } = require('../../utils/memberIdentity')
 const { listTableReleaseStatus, releaseTable } = require('../service/tableRelease')
@@ -1637,20 +1638,9 @@ const posController = {
           // exactly instead of drifting line by line.
           const rawLines = []
           for (const reqItem of items) {
-            const qty = Number(reqItem.qty)
+            const qty = roundQty(reqItem.qty)
             if (!qty || qty <= 0) {
               const e = new Error(`Invalid quantity for product ${reqItem.productId}`)
-              e.statusCode = 422
-              throw e
-            }
-            // Return quantities are integer selling units (sales_return_item
-            // .qty is INTEGER, mirroring order_item.quantity). A fractional
-            // qty would die at persistence or be silently truncated at
-            // approval — reject it here with a clear contract error.
-            if (!Number.isInteger(qty)) {
-              const e = new Error(
-                `Quantity must be an integer for product ${reqItem.productId}`
-              )
               e.statusCode = 422
               throw e
             }
@@ -1680,9 +1670,19 @@ const posController = {
               e.statusCode = 422
               throw e
             }
+            // Return quantities are whole selling units, except for a
+            // product sold by weight (retail R1), which returns in the same
+            // three-decimal precision it sells in.
+            if (!isSellableQuantity(product, qty)) {
+              const e = new Error(
+                `Quantity must be an integer for product ${reqItem.productId}`
+              )
+              e.statusCode = 422
+              throw e
+            }
 
-            const alreadyReturned = returnedQtyMap[matchedItem.id] || 0
-            if (alreadyReturned + qty > matchedItem.quantity) {
+            const alreadyReturned = roundQty(returnedQtyMap[matchedItem.id] || 0)
+            if (roundQty(alreadyReturned + qty) > Number(matchedItem.quantity)) {
               const e = new Error(
                 `Cumulative return quantity for ${matchedItem.productName} (${alreadyReturned + qty}) exceeds original quantity (${matchedItem.quantity})`
               )

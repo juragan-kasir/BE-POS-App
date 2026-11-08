@@ -5,7 +5,9 @@ process.env.VERCEL = 'true'
 
 // PGA-19 (product-grade audit 2026-11-02): a counter quantity of 1.5
 // reached the integer quantity columns and failed in Postgres with a 500.
-// Order lines now take whole units only and say so with a 400.
+// Retail R1 (2026-11-08): a whole-unit product still takes whole units only
+// and says so with a 400; only a product sold by weight takes fractions
+// (retail-r1-sell-by-weight.test.js), and never beyond three decimals.
 const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const { withIdempotencyKey } = require('../test-helpers/idempotency')
@@ -60,12 +62,20 @@ const post = (path, quantity) =>
       })
     )
 
-describe('PGA-19: order quantities are whole units', () => {
+describe('PGA-19: whole-unit products take whole quantities', () => {
   test.each(['/order/create', '/order/quote'])('%s refuses 1.5 with a 400 and writes nothing', async (path) => {
     const before = await db.order.count({ where: { store: store.id } })
     const res = await post(path, 1.5)
     expect(res.status).toBe(400)
-    expect(res.body.message).toContain('quantity must be a whole number')
+    expect(res.body.code).toBe('QUANTITY_NOT_DIVISIBLE')
+    expect(await db.order.count({ where: { store: store.id } })).toBe(before)
+  })
+
+  test.each(['/order/create', '/order/quote'])('%s refuses more than three decimals with a 400', async (path) => {
+    const before = await db.order.count({ where: { store: store.id } })
+    const res = await post(path, 1.2345)
+    expect(res.status).toBe(400)
+    expect(JSON.stringify(res.body)).toContain('three decimals')
     expect(await db.order.count({ where: { store: store.id } })).toBe(before)
   })
 

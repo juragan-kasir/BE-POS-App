@@ -23,7 +23,13 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.STRING(2048)
       },
       totalSelling: {
-        type: DataTypes.BIGINT
+        type: DataTypes.DECIMAL(14, 3),
+        // Retail R1: sold-by-weight quantities keep three decimals; read
+        // back as a number (Postgres NUMERIC arrives as a string).
+        get() {
+          const v = this.getDataValue('totalSelling')
+          return v === null || v === undefined ? v : Number(v)
+        }
       },
       createdBy: {
         type: DataTypes.STRING

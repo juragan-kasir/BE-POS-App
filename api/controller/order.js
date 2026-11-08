@@ -306,6 +306,7 @@ const {
   getEffectivePriceMap,
   quantityTierPrice
 } = require('../../utils/outletPricing')
+const { roundQty, lineTotal, isSellableQuantity } = require('../../utils/quantity')
 
 // AUD-2 (security): store-tenancy guards for the public customer-order
 // mutation surface. A product is orderable through a store when it is
@@ -712,7 +713,7 @@ const calculateOrderTotals = (
 
   items.forEach((item) => {
     subTotal += item.subtotal
-    totalQuantity += item.quantity
+    totalQuantity = roundQty(totalQuantity + Number(item.quantity))
   })
 
   let discountAmount = 0
@@ -942,11 +943,15 @@ const loadAndPriceOrderItems = async (items, store, user = null) => {
 
   for (let index = 0; index < items.length; index++) {
     const item = items[index]
-    const qty = Number(item.quantity)
+    const qty = roundQty(item.quantity)
     if (!Number.isFinite(qty) || qty <= 0) {
       return { ok: false, code: 'INVALID_QUANTITY', message: `Quantity must be greater than 0` }
     }
+    item.quantity = qty
     const hasPriceOverride = item.priceOverride !== undefined && item.priceOverride !== null
+    if (item.bundleId && !Number.isInteger(qty)) {
+      return { ok: false, code: 'QUANTITY_NOT_DIVISIBLE', message: `Paket hanya bisa dijual per satuan utuh` }
+    }
     if (item.bundleId) {
       if (hasPriceOverride) {
         return { ok: false, code: 'PRICE_OVERRIDE_NOT_ALLOWED', message: `Price override not supported for bundle items` }
@@ -1083,6 +1088,15 @@ const loadAndPriceOrderItems = async (items, store, user = null) => {
     }
     productById.set(prod.id, prod)
 
+    // Retail R1: a fraction only for a product sold by weight.
+    if (!isSellableQuantity(prod, qty)) {
+      return {
+        ok: false,
+        code: 'QUANTITY_NOT_DIVISIBLE',
+        message: `Produk "${prod.nameProduct || item.productName || item.product || item.productId}" hanya bisa dijual per satuan utuh`
+      }
+    }
+
     let serverPrice
     // W3-1 (DR-11): authoritative catalog price is outlet-resolved; the same
     // value feeds basePrice, the override audit baseline, and the final price.
@@ -1121,7 +1135,8 @@ const loadAndPriceOrderItems = async (items, store, user = null) => {
     item.basePrice = catalogPrice
     item.price = serverPrice
     item.unitPrice = serverPrice
-    item.subtotal = serverPrice * qty
+    // Retail R1: rounded to the nearest Rp1, half up (exact for whole units).
+    item.subtotal = lineTotal(serverPrice, qty)
 
     // F7: see the bundle branch — a make_to_order product is limited by its
     // recipe ingredients, never by its own (usually zero) product stock.
@@ -2103,7 +2118,7 @@ const deductStockForOrder = async (
           err.code = 'INSUFFICIENT_STOCK'
           throw err
         }
-        const newStock = oldStock - deductQty
+        const newStock = roundQty(oldStock - deductQty)
         await outletRow.update({ stock: newStock }, { transaction: t })
         // The global product.stock is only a derived total (DR-14): it
         // follows the outlet movement and is never read for availability.
@@ -2183,7 +2198,7 @@ const deductStockForOrder = async (
 
       await deductAndTrack({
         product,
-        deductQty: Math.floor(Number(item.quantity)) || 0,
+        deductQty: roundQty(item.quantity) || 0,
         referenceNote: `Penjualan: ${orderNumber}`,
         sellName: item.productName || product.nameProduct
       })
@@ -2219,7 +2234,7 @@ const deductStockForOrder = async (
       if (pid) {
         bomFlatItems.push({
           productId: pid,
-          quantity: Math.floor(Number(item.quantity)) || 0
+          quantity: roundQty(item.quantity) || 0
         })
       }
     }
@@ -2949,7 +2964,7 @@ const deductStockForPaidOrder = async (
     if (!product) continue
 
     if (usesOwnStock(product.inventoryMode)) {
-      const qty = Math.floor(Number(item.quantity)) || 0
+      const qty = roundQty(item.quantity) || 0
       // DR-14: the outlet row is the authoritative stock, read under a row
       // lock; a missing row is 0 and is never seeded from the global stock.
       const outletRow = await db.product_store_stock.findOne({
@@ -2959,8 +2974,8 @@ const deductStockForPaidOrder = async (
       })
       const oldStock = outletRow ? Number(outletRow.stock) || 0 : 0
       const deducted = Math.min(Math.max(oldStock, 0), qty)
-      const shortfall = qty - deducted
-      const newStock = oldStock - deducted
+      const shortfall = roundQty(qty - deducted)
+      const newStock = roundQty(oldStock - deducted)
       if (outletRow && deducted > 0) {
         await outletRow.update({ stock: newStock }, { transaction: t })
       }
@@ -3185,7 +3200,7 @@ exports.updateOrderStatus = async (req, res) => {
         const productId = Number(line.product)
         if (!productId) continue
         if (fgRestore.has(productId)) continue
-        const qty = Math.floor(Number(line.quantity)) || 0
+        const qty = roundQty(line.quantity) || 0
         if (!(qty > 0)) continue
         bsDecrement.set(productId, (bsDecrement.get(productId) || 0) + qty)
       }
@@ -3206,7 +3221,7 @@ exports.updateOrderStatus = async (req, res) => {
         const product = productById.get(productId)
         if (!product) continue
         const oldStock = Number(product.stock) || 0
-        const newStock = oldStock + restoreQty
+        const newStock = roundQty(oldStock + restoreQty)
         await product.update(
           { stock: db.sequelize.literal(`stock + ${restoreQty}`) },
           { transaction: t }
