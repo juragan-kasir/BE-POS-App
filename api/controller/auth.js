@@ -497,13 +497,17 @@ exports.login = async (req, res) => {
 
   try {
     const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(userName)
+    const normalizedIdentity = String(userName).toLowerCase()
 
     // Cari user berdasarkan email atau username
     // (the password hash is excluded by default; verification reads it explicitly)
+    // The lookup is case-insensitive on purpose: rows created before usernames
+    // were normalized on save may still carry their original casing.
     const findUser = await User.scope('withCredentials').findOne({
-      where: isEmail
-        ? { email: userName.toLowerCase() }
-        : { userName: userName.toLowerCase() },
+      where: db.sequelize.where(
+        db.sequelize.fn('lower', db.sequelize.col(isEmail ? 'email' : 'userName')),
+        normalizedIdentity
+      ),
       paranoid: false // opsional untuk test
     })
 

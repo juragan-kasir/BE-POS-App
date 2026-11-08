@@ -170,6 +170,9 @@ module.exports = (sequelize, DataTypes) => {
       },
       hooks: {
         beforeSave: async (user) => {
+          if (user.changed('userName') && user.userName != null) {
+            user.userName = String(user.userName).toLowerCase()
+          }
           if (user.changed('password') && user.password) {
             user.password = await bcrypt.hash(user.password, 10)
           }

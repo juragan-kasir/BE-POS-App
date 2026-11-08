@@ -408,8 +408,12 @@ exports.getAllEmployee = async (req, res) => {
       limit: rawLimit = 10,
       search,
       status,
-      location
+      location: rawLocation,
+      store: rawStore
     } = req.query
+    // `store` is accepted as an alias for `location` so this endpoint matches
+    // the rest of the API (expense/attendance/shift all use `store`).
+    const location = rawLocation ?? rawStore
     const page = Math.max(1, parseInt(rawPage) || 1)
     const limit = Math.max(1, Math.min(100, parseInt(rawLimit) || 10))
     const offset = (page - 1) * limit
