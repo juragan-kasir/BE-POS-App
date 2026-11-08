@@ -3310,6 +3310,26 @@ order: [['updatedAt', 'DESC']],
             message: 'Anda hanya dapat mengakses harga di toko Anda'
           })
         }
+        // Sweep stage 2: the product itself must be sold by one of the
+        // caller's stores (or be unassigned, the PGA-01 family convention);
+        // otherwise an outlet price row could be written for another
+        // tenant's product.
+        const productStores = (
+          await db.product_store.findAll({
+            where: { product: productId },
+            attributes: ['store'],
+            raw: true
+          })
+        ).map((r) => Number(r.store))
+        if (
+          productStores.length > 0 &&
+          !productStores.some((sid) => allowedStores.includes(sid))
+        ) {
+          return res.status(404).json({
+            success: false,
+            message: 'Product not found'
+          })
+        }
       }
 
       const product = await db.product.findByPk(productId)

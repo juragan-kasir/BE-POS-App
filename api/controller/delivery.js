@@ -2,7 +2,11 @@ const db = require('../../db/models')
 const { Op } = require('sequelize')
 const { enrichAuditFields } = require('../../utils/auditFields')
 const { emitToStore } = require('../service/socket')
-const { scalarStoreScope, nullableArrayStoreScope, tenantArrayStoreWhere } = require('../../utils/tenantScope')
+const {
+  scalarStoreScope,
+  tenantArrayStoreWhere,
+  tenantStoreWhere
+} = require('../../utils/tenantScope')
 const { authorizedStoreIds } = require('../../utils/storeValidation')
 
 const generateDeliveryNumber = () => {
@@ -170,6 +174,21 @@ const deliveryController = {
         totalDistance,
         source
       } = req.body
+
+      // Sweep stage 2: the linked POS order must belong to the caller's
+      // stores (and to the delivery's store when one is named), otherwise a
+      // caller could attach a delivery to another tenant's order.
+      if (orderId) {
+        const linked = await db.order.findOne({
+          where: await tenantStoreWhere(req, { id: orderId }),
+          attributes: ['id', 'store']
+        })
+        if (!linked || (store && Number(linked.store) !== Number(store))) {
+          return res
+            .status(404)
+            .json({ success: false, message: 'Order not found' })
+        }
+      }
 
       const orderNumber = generateDeliveryNumber()
 

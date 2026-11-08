@@ -611,10 +611,7 @@ const KNOWN_LEAKS = new Set([
   'get /supplier-contact/supplier/:supplierId owner',
   'get /supplier/compare admin',
   'get /supplier/compare owner',
-  'post /delivery/orders admin',
-  'post /delivery/orders owner',
-  'post /inventory/forecast/run owner',
-  'put /pos/product/update-price-by-store owner'
+  'post /inventory/forecast/run owner'
 ])
 
 const results = []
