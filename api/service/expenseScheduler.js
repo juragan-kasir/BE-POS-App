@@ -76,12 +76,10 @@ async function generateDueRecurringExpenses() {
 
         try {
           const { postExpenseJournal } = require('../service/accountingService')
-          const category = await db.expense_category.findOne(
-            {
-              where: { id: tpl.category || null }
-            },
-            { transaction }
-          )
+          const category = await db.expense_category.findOne({
+            where: { id: tpl.category || null },
+            transaction
+          })
           await postExpenseJournal(
             {
               store: tpl.store,

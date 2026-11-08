@@ -150,15 +150,16 @@ const findOrCreateAccount = async (
   if (existing) return existing
   const defaults = DEFAULT_ACCOUNTS.find((a) => a.code === code)
   if (!defaults && !overrides.name) return null
+  const base = defaults || {}
   try {
     return await db.account.create(
       {
         store,
         code,
-        name: overrides.name || defaults.name,
-        type: overrides.type || defaults.type,
-        normalBalance: overrides.normalBalance || defaults.normalBalance,
-        description: overrides.description || defaults.description || null,
+        name: overrides.name || base.name,
+        type: overrides.type || base.type,
+        normalBalance: overrides.normalBalance || base.normalBalance,
+        description: overrides.description || base.description || null,
         isSystem: true,
         createdBy
       },

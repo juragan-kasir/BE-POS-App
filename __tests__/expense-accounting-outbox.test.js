@@ -22,6 +22,7 @@ const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
 let location = null
 let category = null
+let customCategory = null
 let adminUser = null
 let adminToken = null
 
@@ -59,6 +60,12 @@ beforeAll(async () => {
     accountCode: '6000',
     status: 'active'
   })
+  customCategory = await db.expense_category.create({
+    store: location.id,
+    name: 'EXP_OUTBOX_CUSTOM_CATEGORY',
+    accountCode: '6500',
+    status: 'active'
+  })
   adminUser = await db.user.create({
     userName: 'admin_exp_outbox',
     email: 'admin_exp_outbox@test.com',
@@ -78,7 +85,11 @@ afterAll(async () => {
   await db.journal_entry_line.destroy({ where: {}, force: true })
   await db.journal_entry.destroy({ where: { store: location.id }, force: true })
   await db.expense.destroy({ where: { store: location.id }, force: true })
-  await db.expense_category.destroy({ where: { id: category?.id }, force: true })
+  await db.expense_category.destroy({
+    where: { id: [category?.id, customCategory?.id].filter(Boolean) },
+    force: true
+  })
+  await db.account.destroy({ where: { store: location.id }, force: true })
   await db.user.destroy({ where: { id: adminUser?.id }, force: true })
   await db.location.destroy({ where: { id: location?.id }, force: true })
 })
@@ -97,6 +108,30 @@ describe('Expense journal posting — durable outbox parity via state reconcilia
     const journals = await journalFor(location.id, expenseId)
     expect(journals.length).toBe(1)
     expect(Number(journals[0].totalDebit)).toBe(12000)
+  })
+
+  test('posts a journal for a category whose accountCode is not a built-in account', async () => {
+    const res = await createExpense({
+      categoryId: customCategory.id,
+      status: 'approved',
+      amount: 7000
+    })
+    expect(res.status).toBe(201)
+
+    const jobs = await outboxFor(res.body.data.id)
+    expect(jobs.length).toBe(1)
+    expect(jobs[0].status).toBe('posted')
+
+    const journals = await journalFor(location.id, res.body.data.id)
+    expect(journals.length).toBe(1)
+
+    const lines = await db.journal_entry_line.findAll({
+      where: { journalEntry: journals[0].id },
+      order: [['id', 'ASC']]
+    })
+    const debitAccount = await db.account.findByPk(lines[0].account)
+    expect(debitAccount.code).toBe('6500')
+    expect(debitAccount.name).toBe('EXP_OUTBOX_CUSTOM_CATEGORY')
   })
 
   test('approving a pending expense enqueues a durable expense_journal_sync job and posts it immediately', async () => {

@@ -25,6 +25,7 @@
     "check:migration-preflight": "node scripts/check-migration-preflight.js",
     "rehearse:staging": "node scripts/rehearse-staging.js",
     "test": "node scripts/run-tests-sharded.js",
+    "test:e2e": "node node_modules/.bin/jest --config jest.config.e2e.js --runInBand --forceExit --detectOpenHandles",
     "test:isolation": "node --experimental-vm-modules node_modules/.bin/jest __tests__/ingredient-isolation.test.js --forceExit --detectOpenHandles"
   },
   "author": "",
