@@ -1369,6 +1369,8 @@ exports.storeConfigurationListScope = storeConfigurationListScope
 // audited, and fail-closed while the outlet still carries live operations.
 // Financial/history rows are never rewritten; the destructive legacy
 // /delete-location remains for purge scenarios and is untouched.
+const REACTIVATABLE_STORE_STATUSES = Object.freeze(['archived', 'inactive', 'closed'])
+
 const resolveArchiveTarget = async (req) => {
   const { id } = req.body
   if (id === undefined || id === null || id === '') {
@@ -1388,15 +1390,22 @@ const resolveArchiveTarget = async (req) => {
       error: { status: 404, body: { success: false, code: 'LOCATION_NOT_FOUND', message: 'Location not found' } }
     }
   }
-  // D-09: a client admin is store-bound; only the platform super_admin may
-  // act on an arbitrary outlet.
-  if (req.user.roleType !== 'super_admin' && Number(req.user.store) !== dbId) {
-    return {
-      error: {
-        status: 403,
-        body: { success: false, code: 'STORE_SCOPE_DENIED', message: 'This outlet is outside your scope' }
-      }
+  // D-09: a client admin is store-bound; only the platform super_admin (no
+  // store) may act on an arbitrary outlet. A store-bound super_admin (a
+  // client's own super admin, e.g. bakso_admin) stays inside its tenant: its
+  // own outlet, or an outlet of the tenant that owns its outlet.
+  const denied = {
+    error: {
+      status: 403,
+      body: { success: false, code: 'STORE_SCOPE_DENIED', message: 'This outlet is outside your scope' }
     }
+  }
+  const homeStoreId = req.user.store == null ? null : Number(req.user.store)
+  if (req.user.roleType !== 'super_admin') {
+    if (homeStoreId !== dbId) return denied
+  } else if (homeStoreId != null && homeStoreId !== dbId) {
+    const home = await Location.findByPk(homeStoreId, { attributes: ['id', 'tenantId'] })
+    if (home?.tenantId == null || Number(home.tenantId) !== Number(location.tenantId)) return denied
   }
   return { location }
 }
@@ -1515,11 +1524,26 @@ exports.reactivateLocationById = async (req, res) => {
       })
     }
 
-    if (location.status !== 'archived') {
+    // An edit request may never move a non-draft, non-operational store into
+    // 'active' (schemas.js STORE_ACTIVATION_NOT_PERMITTED). This audited,
+    // reason-bearing action is the one way back for a store that was taken
+    // out of service: archived (DR-24 C-04), or inactive / closed. Terminal
+    // states (retired, quarantined) never come back; draft is published by
+    // the normal create/edit flow.
+    if (!REACTIVATABLE_STORE_STATUSES.includes(location.status)) {
       return res.status(400).json({
         success: false,
         code: 'STORE_NOT_ARCHIVED',
-        message: 'This outlet is not archived'
+        message: 'Only an archived, inactive or closed outlet can be reactivated'
+      })
+    }
+
+    // GAP-1: an operational store must belong to a tenant.
+    if (location.status !== 'archived' && location.tenantId == null) {
+      return res.status(409).json({
+        success: false,
+        code: 'REACTIVATE_TENANT_REQUIRED',
+        message: 'Attach the outlet to a tenant before reactivating it'
       })
     }
 

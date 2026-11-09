@@ -287,3 +287,121 @@ describe('archived stores are refused for new sales', () => {
     expect(await db.order.count({ where: { store: store.id } })).toBe(0)
   })
 })
+
+// 2026-11-10: an edit request may never move inactive/closed → active
+// (STORE_ACTIVATION_NOT_PERMITTED), and reactivate used to accept only
+// 'archived' — so a deactivated store had no way back. Reactivate now also
+// takes inactive / closed (reason + audit), and only for a store that belongs
+// to a tenant. A store-bound super_admin stays inside its own tenant.
+describe('reactivating an inactive or closed store', () => {
+  const tenants = []
+  let tenantA = null
+  let tenantB = null
+  let boundSuperToken = null
+  let boundUserId = null
+
+  const createTenantStore = async (tenantId, status) => {
+    const loc = await db.location.create({ name: unique('C04_TSTORE'), status, tenantId })
+    locations.push(loc.id)
+    return loc
+  }
+
+  beforeAll(async () => {
+    tenantA = await db.tenant.create({ code: unique('ta').toLowerCase().replace(/_/g, '-'), name: unique('Tenant A') })
+    tenantB = await db.tenant.create({ code: unique('tb').toLowerCase().replace(/_/g, '-'), name: unique('Tenant B') })
+    tenants.push(tenantA.id, tenantB.id)
+    const home = await createTenantStore(tenantA.id, 'active')
+    const bound = await db.user.create({
+      userName: unique('c04_bound_super'),
+      email: `${unique('c04_bound_mail')}@test.com`,
+      roleType: 'super_admin',
+      userType: 'admin',
+      store: home.id,
+      status: 'active'
+    })
+    boundUserId = bound.id
+    boundSuperToken = await signSessionToken(
+      { id: bound.id, userName: bound.userName, roleType: 'super_admin', store: home.id },
+      JWT_SECRET
+    )
+  })
+
+  afterAll(async () => {
+    const storeIds = (await db.location.findAll({ where: { tenantId: tenants }, attributes: ['id'], paranoid: false })).map(
+      (l) => l.id
+    )
+    await db.authorizationContextSession.destroy({ where: { userId: boundUserId } })
+    await db.user.destroy({ where: { id: boundUserId }, force: true })
+    await db.auditLog.destroy({
+      where: { entity: 'location', entityId: storeIds },
+      force: true,
+      __auditMaintenance: true
+    })
+    await db.location.destroy({ where: { id: storeIds }, force: true })
+    await db.tenant.destroy({ where: { id: tenants }, force: true })
+  })
+
+  test.each(['inactive', 'closed'])('a %s store with a tenant is reactivated with an audit trail', async (status) => {
+    const store = await createTenantStore(tenantA.id, status)
+    const res = await reactivate(superToken, { id: store.id, reason: 'back in service' })
+    expect(res.status).toBe(200)
+    expect(res.body.data).toEqual({ id: store.id, status: 'active' })
+    expect((await db.location.findByPk(store.id)).status).toBe('active')
+
+    const [row] = await db.auditLog.findAll({
+      where: { entity: 'location', entityId: store.id, action: 'status_change' },
+      order: [['id', 'DESC']],
+      limit: 1
+    })
+    expect(row.reason).toBe('back in service')
+    expect(row.oldValues?.status).toBe(status)
+    expect(row.newValues?.status).toBe('active')
+  })
+
+  test('the reason is still required', async () => {
+    const store = await createTenantStore(tenantA.id, 'inactive')
+    const res = await reactivate(superToken, { id: store.id })
+    expect(res.status).toBe(400)
+    expect(res.body.code).toBe('REACTIVATE_REASON_REQUIRED')
+    expect((await db.location.findByPk(store.id)).status).toBe('inactive')
+  })
+
+  test('a tenantless inactive store is refused (an active store needs a tenant)', async () => {
+    const store = await createStore()
+    await store.update({ status: 'inactive' })
+    const res = await reactivate(superToken, { id: store.id, reason: 'reopen' })
+    expect(res.status).toBe(409)
+    expect(res.body.code).toBe('REACTIVATE_TENANT_REQUIRED')
+    expect((await db.location.findByPk(store.id)).status).toBe('inactive')
+  })
+
+  test('a terminal (retired) store is never reactivated', async () => {
+    const store = await createTenantStore(tenantA.id, 'retired')
+    const res = await reactivate(superToken, { id: store.id, reason: 'reopen' })
+    expect(res.status).toBe(400)
+    expect(res.body.code).toBe('STORE_NOT_ARCHIVED')
+    expect((await db.location.findByPk(store.id)).status).toBe('retired')
+  })
+
+  test('a store-bound super_admin reactivates inside its tenant but not another tenant', async () => {
+    const own = await createTenantStore(tenantA.id, 'inactive')
+    const foreign = await createTenantStore(tenantB.id, 'inactive')
+
+    const denied = await reactivate(boundSuperToken, { id: foreign.id, reason: 'reopen' })
+    expect(denied.status).toBe(403)
+    expect(denied.body.code).toBe('STORE_SCOPE_DENIED')
+    expect((await db.location.findByPk(foreign.id)).status).toBe('inactive')
+
+    const ok = await reactivate(boundSuperToken, { id: own.id, reason: 'reopen' })
+    expect(ok.status).toBe(200)
+    expect((await db.location.findByPk(own.id)).status).toBe('active')
+  })
+
+  test('a store-bound super_admin cannot archive another tenant\'s store either', async () => {
+    const foreign = await createTenantStore(tenantB.id, 'active')
+    const res = await archive(boundSuperToken, { id: foreign.id, reason: 'not mine' })
+    expect(res.status).toBe(403)
+    expect(res.body.code).toBe('STORE_SCOPE_DENIED')
+    expect((await db.location.findByPk(foreign.id)).status).toBe('active')
+  })
+})
