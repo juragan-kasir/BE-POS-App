@@ -2727,7 +2727,11 @@ exports.getOrdersByStore = async (req, res) => {
           ]
         }
         if (!status) where.status = { [Op.notIn]: ['cancelled', 'void'] }
-        if (!req.query.paymentStatus) where.paymentStatus = { [Op.in]: ['paid', 'refunded'] }
+        if (!req.query.paymentStatus) {
+          where.paymentStatus = {
+            [Op.in]: ['paid', 'refunded', 'partially_refunded']
+          }
+        }
       } else {
         where.createdAt = {
           [Op.gte]: register.openedAt,
@@ -5646,7 +5650,9 @@ exports.getReceiptHTML = async (req, res) => {
     const STATUS_LABELS = {
       paid: 'LUNAS',
       unpaid: 'BELUM DIBAYAR',
-      partial: 'DP'
+      partial: 'DP',
+      partially_paid: 'DP',
+      partially_refunded: 'DIKEMBALIKAN SEBAGIAN'
     }
 
     const html = `<!DOCTYPE html>

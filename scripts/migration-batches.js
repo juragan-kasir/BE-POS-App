@@ -234,10 +234,37 @@ const E2_BATCHES = Object.freeze({
     // rewritten. down refuses while any fractional quantity exists. The BE
     // code writes the new column, so B14 must be recorded before it deploys.
     openGates: []
+  }),
+  B15: deepFreeze({
+    id: 'B15',
+    title: 'P3: split partially paid / partially refunded payment status',
+    expectedCount: 1,
+    migrations: ['20261109000001-add-partial-payment-statuses.js'],
+    // Product-grade audit P3 (2026-11-09): adds the two precise enum labels
+    // to order.paymentStatus. 'partial' stays readable for historical rows.
+    // The BE code writes the new labels, so B15 must be recorded before it
+    // deploys.
+    openGates: []
   })
 })
 
-const BATCH_ORDER = Object.freeze(['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B9', 'B10', 'B11', 'B12', 'B13', 'B14'])
+const BATCH_ORDER = Object.freeze([
+  'B1',
+  'B2',
+  'B3',
+  'B4',
+  'B5',
+  'B6',
+  'B7',
+  'B8',
+  'B9',
+  'B10',
+  'B11',
+  'B12',
+  'B13',
+  'B14',
+  'B15'
+])
 
 // D-08 B1 resume contracts. A resume finishes a batch whose earlier members
 // were recorded by an interrupted run; it never redefines the batch (the

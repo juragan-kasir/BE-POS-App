@@ -8,6 +8,7 @@ const {
   tenantStoreWhere
 } = require('../../utils/tenantScope')
 const { visibleWhere } = require('../../utils/ownedOrSharedScope')
+const { completedSaleSql } = require('../../utils/completedSaleSql')
 
 // Wave 4: an ingredient may only be filed under a category its caller can
 // see (own outlets' or shared), never another tenant's.
@@ -594,8 +595,7 @@ const ingredientController = {
            JOIN "order" o ON o.id = oi."order"
           WHERE o.store = :store
             AND o."deletedAt" IS NULL AND oi."deletedAt" IS NULL
-            AND o."paymentStatus"::text IN ('paid', 'refunded')
-            AND o.status::text NOT IN ('cancelled', 'void')
+            AND ${completedSaleSql('o.')}
             AND (CAST(:start AS timestamptz) IS NULL OR o."createdAt" >= CAST(:start AS timestamptz))
             AND (CAST(:end AS timestamptz) IS NULL OR o."createdAt" <= CAST(:end AS timestamptz))
           GROUP BY oi.product

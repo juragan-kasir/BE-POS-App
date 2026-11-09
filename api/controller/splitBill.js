@@ -523,7 +523,7 @@ const splitBillController = {
             )
           } else {
             // DR-23: partial collection is first-class — never hidden as
-            // 'unpaid' (legacy carrier for PARTIALLY_PAID is 'partial').
+            // 'unpaid'. New rows persist 'partially_paid'.
             await order.update(
               { paymentStatus: legacyPaymentStatusFor(after.state) },
               { transaction: t }

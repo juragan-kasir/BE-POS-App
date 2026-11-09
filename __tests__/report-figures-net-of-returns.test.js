@@ -101,7 +101,7 @@ beforeAll(async () => {
     taxAmount: 5500,
     totalPrice: 55500,
     totalQuantity: 2,
-    paymentStatus: 'partial'
+    paymentStatus: 'partially_refunded'
   })
   await makeItem(b, product, 1, 30000, 20000)
   const y = await makeItem(b, product, 1, 20000, 10000)
@@ -127,7 +127,7 @@ beforeAll(async () => {
     subTotal: 90000,
     taxAmount: 9999,
     totalPrice: 99999,
-    paymentStatus: 'partial',
+    paymentStatus: 'partially_paid',
     status: 'pending'
   })
   await makeItem(c, product, 1, 90000, 40000)

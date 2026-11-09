@@ -1503,11 +1503,11 @@ const posController = {
       // refunds reaching exactly the collected amount" scenario (a
       // ledger-based remainingRefundable check is pointless if a
       // status-based gate blocks the second request before it's ever
-      // evaluated). 'partial' is included here for that reason; the
+      // evaluated). 'partial' is kept for historical rows. The
       // authoritative amount/quantity checks below remain the real
-      // safety mechanism regardless of which of these two statuses the
+      // safety mechanism regardless of which of these statuses the
       // order is in.
-      if (!['paid', 'partial'].includes(order.paymentStatus)) {
+      if (!['paid', 'partial', 'partially_refunded'].includes(order.paymentStatus)) {
         return res.status(409).json({
           success: false,
           message: 'Only paid or partially-refunded orders can be returned'
@@ -1574,12 +1574,18 @@ const posController = {
             lock: t.LOCK.UPDATE,
             transaction: t
           })
-          if (!lockedOrder || !['paid', 'partial'].includes(lockedOrder.paymentStatus)) {
+          if (
+            !lockedOrder ||
+            !['paid', 'partial', 'partially_refunded'].includes(
+              lockedOrder.paymentStatus
+            )
+          ) {
             const e = new Error('Only paid or partially-refunded orders can be returned')
             e.statusCode = 409
             throw e
           }
-          // DR-23 (BA §35.10): 'partial' now also carries PARTIALLY_PAID.
+          // DR-23 (BA §35.10): 'partial' is the historical carrier; new
+          // rows use partially_paid / partially_refunded.
           // Returns require a fully settled order (outstanding = 0), judged
           // on ledger aggregates under this lock — never on the cache alone.
           const fin = await computeOrderFinancials(lockedOrder, t)

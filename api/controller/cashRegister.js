@@ -714,7 +714,7 @@ async function buildRegisterReconciliation({ registerId, store, user, openedAt, 
       `SELECT id, "totalPrice" FROM "order"
         WHERE "store" = :store AND "createdBy" = :user
           AND "createdAt" >= :openedAt AND "createdAt" <= :endAt
-          AND ("paymentStatus" = 'refunded'
+          AND ("paymentStatus" IN ('refunded', 'partially_refunded')
             OR ("paymentStatus" = 'partial' AND ${approvedReturnExistsSql()}))
           AND "status" NOT IN ('cancelled', 'void') ORDER BY id`,
       { replacements: base, ...queryOpts }

@@ -182,6 +182,13 @@ module.exports = async () => {
   const psqlTest = (sql) =>
     run('psql', ['-h', DB_HOST, '-p', DB_PORT, '-U', DB_USER, '-d', TEST_DB, '-c', sql])
 
+  // P3 (migration 20261109000001): the committed dev-schema snapshot predates
+  // the paymentStatus split. Provision the two enum labels idempotently so a
+  // fresh CI clone can persist the precise money states.
+  for (const value of ['partially_paid', 'partially_refunded']) {
+    psqlTest(`ALTER TYPE "enum_order_paymentStatus" ADD VALUE IF NOT EXISTS '${value}'`)
+  }
+
   const R4_TABLE_DDL = [
     `CREATE TABLE IF NOT EXISTS attendance (
       id SERIAL PRIMARY KEY,

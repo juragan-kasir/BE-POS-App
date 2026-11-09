@@ -31,15 +31,16 @@ const FINANCIAL_STATES = Object.freeze({
 
 const TERMINAL_FULFILMENT = Object.freeze(['cancelled', 'void'])
 
-// Legacy cache carrier (order.paymentStatus enum: unpaid|partial|paid|
-// refunded). Until the enum is extended (migration contract MC-2),
-// PARTIALLY_PAID and PARTIALLY_REFUNDED share 'partial'; the canonical
-// state is always re-derived from the ledger, never read from this column.
+// Persisted cache carrier (order.paymentStatus enum:
+// unpaid|partial|partially_paid|partially_refunded|paid|refunded). The
+// precise states are written for new rows; 'partial' remains readable for
+// historical rows and is never produced again. The canonical state is always
+// re-derived from the ledger, never read from this column.
 const LEGACY_PAYMENT_STATUS = Object.freeze({
   UNPAID: 'unpaid',
-  PARTIALLY_PAID: 'partial',
+  PARTIALLY_PAID: 'partially_paid',
   PAID: 'paid',
-  PARTIALLY_REFUNDED: 'partial',
+  PARTIALLY_REFUNDED: 'partially_refunded',
   REFUNDED: 'refunded'
 })
 

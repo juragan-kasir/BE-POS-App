@@ -8,11 +8,12 @@ const db = require('../db/models')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
-// A partially returned sale stays a sale. The legacy paymentStatus 'partial'
-// (PARTIALLY_REFUNDED after an approved return) used to drop the whole order
-// from the register X/Z sales totals and the daily report, while its payment
-// and refund rows still counted — so sales no longer reconciled with the
-// ledger. An unfinished split bill (also 'partial') must stay excluded.
+// A partially returned sale stays a sale. paymentStatus 'partially_refunded'
+// used to be the legacy 'partial' (shared with an unfinished split bill), and
+// that ambiguity used to drop the whole order from the register X/Z sales
+// totals and the daily report while its payment and refund rows still counted
+// — so sales no longer reconciled with the ledger. An unfinished split bill
+// ('partially_paid') must stay excluded.
 
 const unique = (prefix) => `${prefix}_${Date.now()}_${Math.floor(Math.random() * 1e6)}`
 const PRICE = 20000
@@ -104,9 +105,9 @@ test('a partially returned sale stays in X/Z and daily sales; an unfinished spli
   const kept = await cashSale(1)
   const returned = await cashSale(2)
   await approvedReturn(returned.id, 1)
-  expect((await db.order.findByPk(returned.id)).paymentStatus).toBe('partial')
+  expect((await db.order.findByPk(returned.id)).paymentStatus).toBe('partially_refunded')
 
-  // Unfinished split bill: also 'partial', but not a completed sale.
+  // Unfinished split bill: 'partially_paid', not a completed sale.
   const table = await db.table.create({ store: store.id, name: unique('PRS_TABLE') })
   tableIds.push(table.id)
   const qr = await request(app)
@@ -129,7 +130,7 @@ test('a partially returned sale stays in X/Z and daily sales; an unfinished spli
     .set(as())
     .send({ paymentMethod: 'cash', cashAmount: PRICE, changeAmount: 0 })
   expect(paidOne.status).toBe(200)
-  expect((await db.order.findByPk(qr.body.data.id)).paymentStatus).toBe('partial')
+  expect((await db.order.findByPk(qr.body.data.id)).paymentStatus).toBe('partially_paid')
 
   const z = await request(app).get(`/cash-register/z-report/${registerId}`).set(as())
   expect(z.status).toBe(200)
