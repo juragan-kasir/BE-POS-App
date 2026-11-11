@@ -1,6 +1,7 @@
 'use strict'
 const db = require('../../../db/models')
 const { completedSaleSql } = require('../../../utils/completedSaleSql')
+const { refundNetOfTaxSql, refundTaxSql, REFUND_ORDER_JOIN } = require('../../../utils/refundSql')
 const { assertReportStore, getReportStores } = require('./getReportStore')
 const { getStoreDayBounds, DEFAULT_TIMEZONE } = require('../../../utils/businessDate')
 
@@ -154,18 +155,25 @@ const getData = async (req) => {
     const dailyRefunds = await db.sequelize.query(
       `SELECT DATE(sr."approvedAt" AT TIME ZONE :storeTimezone) as tanggal,
               COALESCE(SUM(sri."qty" * sri."price"), 0) as "totalRefund",
+              COALESCE(SUM(${refundNetOfTaxSql()}), 0) as "totalRefundNet",
+              COALESCE(SUM(${refundTaxSql()}), 0) as "totalRefundTax",
               COALESCE(SUM(sri."qty" * COALESCE(oi."hppSnapshot", 0)) FILTER (WHERE sr."restock"), 0) as "totalReturnedHpp"
        FROM sales_return_item sri
        JOIN sales_return sr ON sr.id = sri."salesReturn"
        JOIN order_item oi ON oi.id = sri."orderItem"
+       ${REFUND_ORDER_JOIN}
        WHERE ${refundConditions}
        GROUP BY DATE(sr."approvedAt" AT TIME ZONE :storeTimezone)`,
       { replacements: refundReplacements, type: db.sequelize.QueryTypes.SELECT }
     )
     const refundMap = {}
+    const refundNetMap = {}
+    const refundTaxMap = {}
     const returnedHppMap = {}
     for (const row of dailyRefunds) {
       refundMap[row.tanggal] = Number(row.totalRefund || 0)
+      refundNetMap[row.tanggal] = Number(row.totalRefundNet || 0)
+      refundTaxMap[row.tanggal] = Number(row.totalRefundTax || 0)
       returnedHppMap[row.tanggal] = Number(row.totalReturnedHpp || 0)
     }
 
@@ -174,7 +182,7 @@ const getData = async (req) => {
       const totalPenjualan = Number(row.totalPenjualan || 0)
       const totalDiscount = Number(row.totalDiscount || 0)
       const totalRefund = refundMap[tanggal] || 0
-      const netRevenue = totalPenjualan - totalDiscount - totalRefund
+      const netRevenue = totalPenjualan - totalDiscount - (refundNetMap[tanggal] || 0)
       // F6-03: net of the same approved returns' COGS reversal — the
       // returned units' original cost must not still count against a
       // period whose revenue no longer includes them.
@@ -189,7 +197,7 @@ const getData = async (req) => {
         totalTransaksi: Number(row.totalTransaksi || 0),
         totalPenjualanKotor: totalPenjualan,
         diskon: totalDiscount,
-        pajak: Number(row.totalTax || 0),
+        pajak: Number(row.totalTax || 0) - (refundTaxMap[tanggal] || 0),
         serviceCharge: Number(row.totalServiceCharge || 0),
         operationalExpense: totalExpense,
         totalPenjualanBersih: netRevenue,

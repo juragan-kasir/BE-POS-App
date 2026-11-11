@@ -1,6 +1,7 @@
 'use strict'
 const db = require('../../../db/models')
 const { completedSaleSql } = require('../../../utils/completedSaleSql')
+const { refundNetOfTaxSql, REFUND_ORDER_JOIN } = require('../../../utils/refundSql')
 const { assertReportStore, getReportStores } = require('./getReportStore')
 const { DEFAULT_TIMEZONE, getStoreDayBounds } = require('../../../utils/businessDate')
 
@@ -114,11 +115,12 @@ const getData = async (req) => {
   const returnRows = await db.sequelize.query(
     `SELECT sri."product" as "productId",
             COALESCE(MAX(oi."productName"), 'Unknown') as "productName",
-            COALESCE(SUM(sri."qty" * sri."price"), 0) as "returnedRevenue",
+            COALESCE(SUM(${refundNetOfTaxSql()}), 0) as "returnedRevenue",
             COALESCE(SUM(sri."qty" * COALESCE(oi."hppSnapshot", 0)) FILTER (WHERE sr."restock"), 0) as "returnedHpp"
      FROM sales_return_item sri
      JOIN sales_return sr ON sr.id = sri."salesReturn"
      JOIN order_item oi ON oi.id = sri."orderItem"
+     ${REFUND_ORDER_JOIN}
      WHERE ${returnConditions}
      GROUP BY sri."product"`,
     { replacements: returnReplacements, type: db.sequelize.QueryTypes.SELECT }

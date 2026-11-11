@@ -2,6 +2,7 @@
 
 const db = require('../../db/models')
 const { completedSaleSql } = require('../../utils/completedSaleSql')
+const { refundNetOfTaxSql, REFUND_ORDER_JOIN } = require('../../utils/refundSql')
 
 const completedOrderWhere = () => ({
   [db.Sequelize.Op.and]: [db.sequelize.literal(completedSaleSql('"order".'))]
@@ -87,11 +88,12 @@ const profitFigures = async (opts) => {
       repl
     ),
     select(
-      `SELECT COALESCE(SUM(sri."qty" * sri."price"), 0)::bigint AS lines,
+      `SELECT COALESCE(SUM(${refundNetOfTaxSql()}), 0)::bigint AS lines,
               COALESCE(SUM(sri."qty" * COALESCE(oi."hppSnapshot", 0)) FILTER (WHERE sr."restock"), 0)::bigint AS hpp
          FROM sales_return_item sri
          JOIN sales_return sr ON sr.id = sri."salesReturn"
          JOIN order_item oi ON oi.id = sri."orderItem"
+         ${REFUND_ORDER_JOIN}
         WHERE sr.status = 'approved' AND sr."approvedAt" IS NOT NULL AND sr."deletedAt" IS NULL
           ${rangeSql('sr."approvedAt"', opts)}
           ${storeSql('sr."store"', opts)}`,
