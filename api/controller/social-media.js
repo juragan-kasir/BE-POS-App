@@ -1,18 +1,17 @@
 const db = require('../../db/models')
 const { createAudit } = require('../../utils/auditLog')
-const { scalarStoreScope } = require('../../utils/tenantScope')
+const { scalarStoreScope, listStoreIds, storeIdsCondition } = require('../../utils/tenantScope')
 const SocialMedia = db.social_media
 
 exports.getAllSocialMedia = async (req, res) => {
-  const store = req.query.store ||
-      (req.user?.roleType !== 'super_admin' ? req.user?.store : null)
   const { page = 1, size = 10 } = req.query
   const limit = parseInt(size)
   const offset = (parseInt(page) - 1) * limit
 
   try {
+    const storeIds = await listStoreIds(req)
     const { count, rows: getAllCategory } = await SocialMedia.findAndCountAll({
-      where: store ? { store } : {},
+      where: storeIds === null ? {} : { store: storeIdsCondition(storeIds) },
       limit: limit,
       offset: offset
     })

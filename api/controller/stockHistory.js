@@ -2,7 +2,7 @@ const db = require('../../db/models')
 const { Op } = require('sequelize')
 const { enrichAuditFields } = require('../../utils/auditFields')
 const { createAudit } = require('../../utils/auditLog')
-const { scalarStoreScope, isSuperAdmin, resolveStoreId } = require('../../utils/tenantScope')
+const { scalarStoreScope, isSuperAdmin, resolveStoreId, listStoreIds, storeIdsCondition } = require('../../utils/tenantScope')
 const { OWN_STOCK_MODES } = require('../service/inventoryLinkService')
 
 // A make_to_order or inventory_item product never uses its own stock (its
@@ -37,7 +37,13 @@ const stockHistoryController = {
         })
       }
 
+      // A super_admin without ?store used to list every tenant's movements;
+      // listStoreIds narrows a client owner to its own tenant's outlets.
       let store = queryStore
+      if (isSuperAdmin(req)) {
+        const ids = await listStoreIds(req, queryStore)
+        store = ids === null ? queryStore : storeIdsCondition(ids)
+      }
       if (req.user?.roleType !== 'super_admin') {
         // HIGH-4: always use the pinned server-side store (validateStoreAccess
         // already blocked a foreign ?store for tenant roles). req.storeId is

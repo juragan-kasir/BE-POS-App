@@ -4,6 +4,7 @@ const {
   deleteFromCloudinary
 } = require('../../utils/cloudinaryStorage')
 const { createAudit } = require('../../utils/auditLog')
+const { listStoreIds, storeIdsCondition } = require('../../utils/tenantScope')
 
 const DEFAULT_TEMPLATE = {
   showStoreName: true,
@@ -25,10 +26,12 @@ const DEFAULT_TEMPLATE = {
 const invoiceController = {
   async getSetting(req, res) {
     try {
-      const store = req.query.store ||
-      (req.user?.roleType !== 'super_admin' ? req.user?.store : null)
+      // Own outlet first for a multi-outlet owner; never another tenant's row.
+      let storeIds = await listStoreIds(req)
+      const own = Number(req.user?.store)
+      if (storeIds && !req.query.store && storeIds.includes(own)) storeIds = [own]
       const setting = await db.invoice_setting.findOne({
-        where: store ? { store } : {}
+        where: storeIds === null ? {} : { store: storeIdsCondition(storeIds) }
       })
 
       if (!setting) {

@@ -2,7 +2,7 @@ const db = require('../../db/models')
 const { Op } = require('sequelize')
 const { enrichAuditFields } = require('../../utils/auditFields')
 const { emitToStore } = require('../service/socket')
-const { arrayStoreScope } = require('../../utils/tenantScope')
+const { arrayStoreScope, listStoreIds } = require('../../utils/tenantScope')
 
 const generateRequestNumber = () => {
   const date = new Date()
@@ -149,15 +149,15 @@ const waiterRequestController = {
   async getPendingList(req, res) {
     try {
       const { page = 1, limit = 50 } = req.query
-      const store = req.query.store ||
-      (req.user?.roleType !== 'super_admin' ? req.user?.store : null)
+      const storeIds = await listStoreIds(req)
 
       const where = { status: 'pending' }
-      if (store) {
-        const storeId = Number(store)
-        if (!isNaN(storeId)) {
-          where.store = { [Op.contains]: [storeId] }
-        }
+      // store is a JSONB array: rows tagged with any of the caller's outlets.
+      if (storeIds !== null) {
+        const ids = storeIds.length ? storeIds : [-1]
+        where.store = ids.length === 1
+          ? { [Op.contains]: [ids[0]] }
+          : { [Op.or]: ids.map((id) => ({ [Op.contains]: [id] })) }
       }
 
       const offset = (Number(page) - 1) * Number(limit)
@@ -199,16 +199,16 @@ const waiterRequestController = {
   async getList(req, res) {
     try {
       const { status, page = 1, limit = 20 } = req.query
-      const store = req.query.store ||
-      (req.user?.roleType !== 'super_admin' ? req.user?.store : null)
+      const storeIds = await listStoreIds(req)
 
       const where = {}
       if (status && status !== 'all') where.status = status
-      if (store) {
-        const storeId = Number(store)
-        if (!isNaN(storeId)) {
-          where.store = { [Op.contains]: [storeId] }
-        }
+      // store is a JSONB array: rows tagged with any of the caller's outlets.
+      if (storeIds !== null) {
+        const ids = storeIds.length ? storeIds : [-1]
+        where.store = ids.length === 1
+          ? { [Op.contains]: [ids[0]] }
+          : { [Op.or]: ids.map((id) => ({ [Op.contains]: [id] })) }
       }
 
       const offset = (Number(page) - 1) * Number(limit)
