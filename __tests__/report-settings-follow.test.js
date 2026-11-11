@@ -55,7 +55,12 @@ jest.mock('../db/models', () => {
         ])
       )
     },
-    reportConfig: { findOne: jest.fn(() => Promise.resolve(null)) }
+    reportConfig: { findOne: jest.fn(() => Promise.resolve(null)) },
+    user: {
+      findByPk: jest.fn(() =>
+        Promise.resolve({ id: 9999, roleType: 'super_admin', accessMenu: [], roleId: null })
+      )
+    }
   }
 })
 
