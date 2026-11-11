@@ -14,6 +14,24 @@ const {
 const { toStoreRangeBound } = require('../../utils/businessDate')
 const { resolveStoreTimezone } = require('../../utils/storeTimezone')
 
+// An order belongs to the shift whose register took its first payment,
+// judged by when that payment happened. Using the order's own createdAt
+// dropped QR orders placed just before the drawer opened, while the cash
+// ledger (payment time) still counted their money.
+function firstSettledInRegisterSql(q = '') {
+  return `EXISTS (
+    SELECT 1 FROM (
+      SELECT t1."cashRegisterId" AS "registerId", t1."createdAt" AS "paidAt"
+        FROM "transaction" t1
+       WHERE t1."order" = ${q}id AND t1."amount" > 0
+       ORDER BY t1."createdAt", t1.id
+       LIMIT 1
+    ) first_payment
+    WHERE COALESCE(first_payment."registerId", ${q}"cashRegisterId") = :registerId
+      AND first_payment."paidAt" >= :openedAt AND first_payment."paidAt" <= :endAt
+  )`
+}
+
 // P1 (DR-PAY-ATTR-06): payment-breakdown bucketing speaks canonical
 // methods. Historical rows whose tender cannot be mapped are summed into
 // an explicit UNRECONCILED bucket — never silently merged into another
@@ -299,12 +317,7 @@ async function buildReportData({
                 COALESCE(SUM("totalPrice"), 0) as "totalSales"
          FROM "order" o
          WHERE "store" = :store
-           AND EXISTS (
-             SELECT 1 FROM "transaction" t2
-             WHERE t2."order" = o.id
-               AND COALESCE(t2."cashRegisterId", o."cashRegisterId") = :registerId
-           )
-           AND o."createdAt" >= :openedAt AND o."createdAt" <= :endAt
+           AND ${firstSettledInRegisterSql('o.')}
            AND ${completedSaleSql('o.')}`,
         { replacements, type: db.sequelize.QueryTypes.SELECT }
       )
@@ -317,7 +330,7 @@ async function buildReportData({
          JOIN "order" o ON o.id = t."order"
          WHERE o."store" = :store
            AND COALESCE(t."cashRegisterId", o."cashRegisterId") = :registerId
-           AND o."createdAt" >= :openedAt AND o."createdAt" <= :endAt
+           AND t."createdAt" >= :openedAt AND t."createdAt" <= :endAt
            AND ${completedSaleSql('o.')}
          GROUP BY t."typePayment"
          ORDER BY total DESC, t."typePayment" ASC`,
@@ -360,12 +373,7 @@ async function buildReportData({
            JOIN "order" o ON o.id = oi."order"
            LEFT JOIN "product" p ON p.id = oi."product"
           WHERE o."store" = :store
-            AND EXISTS (
-              SELECT 1 FROM "transaction" t2
-              WHERE t2."order" = o.id
-                AND COALESCE(t2."cashRegisterId", o."cashRegisterId") = :registerId
-            )
-            AND o."createdAt" >= :openedAt AND o."createdAt" <= :endAt
+            AND ${firstSettledInRegisterSql('o.')}
             AND ${completedSaleSql('o.')}
           GROUP BY oi."product", oi."productName", p."sku"
           ORDER BY quantity DESC, oi."productName" ASC`,
@@ -507,12 +515,7 @@ async function buildCloseSnapshot({ registerId, store, user, openedAt, endAt, op
               COALESCE(SUM("totalPrice"), 0) as "totalSales"
          FROM "order" o
          WHERE "store" = :store
-           AND EXISTS (
-             SELECT 1 FROM "transaction" t2
-             WHERE t2."order" = o.id
-               AND COALESCE(t2."cashRegisterId", o."cashRegisterId") = :registerId
-           )
-           AND o."createdAt" >= :openedAt AND o."createdAt" <= :endAt
+           AND ${firstSettledInRegisterSql('o.')}
            AND ${completedSaleSql('o.')}`,
       queryOpts
     ).then((r) => r[0]),
@@ -524,7 +527,7 @@ async function buildCloseSnapshot({ registerId, store, user, openedAt, endAt, op
          JOIN "order" o ON o.id = t."order"
          WHERE o."store" = :store
            AND COALESCE(t."cashRegisterId", o."cashRegisterId") = :registerId
-           AND o."createdAt" >= :openedAt AND o."createdAt" <= :endAt
+           AND t."createdAt" >= :openedAt AND t."createdAt" <= :endAt
            AND ${completedSaleSql('o.')}
          GROUP BY t."typePayment"
          ORDER BY total DESC, t."typePayment" ASC`,
@@ -558,12 +561,7 @@ async function buildCloseSnapshot({ registerId, store, user, openedAt, endAt, op
            JOIN "order" o ON o.id = oi."order"
            LEFT JOIN "product" p ON p.id = oi."product"
           WHERE o."store" = :store
-            AND EXISTS (
-              SELECT 1 FROM "transaction" t2
-              WHERE t2."order" = o.id
-                AND COALESCE(t2."cashRegisterId", o."cashRegisterId") = :registerId
-            )
-            AND o."createdAt" >= :openedAt AND o."createdAt" <= :endAt
+            AND ${firstSettledInRegisterSql('o.')}
             AND ${completedSaleSql('o.')}
           GROUP BY oi."product", oi."productName", p."sku"
           ORDER BY quantity DESC, oi."productName" ASC`,
@@ -1762,15 +1760,21 @@ const cashRegisterController = {
         })
       }
 
-      // totalSales: UNCHANGED existing meaning/computation.
+      // totalSales uses the same register attribution as the X/Z report, so
+      // the open-register page and the X report show one figure.
       const [salesAgg] = await db.sequelize.query(
         `SELECT COUNT(*) as "totalTransactions",
-                COALESCE(SUM("totalPrice"), 0) as "totalSales"
-           FROM "order"
-          WHERE "store" = :store AND "createdBy" = :user
-            AND "createdAt" >= :openedAt AND ${completedSaleSql()}`,
+                COALESCE(SUM(o."totalPrice"), 0) as "totalSales"
+           FROM "order" o
+          WHERE o."store" = :store
+            AND ${firstSettledInRegisterSql('o.')} AND ${completedSaleSql('o.')}`,
         {
-          replacements: { store, user: userId, openedAt: cashRegister.openedAt },
+          replacements: {
+            store,
+            registerId: cashRegister.id,
+            openedAt: cashRegister.openedAt,
+            endAt: new Date()
+          },
           type: db.sequelize.QueryTypes.SELECT
         }
       )
@@ -1884,15 +1888,16 @@ const cashRegisterController = {
           const d = row.get({ plain: true })
           const [result] = await db.sequelize.query(
             `SELECT COUNT(*) as "totalTransactions",
-                    COALESCE(SUM("totalPrice"), 0) as "totalSales"
-             FROM "order"
-             WHERE "store" = :store AND "createdBy" = :user
-               AND "createdAt" >= :openedAt AND ${completedSaleSql()}`,
+                    COALESCE(SUM(o."totalPrice"), 0) as "totalSales"
+             FROM "order" o
+             WHERE o."store" = :store
+               AND ${firstSettledInRegisterSql('o.')} AND ${completedSaleSql('o.')}`,
             {
               replacements: {
                 store: d.store,
-                user: d.user,
-                openedAt: d.openedAt
+                registerId: d.id,
+                openedAt: d.openedAt,
+                endAt: new Date()
               },
               type: db.sequelize.QueryTypes.SELECT
             }

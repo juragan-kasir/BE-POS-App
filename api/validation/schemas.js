@@ -1110,7 +1110,7 @@ const userBaseSchema = z.object({
   dateOfBirth: z.string().optional().nullable(),
   placeOfBirth: z.string().max(FIELD_MAX.SHORT_LABEL, tooLong(FIELD_MAX.SHORT_LABEL)).optional().default(''),
   store: optionalStrToNum().nullable(),
-  shift: strToNumNullable(),
+  shift: strToNumNullable().optional(),
   position: optionalStrToNum().nullable(),
   roleId: optionalStrToNum().nullable(),
   department: z.string().max(FIELD_MAX.SHORT_LABEL, tooLong(FIELD_MAX.SHORT_LABEL)).optional().nullable(),
@@ -1144,7 +1144,7 @@ const employeeBaseSchema = z.object({
   placeOfBirth: z.string().max(FIELD_MAX.SHORT_LABEL, tooLong(FIELD_MAX.SHORT_LABEL)).optional().default(''),
   employeeId: z.string().max(FIELD_MAX.CODE, tooLong(FIELD_MAX.CODE)).optional().nullable(),
   store: optionalStrToNum().nullable(),
-  shift: strToNumNullable(),
+  shift: strToNumNullable().optional(),
   position: optionalStrToNum().nullable(),
   roleId: optionalStrToNum().nullable(),
   department: z.string().max(FIELD_MAX.SHORT_LABEL, tooLong(FIELD_MAX.SHORT_LABEL)).optional().nullable(),
@@ -1562,12 +1562,17 @@ exports.updateProductionOrderSchema =
   partialUpdate(exports.createProductionOrderSchema)
 
 // ===================== Stock Opname =====================
+// The controller creates a draft unless the caller asks for 'completed'
+// ("Simpan & Selesai"); the generic active/inactive/draft enum rejected that
+// request, so a count could never be finished from the form.
+const stockOpnameStatus = z.enum(['draft', 'completed', 'active', 'inactive']).optional()
+
 exports.createStockOpnameSchema = z.object({
   store: strToNum().optional().nullable(),
   auditDate: z.string().optional().nullable(),
   auditor: z.string().max(FIELD_MAX.PERSON_NAME, tooLong(FIELD_MAX.PERSON_NAME)).optional().nullable(),
   notes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().default(''),
-  status: statusEnum,
+  status: stockOpnameStatus,
   items: z.array(z.record(z.any())).optional().default([])
 })
 

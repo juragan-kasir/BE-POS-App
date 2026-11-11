@@ -5,6 +5,7 @@ const reportExportController = require('../controller/reportExport')
 const authorization = require('../../utils/authorization')
 const { validateStoreAccess } = require('../../utils/storeValidation')
 const { createUserEndpointLimiter } = require('../../utils/rateLimiters')
+const { requireReportMenu } = require('../../utils/reportMenuGate')
 
 const reportExportLimiter = createUserEndpointLimiter({
   windowMs: 15 * 60 * 1000,
@@ -15,6 +16,7 @@ router.get(
   '/export/:key',
   authorization,
   validateStoreAccess,
+  requireReportMenu,
   reportExportLimiter,
   reportExportController.exportOne
 )
@@ -22,6 +24,7 @@ router.get(
   '/data/:key',
   authorization,
   validateStoreAccess,
+  requireReportMenu,
   reportExportLimiter,
   reportExportController.reportData
 )

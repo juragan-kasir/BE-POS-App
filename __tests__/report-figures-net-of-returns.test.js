@@ -11,13 +11,15 @@ const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 // One store, one day:
 //   A  paid                 subTotal 100000, tax 11000 → 111000; 2 × hpp 30000
 //   B  partially refunded   subTotal  50000, tax  5500 →  55500; X hpp 20000, Y hpp 10000
-//      approved return of Y (line 20000, refundAmount 22200)
+//      approved return of Y (line 20000, refundAmount 22200; the return item
+//      carries the refunded unit price, tax included, as pos.js writes it)
 //   C  'partial' without a return (unfinished split bill) → not a sale
 //   D  paid but cancelled → not a sale
 //   expense 5000
 // Expected: gross 166500, refunds 22200, revenue 144300,
 //   net sales 150000 − 20000 = 130000, HPP 60000 + 30000 − 10000 = 80000,
-//   gross profit 50000, net profit 45000, margin 34.6 %.
+//   gross profit 50000, net profit 45000, margin 34.6 %;
+//   daily tax 16500 − 2200 refunded = 14300.
 
 let store = null
 let category = null
@@ -120,7 +122,7 @@ beforeAll(async () => {
     product: product.id,
     orderItem: y.id,
     qty: 1,
-    price: 20000
+    price: 22200
   })
 
   const c = await makeOrder({
@@ -222,7 +224,7 @@ describe('report figures count partially refunded sales and subtract refunds', (
     expect(row.totalTransaksi).toBe(2)
     expect(row.totalPenjualanKotor).toBe(150000)
     expect(row.diskon).toBe(0)
-    expect(row.pajak).toBe(16500)
+    expect(row.pajak).toBe(14300)
     expect(row.serviceCharge).toBe(0)
     expect(row.totalPenjualanBersih).toBe(130000)
     expect(row.totalHpp).toBe(80000)
