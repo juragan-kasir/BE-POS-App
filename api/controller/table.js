@@ -6,7 +6,7 @@ const Reservation = db.reservation
 const Location = db.location
 const { createAudit, recordAudit } = require('../../utils/auditLog')
 const { enrichAuditFields } = require('../../utils/auditFields')
-const { scalarStoreScope } = require('../../utils/tenantScope')
+const { scalarStoreScope, listStoreIds, storeIdsCondition } = require('../../utils/tenantScope')
 
 exports.getTablesByStore = async (req, res) => {
   const storeScope = Array.isArray(req.storeIds) && req.storeIds.length > 0
@@ -100,10 +100,8 @@ exports.getTablesByStore = async (req, res) => {
 }
 
 exports.getTableWithActiveOrders = async (req, res) => {
-  const store = req.query.store ||
-      (req.user?.roleType !== 'super_admin' ? req.user?.store : null)
-
   try {
+    const storeIds = await listStoreIds(req)
     const locations = await Location.findAll({ attributes: ['id', 'name'] })
     const locMap = {}
     for (const l of locations) locMap[l.id] = l.name
@@ -127,7 +125,7 @@ exports.getTableWithActiveOrders = async (req, res) => {
       }
     } catch {}
     const tables = await Table.findAll({
-      where: store ? { store } : {},
+      where: storeIds === null ? {} : { store: storeIdsCondition(storeIds) },
       include: [orderInclude],
       order: [['createdAt', 'DESC']]
     })
@@ -151,20 +149,18 @@ exports.getTableWithActiveOrders = async (req, res) => {
 }
 
 exports.getTableAvailability = async (req, res) => {
-  const store = req.query.store ||
-      (req.user?.roleType !== 'super_admin' ? req.user?.store : null)
-
   try {
+    const storeIds = await listStoreIds(req)
     const replacements = {}
     let conditions = '1=1'
-    if (store) {
-      conditions += ` AND "store" = :store`
-      replacements.store = store
+    if (storeIds !== null) {
+      conditions += ` AND "store" IN (:stores)`
+      replacements.stores = storeIds.length ? storeIds : [-1]
     }
 
     const [tables, summary] = await Promise.all([
       Table.findAll({
-        where: store ? { store } : {},
+        where: storeIds === null ? {} : { store: storeIdsCondition(storeIds) },
         attributes: ['id', 'name', 'status', 'capacity']
       }),
       db.sequelize

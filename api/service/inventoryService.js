@@ -240,6 +240,11 @@ const inventoryService = {
          AND sh."referenceType" = 'sale'
          AND sh.store = :storeId
        WHERE p.status = 'active'
+         -- only products this outlet sells: without it every tenant's
+         -- products (names + costPrice) were listed as this outlet's dead stock
+         AND (pss.product IS NOT NULL
+              OR EXISTS (SELECT 1 FROM product_store ps
+                         WHERE ps.product = p.id AND ps.store = :storeId))
        GROUP BY p.id, p."nameProduct", p."costPrice", pss.stock, p.stock
        HAVING MAX(sh."createdAt") IS NULL OR MAX(sh."createdAt") < :since
        ORDER BY COALESCE(pss.stock, p.stock) DESC`,

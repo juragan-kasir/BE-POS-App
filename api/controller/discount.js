@@ -5,7 +5,7 @@ const Order = db.order
 const ExcelJS = require('exceljs')
 const { createAudit } = require('../../utils/auditLog')
 const { enrichAuditFields } = require('../../utils/auditFields')
-const { scalarStoreScope } = require('../../utils/tenantScope')
+const { scalarStoreScope, listStoreIds, storeIdsCondition } = require('../../utils/tenantScope')
 const { authorizedWriteStore } = require('../../utils/storeValidation')
 
 const attachStoreData = async (rows) => {
@@ -29,10 +29,6 @@ const attachStoreData = async (rows) => {
 }
 
 exports.getAllDiscountByLocationAndActive = async (req, res) => {
-  let store = req.query.store
-  if (!store && req.user?.roleType !== 'super_admin' && req.user?.store) {
-    store = req.user.store
-  }
   const { page = 1, size = 10, search } = req.query
   const limit = parseInt(size)
   const offset = (parseInt(page) - 1) * limit
@@ -49,8 +45,9 @@ exports.getAllDiscountByLocationAndActive = async (req, res) => {
     )
 
     const whereDiscount = { status: 'active' }
-    if (store) {
-      whereDiscount[db.Sequelize.Op.or] = [{ store }, { store: null }]
+    const storeIds = await listStoreIds(req)
+    if (storeIds !== null) {
+      whereDiscount[db.Sequelize.Op.or] = [{ store: storeIdsCondition(storeIds) }, { store: null }]
     }
     if (search) whereDiscount.name = { [Op.iLike]: `%${search}%` }
 
@@ -86,10 +83,6 @@ exports.getAllDiscountByLocationAndActive = async (req, res) => {
 }
 
 exports.getAllDiscount = async (req, res) => {
-  let store = req.query.store
-  if (!store && req.user?.roleType !== 'super_admin' && req.user?.store) {
-    store = req.user.store
-  }
   const { page = 1, size = 10, limit: queryLimit, status, search } = req.query
   const limit = parseInt(queryLimit || size)
   const offset = (parseInt(page) - 1) * limit
@@ -126,8 +119,9 @@ exports.getAllDiscount = async (req, res) => {
     )
 
     const whereDiscount = {}
-    if (store) {
-      whereDiscount[db.Sequelize.Op.or] = [{ store }, { store: null }]
+    const storeIds = await listStoreIds(req)
+    if (storeIds !== null) {
+      whereDiscount[db.Sequelize.Op.or] = [{ store: storeIdsCondition(storeIds) }, { store: null }]
     }
     if (status && status !== 'all') whereDiscount.status = status
     if (search) whereDiscount.name = { [Op.iLike]: `%${search}%` }
@@ -141,8 +135,8 @@ exports.getAllDiscount = async (req, res) => {
 
     await enrichAuditFields(db, rows)
 
-    const storeFilter = store
-      ? { [db.Sequelize.Op.or]: [{ store }, { store: null }] }
+    const storeFilter = storeIds !== null
+      ? { [db.Sequelize.Op.or]: [{ store: storeIdsCondition(storeIds) }, { store: null }] }
       : {}
     const now = new Date()
     const sevenDaysLater = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000)
@@ -594,6 +588,7 @@ exports.postNewDiscount = async (req, res) => {
 
 exports.lookupByCode = async (req, res) => {
   const { code } = req.params
+  // Public endpoint (no session): the customer names the outlet.
   const store = req.query.store ||
       (req.user?.roleType !== 'super_admin' ? req.user?.store : null)
 

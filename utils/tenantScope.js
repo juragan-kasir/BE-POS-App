@@ -356,6 +356,29 @@ const storeIdsCondition = (ids) => {
   return ids.length === 1 ? ids[0] : { [Op.in]: ids }
 }
 
+// Store ids a LIST endpoint narrows to (null = no narrowing, global caller).
+// Replaces `req.query.store || (roleType !== 'super_admin' ? req.user.store
+// : null)`, which let a store-bound super_admin (a client owner) list every
+// tenant's rows whenever the request named no store ("Semua toko").
+// - explicit ?store= (one id, "1,2" or repeated): kept only where it is in
+//   the caller's roster ([] = matches nothing when none is);
+// - no store: a non-super-admin keeps its own store (unchanged behaviour),
+//   a super_admin gets its roster (every outlet of its tenant, or null when
+//   global).
+async function listStoreIds(req, requested = req.query?.store) {
+  const roster = await callerStoreIds(req)
+  const asked =
+    requested === undefined || requested === null || requested === '' || requested === 'all'
+      ? []
+      : positiveIds(String(requested).split(','))
+  if (asked.length > 0) {
+    return roster === null ? asked : asked.filter((id) => roster.includes(id))
+  }
+  const own = Number(req.user?.store)
+  if (!isSuperAdmin(req) && Number.isInteger(own) && own > 0) return [own]
+  return roster
+}
+
 // `where` narrowed to the caller's tenant roster on `column`.
 async function tenantStoreWhere(req, where = {}, column = 'store') {
   const condition = storeIdsCondition(await callerStoreIds(req))
@@ -432,6 +455,7 @@ module.exports = {
   tenantArrayStoreWhere,
   productInCallerScope,
   callerStoreIds,
+  listStoreIds,
   storeIdsCondition,
   tenantStoreWhere,
   storesInCallerTenant,

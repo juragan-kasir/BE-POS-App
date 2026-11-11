@@ -3,7 +3,7 @@ const { Op } = require('sequelize')
 const ExcelJS = require('exceljs')
 const TypePayment = db.type_payment
 const { createAudit } = require('../../utils/auditLog')
-const { scalarStoreScope } = require('../../utils/tenantScope')
+const { scalarStoreScope, listStoreIds, storeIdsCondition } = require('../../utils/tenantScope')
 const { visibleWhere, canWrite } = require('../../utils/ownedOrSharedScope')
 const { authorizedStoreIds } = require('../../utils/storeValidation')
 
@@ -34,17 +34,17 @@ const resolveStoreIds = (rawStore, userStore) => {
 }
 
 // Matches store-specific rows plus global (store null) rows for reads.
-const buildStoreWhere = (store) => {
-  if (!store) return {}
-  return { [Op.or]: [{ store }, { store: null }] }
+// `storeIds` from listStoreIds(): null = every row (global caller).
+const buildStoreWhere = (storeIds) => {
+  if (storeIds === null) return {}
+  return { [Op.or]: [{ store: storeIdsCondition(storeIds) }, { store: null }] }
 }
 
 exports.getAllTypePaymentByLocationAndActive = async (req, res) => {
-  const store = req.query.store ||
-      (req.user?.roleType !== 'super_admin' ? req.user?.store : null)
   const { page = 1, limit = 10, search } = req.query
 
   try {
+    const store = await listStoreIds(req)
     const offset = (page - 1) * limit
 
     const where = buildStoreWhere(store)
@@ -94,8 +94,6 @@ exports.getAllTypePaymentByLocationAndActive = async (req, res) => {
 }
 
 exports.getAllTypePayment = async (req, res) => {
-  const store = req.query.store ||
-      (req.user?.roleType !== 'super_admin' ? req.user?.store : null)
   const {
     page = 1,
     pageSize = req.query.limit || 10,
@@ -106,7 +104,7 @@ exports.getAllTypePayment = async (req, res) => {
   try {
     const offset = (page - 1) * pageSize
 
-    const queryConditions = buildStoreWhere(store)
+    const queryConditions = buildStoreWhere(await listStoreIds(req))
 
     if (status && status !== 'all') {
       queryConditions.status = status
