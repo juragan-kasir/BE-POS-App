@@ -1145,7 +1145,7 @@ exports.importCategory = async (req, res) => {
       }
 
       const newCategory = await Category.create({
-        name: cat.name,
+        name: typeof cat.name === 'string' ? cat.name.trim() : cat.name,
         description: cat.description,
         status: cat.status,
         createdBy: cat.createdBy
