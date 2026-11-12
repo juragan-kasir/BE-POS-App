@@ -30,6 +30,12 @@ jest.mock('../db/models', () => {
         )
       )
     },
+    // #345 report menu gate: the account row decides whether a menu applies.
+    user: {
+      findByPk: jest.fn(() =>
+        Promise.resolve({ id: 9999, roleType: 'super_admin', accessMenu: null, roleId: null })
+      )
+    },
     location: { findOne: locationFindOne },
     reportConfig: { findOne: jest.fn(() => Promise.resolve(null)) },
     sequelize: { query: jest.fn(() => Promise.resolve([])), QueryTypes: { SELECT: 'SELECT' } }
