@@ -1012,10 +1012,6 @@ const buildLocationDetailData = async (location, { includeConfiguration = false 
     data.parkedCartTtlMinutes = location.parkedCartTtlMinutes ?? null
   }
 
-  // F-20: the same rule that refuses QR orders (STORE_CLOSED), so the POS
-  // can tell staff when BISA shows this outlet as closed.
-  data.openStatus = getStoreOpenStatus(location.openingHours, location.timezone)
-
   return data
 }
 
@@ -1062,7 +1058,12 @@ exports.getLocationById = async (req, res) => {
         .json({ success: false, message: 'Location not found' })
     }
 
-    const data = await buildLocationDetailData(location, { includeConfiguration: true })
+    const data = {
+      ...(await buildLocationDetailData(location, { includeConfiguration: true })),
+      // F-20: the same rule that refuses QR orders (STORE_CLOSED), so the POS
+      // can tell staff when BISA shows this outlet as closed.
+      openStatus: getStoreOpenStatus(location.openingHours, location.timezone)
+    }
 
     res.set('Cache-Control', 'no-cache, no-store, must-revalidate')
     return res.status(200).json({ success: true, message: 'Success', data })
