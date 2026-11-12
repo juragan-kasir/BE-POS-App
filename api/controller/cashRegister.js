@@ -13,6 +13,7 @@ const {
 } = require('../../utils/completedSaleSql')
 const { toStoreRangeBound } = require('../../utils/businessDate')
 const { resolveStoreTimezone } = require('../../utils/storeTimezone')
+const { otherStaffActivity } = require('../service/registerOtherStaff')
 
 // An order belongs to the shift whose register took its first payment,
 // judged by when that payment happened. Using the order's own createdAt
@@ -480,6 +481,7 @@ async function buildReportData({
     },
     payments,
     salesByProduct,
+    otherStaff: await otherStaffActivity({ registerId: register.id, ownerId: register.user }),
     expenses: expCatRows.map((r) => ({
       category: r.category,
       amount: Number(r.total || 0),
@@ -604,6 +606,7 @@ async function buildCloseSnapshot({ registerId, store, user, openedAt, endAt, op
     payments,
     expenses,
     salesByProduct,
+    otherStaff: await otherStaffActivity({ registerId, ownerId: user, transaction }),
     // Cash inputs shared with the scalar columns above, kept inside the
     // document so the snapshot is self-describing for auditors.
     cash: {
@@ -1141,7 +1144,8 @@ const cashRegisterController = {
                 gross: snapshot.gross,
                 payments: snapshot.payments,
                 expenses: snapshot.expenses,
-                salesByProduct: snapshot.salesByProduct
+                salesByProduct: snapshot.salesByProduct,
+                otherStaff: snapshot.otherStaff
               },
               variance,
               varianceApprovalStatus,
@@ -1184,7 +1188,8 @@ const cashRegisterController = {
               gross: snapshot.gross,
               payments: snapshot.payments,
               expenses: snapshot.expenses,
-              salesByProduct: snapshot.salesByProduct
+              salesByProduct: snapshot.salesByProduct,
+              otherStaff: snapshot.otherStaff
             },
             variance,
             varianceApprovalStatus
@@ -1263,7 +1268,8 @@ const cashRegisterController = {
           },
           payments: closePayments,
           expenses: closeExpenses,
-          salesByProduct: result.closeSnapshot.salesByProduct
+          salesByProduct: result.closeSnapshot.salesByProduct,
+          otherStaff: result.closeSnapshot.otherStaff || []
         }
       })
     } catch (error) {
@@ -1806,7 +1812,11 @@ const cashRegisterController = {
           activeCashIn,
           activeCashOut,
           totalTransactions: Number(salesAgg.totalTransactions || 0),
-          expectedCash
+          expectedCash,
+          otherStaff: await otherStaffActivity({
+            registerId: cashRegister.id,
+            ownerId: cashRegister.user
+          })
         }
       })
     } catch (error) {
@@ -2220,7 +2230,8 @@ const cashRegisterController = {
                 unitPrice: num(r.unitPrice),
                 totalSales: num(r.totalSales)
               }))
-            : []
+            : [],
+          otherStaff: Array.isArray(snap.otherStaff) ? snap.otherStaff : []
         }
       } else {
         data = await buildReportData({
