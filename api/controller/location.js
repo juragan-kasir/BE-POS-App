@@ -1012,6 +1012,10 @@ const buildLocationDetailData = async (location, { includeConfiguration = false 
     data.parkedCartTtlMinutes = location.parkedCartTtlMinutes ?? null
   }
 
+  // F-20: the same rule that refuses QR orders (STORE_CLOSED), so the POS
+  // can tell staff when BISA shows this outlet as closed.
+  data.openStatus = getStoreOpenStatus(location.openingHours, location.timezone)
+
   return data
 }
 
