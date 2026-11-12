@@ -275,7 +275,7 @@ exports.updateProductSchema = z
 
 // ===================== Category =====================
 exports.createCategorySchema = z.object({
-  name: z.string().max(FIELD_MAX.SHORT_LABEL, tooLong(FIELD_MAX.SHORT_LABEL)).min(1, 'Category name is required'),
+  name: z.string().trim().max(FIELD_MAX.SHORT_LABEL, tooLong(FIELD_MAX.SHORT_LABEL)).min(1, 'Category name is required'),
   description: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().nullable(),
   parentId: z.coerce.number().optional().nullable(),
   color: z.string().max(FIELD_MAX.HEX_COLOR, tooLong(FIELD_MAX.HEX_COLOR)).optional().nullable(),

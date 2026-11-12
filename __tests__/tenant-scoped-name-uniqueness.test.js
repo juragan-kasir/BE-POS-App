@@ -125,6 +125,22 @@ describe('category and product names are unique per tenant, not globally', () =>
       expect(res.body).toMatchObject({ code: 'NAME_TAKEN', message: 'Category Sudah Terdaftar' })
     })
 
+    test.each([name.toLowerCase(), name.toUpperCase(), ` ${name}`, `${name} `])(
+      'a repeat that only differs in case or spaces is refused (%j)',
+      async (variant) => {
+        const res = track(await addCategory(variant, [storeX2.id]), catIds)
+        expect(res.status).toBe(409)
+        expect(res.body).toMatchObject({ code: 'NAME_TAKEN' })
+      }
+    )
+
+    test('the name is stored without surrounding spaces', async () => {
+      const res = track(await addCategory(`  Roti_${stamp}  `, [storeX1.id]), catIds)
+      expect([200, 201]).toContain(res.status)
+      const row = await db.category.findByPk(res.body.data.id, { raw: true })
+      expect(row.name).toBe(`Roti_${stamp}`)
+    })
+
     test('renaming is checked inside the category own tenant only', async () => {
       const own = track(await addCategory(`Minuman_${stamp}`, [storeY.id]), catIds)
       expect([200, 201]).toContain(own.status)
@@ -164,6 +180,12 @@ describe('category and product names are unique per tenant, not globally', () =>
         field: 'nameProduct',
         message: 'Product with this name already exists.'
       })
+    })
+
+    test('a product name that only differs in case is refused', async () => {
+      const res = track(await addProduct(name.toUpperCase(), [storeX2.id]), prodIds)
+      expect(res.status).toBe(409)
+      expect(res.body).toMatchObject({ code: 'NAME_TAKEN', field: 'nameProduct' })
     })
 
     test('a product without stores is checked against every business', async () => {

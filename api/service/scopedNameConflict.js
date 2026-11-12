@@ -23,6 +23,10 @@ const tenantKeysByStore = async (storeIds) => {
   return new Map(rows.map((r) => [Number(r.id), tenantKey(r.tenantId)]))
 }
 
+// "Kopi", "kopi", "KOPI " and " Kopi" are the same name to a person
+// reading a menu, so a conflict ignores case and surrounding spaces.
+const normalizeName = (name) => (typeof name === 'string' ? name.trim().toLowerCase() : '')
+
 const findScopedNameConflict = async ({
   model,
   nameField,
@@ -32,9 +36,12 @@ const findScopedNameConflict = async ({
   storeIds,
   excludeId
 }) => {
-  if (!name) return null
-  const where = { [nameField]: name }
-  if (excludeId != null) where.id = { [db.Sequelize.Op.ne]: excludeId }
+  const normalizedName = normalizeName(name)
+  if (!normalizedName) return null
+  const { Op, where: whereFn, fn, col } = db.Sequelize
+  const conditions = [whereFn(fn('lower', fn('btrim', col(nameField))), normalizedName)]
+  if (excludeId != null) conditions.push({ id: { [Op.ne]: excludeId } })
+  const where = { [Op.and]: conditions }
   const candidates = await model.findAll({ where, attributes: ['id'], raw: true })
   if (candidates.length === 0) return null
 
