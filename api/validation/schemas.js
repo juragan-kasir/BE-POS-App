@@ -232,6 +232,8 @@ exports.createProductSchema = z.object({
   currencyId: strToNum().optional().nullable(),
   currencyCode: z.string().max(FIELD_MAX.CURRENCY_CODE, tooLong(FIELD_MAX.CURRENCY_CODE)).optional().nullable(),
   tipeProduk: z.string().optional().default('menu'),
+  // Shared-domain laundry service configuration. Null/default for F&B.
+  serviceConfig: jsonField().optional().nullable(),
   inventoryMode: inventoryModeEnum,
   // Retail R1: sold by weight / volume, so a sale may be a fraction.
   allowDecimalQty: z
@@ -892,7 +894,10 @@ exports.createLocationSchema = z.object({
   timezone: ianaTimezone().optional(),
   socialMedia: jsonField().optional().nullable(),
   dailyTarget: strToNum().optional().default(0),
-  image: z.string().max(FIELD_MAX.URL, tooLong(FIELD_MAX.URL)).optional().nullable()
+  image: z.string().max(FIELD_MAX.URL, tooLong(FIELD_MAX.URL)).optional().nullable(),
+  // Shared-domain marker + laundry-only outlet settings.
+  businessType: z.enum(['fnb', 'retail', 'laundry']).optional().default('fnb'),
+  laundrySettings: jsonField().optional().nullable()
 })
 
 // ponytail: passthrough preserves locationId, id, storeId, coordinates, etc.
@@ -1491,7 +1496,10 @@ exports.createMemberSchema = z.object({
   gender: z.string().optional().default(''),
   address: z.string().max(FIELD_MAX.ADDRESS, tooLong(FIELD_MAX.ADDRESS)).optional().nullable(),
   createdBy: strToNum().optional(),
-  status: z.string().optional().default('active')
+  status: z.string().optional().default('active'),
+  // Laundry credit customer fields. POS members default to non-credit.
+  isCredit: z.union([z.boolean(), z.enum(['true', 'false'])]).transform((v) => v === true || v === 'true').optional().default(false),
+  creditLimit: strToNum().optional().nullable()
 })
 
 exports.updateMemberSchema = partialUpdate(exports.createMemberSchema).extend({
@@ -2607,4 +2615,99 @@ exports.printThermalSchema = z.strictObject({
       footer: thermalText(300).optional()
     })
     .optional()
+})
+
+// ===================== Laundry (2026-11-14) =====================
+const laundryItemSchema = z
+  .object({
+    product: strToNum(),
+    quantity: strToNum().refine((v) => hasQtyPrecision(v), {
+      message: 'quantity allows at most three decimals'
+    }),
+    price: strToNum().optional().default(0),
+    expectedPrice: z
+      .any()
+      .optional()
+      .transform((v) => (v === undefined || v === null || v === '' ? undefined : Number(v)))
+      .refine((v) => v === undefined || (Number.isInteger(v) && v >= 0), {
+        message: 'expectedPrice must be an integer >= 0'
+      }),
+    notes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().default(''),
+    modifiers: z.array(z.any()).optional().default([])
+  })
+  .passthrough()
+
+exports.createLaundryTurnaroundSchema = z.object({
+  store: strToNum().optional(),
+  name: z.string().max(FIELD_MAX.BUSINESS_NAME, tooLong(FIELD_MAX.BUSINESS_NAME)).min(1, 'Name is required'),
+  durationHours: strToNum().optional().default(72),
+  surchargeType: z.enum(['none', 'percent', 'fixed']).optional().default('none'),
+  surchargeValue: strToNum().optional().default(0),
+  isDefault: z.union([z.boolean(), z.string()]).optional().default(false),
+  status: z.enum(['active', 'inactive']).optional().default('active')
+})
+
+exports.updateLaundryTurnaroundSchema = partialUpdate(exports.createLaundryTurnaroundSchema).extend({
+  store: strToNum().optional(),
+  status: z.enum(['active', 'inactive']).optional()
+})
+
+exports.laundryQuoteSchema = z.object({
+  store: strToNum().optional(),
+  items: z.array(laundryItemSchema).min(1, 'At least one item is required'),
+  orderType: z.enum(['full', 'self']).optional().default('full'),
+  turnaroundId: strToNum().optional().nullable(),
+  customerId: strToNum().optional().nullable(),
+  promoCode: z.string().max(FIELD_MAX.CODE, tooLong(FIELD_MAX.CODE)).optional().nullable()
+})
+
+exports.createLaundryOrderSchema = exports.laundryQuoteSchema.extend({
+  customerName: z.string().max(FIELD_MAX.PERSON_NAME, tooLong(FIELD_MAX.PERSON_NAME)).optional().nullable(),
+  customerPhone: z.string().max(FIELD_MAX.PHONE, tooLong(FIELD_MAX.PHONE)).optional().nullable(),
+  pieceCount: strToNum().optional().default(0),
+  conditionTags: z.array(z.string().max(FIELD_MAX.SHORT_LABEL, tooLong(FIELD_MAX.SHORT_LABEL))).optional().default([]),
+  conditionNote: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().default(''),
+  note: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().default(''),
+  paymentMethod: z.string().max(50).optional(),
+  paymentAmount: strToNum().optional().default(0),
+  cashAmount: z.any().optional(),
+  changeAmount: z.any().optional(),
+  referenceNumber: z.string().max(255).optional().nullable(),
+  idempotencyKey: z.string().min(1).max(255),
+  expectedTotal: z
+    .any()
+    .optional()
+    .transform((v) => (v === undefined || v === null || v === '' ? undefined : Number(v)))
+    .refine((v) => v === undefined || (Number.isInteger(v) && v >= 0), {
+      message: 'expectedTotal must be an integer >= 0'
+    })
+})
+
+exports.updateLaundryStatusSchema = z.object({
+  store: strToNum().optional(),
+  toStatus: z.enum(['RECEIVED', 'WASHING', 'IRONING', 'READY', 'PICKED_UP', 'CANCELLED']),
+  reason: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().default('')
+})
+
+exports.laundryPickupSchema = z.object({
+  store: strToNum().optional(),
+  pickupPieceCount: strToNum(),
+  pickupNote: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().default('')
+})
+
+exports.collectOrderPaymentSchema = z.object({
+  store: strToNum().optional(),
+  paymentMethod: z.string().min(1),
+  amount: strToNum(),
+  cashAmount: z.any().optional(),
+  changeAmount: z.any().optional(),
+  referenceNumber: z.string().max(255).optional().nullable(),
+  idempotencyKey: z.string().min(1).max(255),
+  expectedOutstanding: z
+    .any()
+    .optional()
+    .transform((v) => (v === undefined || v === null || v === '' ? undefined : Number(v)))
+    .refine((v) => v === undefined || (Number.isInteger(v) && v >= 0), {
+      message: 'expectedOutstanding must be an integer >= 0'
+    })
 })

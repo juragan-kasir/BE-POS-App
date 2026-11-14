@@ -303,6 +303,7 @@ const routes = [
   { path: '/waiter-request', route: waiterRequestRoutes },
   { path: '/supplier-performance', route: supplierPerformanceRoutes },
   { path: '/promo', route: promoRoutes },
+  { path: '/laundry', route: require('./routes/laundry') },
   { path: '/product-bundle', route: productBundleRoutes },
   { path: '/reports', route: reportingRoutes },
   { path: '/report-config', route: reportConfigRoutes },

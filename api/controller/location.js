@@ -47,6 +47,7 @@ const {
 const { getStoreOpenStatus } = require('../../utils/storeHours')
 const { page: pageOf, paginated } = require('../service/scopeVisibilityService')
 const { assertOperationalStoreTenant, resolveRequestedLifecycleStatus } = require('../validation/schemas')
+const { normalizeLaundrySettings } = require('../service/laundryPricing')
 
 // Store ownership/lifecycle is decided from persisted authorization state
 // only. req.user.store, the JWT store claim, cookies, query params and the
@@ -402,6 +403,8 @@ exports.addNewLocation = async (req, res) => {
     openingHours,
     socialMedia,
     timezone,
+    businessType,
+    laundrySettings,
     tenantId: requestedTenantId,
     _createdBy
   } = bodyData
@@ -510,6 +513,8 @@ exports.addNewLocation = async (req, res) => {
       openingHours: normalizeOpeningHours(openingHours) || [],
       socialMedia: socialMedia || [],
       timezone: timezone || undefined,
+      businessType: businessType || 'fnb',
+      laundrySettings: normalizeLaundrySettings(laundrySettings),
       createdBy: req.user?.id || null
     })
 
@@ -658,6 +663,12 @@ exports.editLocationById = async (req, res) => {
       name,
       modifiedBy: req.user?.id,
       status: requestedStatus
+    }
+    if (rest.businessType !== undefined) {
+      updatedData.businessType = rest.businessType || 'fnb'
+    }
+    if (rest.laundrySettings !== undefined) {
+      updatedData.laundrySettings = normalizeLaundrySettings(rest.laundrySettings)
     }
 
     // A store that already has a tenant keeps it: assertOperationalStoreTenant
@@ -985,6 +996,8 @@ const buildLocationDetailData = async (location, { includeConfiguration = false 
     longitude: location.longitude,
     mainBranch: location.mainBranch,
     dailyTarget: location.dailyTarget,
+    businessType: location.businessType || 'fnb',
+    laundrySettings: location.laundrySettings || null,
     createdAt: location.createdAt,
     updatedAt: location.updatedAt,
     createdBy: location.createdBy,

@@ -13,7 +13,8 @@ const {
   updateOrderItemStatusSchema,
   openBillSchema,
   addOrderItemsSchema,
-  addCustomerOrderItemsSchema
+  addCustomerOrderItemsSchema,
+  collectOrderPaymentSchema
 } = require('../validation/schemas')
 
 // FND-002 (security) — dedicated rate limiter for the anonymous QR order
@@ -170,6 +171,17 @@ router.post(
   '/customer-review',
   customerReviewLimiter,
   orderController.createCustomerReview
+)
+
+
+// Generic partial/full collection (laundry DP/pelunasan, open bill settlement)
+router.post(
+  '/:id/payments',
+  authorization,
+  validateStoreAccess,
+  requireCapability('payment.collect', { entity: 'order', entityIdFrom: (req) => req.params.id }),
+  validate(collectOrderPaymentSchema),
+  orderController.collectOrderPayment
 )
 
 module.exports = router

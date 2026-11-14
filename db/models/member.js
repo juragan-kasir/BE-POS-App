@@ -50,6 +50,16 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.STRING(20),
         defaultValue: 'active'
       },
+      // Laundry credit customer marker. POS members default to non-credit.
+      isCredit: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false
+      },
+      creditLimit: {
+        type: DataTypes.BIGINT,
+        allowNull: true
+      },
       createdBy: {
         type: DataTypes.INTEGER
       },

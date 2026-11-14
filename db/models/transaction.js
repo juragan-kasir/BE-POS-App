@@ -76,6 +76,11 @@ module.exports = (sequelize, DataTypes) => {
       splitBillId: {
         type: DataTypes.INTEGER,
         allowNull: true
+      },
+      // Client idempotency key for a collection; unique per order when set.
+      idempotencyKey: {
+        type: DataTypes.STRING(255),
+        allowNull: true
       }
     },
     {
