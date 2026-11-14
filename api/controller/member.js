@@ -42,6 +42,13 @@ const MEMBER_UNIQUE_MESSAGES = {
 
 const INVALID_PHONE_MESSAGE = 'Nomor telepon tidak valid'
 
+const toCreditFlag = (value) => value === true || value === 'true'
+const toCreditLimit = (value) => {
+  if (value === '' || value === null || value === undefined) return null
+  const n = Number(value)
+  return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : null
+}
+
 // Shared create/update error mapping. Returns the sent response, or null when
 // the error is not a known client/uniqueness error.
 const respondMemberWriteError = (res, error) => {
@@ -348,7 +355,9 @@ exports.addNewMember = async (req, res) => {
               : body.status
           : 'active',
       totalPoints: body.point || 0,
-      lifetimePoints: body.point || 0
+      lifetimePoints: body.point || 0,
+      isCredit: toCreditFlag(body.isCredit),
+      creditLimit: toCreditLimit(body.creditLimit)
     })
 
     if (createdMember.getDataValue) {
@@ -391,7 +400,9 @@ exports.editMember = async (req, res) => {
       address,
       tier,
       status,
-      point
+      point,
+      isCredit,
+      creditLimit
     } = req.body
 
     const member = await Member.findByPk(id)
@@ -491,6 +502,12 @@ exports.editMember = async (req, res) => {
     if (status !== undefined) updateData.status = status
     if (point !== undefined) {
       updateData.totalPoints = point
+    }
+    if (isCredit !== undefined) {
+      updateData.isCredit = toCreditFlag(isCredit)
+    }
+    if (creditLimit !== undefined) {
+      updateData.creditLimit = toCreditLimit(creditLimit)
     }
     updateData.modifiedBy = req.user?.id
 

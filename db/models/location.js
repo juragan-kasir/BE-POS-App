@@ -129,6 +129,18 @@ module.exports = (sequelize, DataTypes) => {
       timezone: {
         type: DataTypes.STRING(50),
         defaultValue: 'Asia/Jakarta'
+      },
+      // Shared-domain marker (2026-11-14): fnb | retail | laundry.
+      // Existing rows are fnb; the POS counter keeps its current behavior.
+      businessType: {
+        type: DataTypes.STRING(20),
+        allowNull: false,
+        defaultValue: 'fnb'
+      },
+      // Laundry-only outlet settings. Null for fnb/retail outlets.
+      laundrySettings: {
+        type: DataTypes.JSONB,
+        allowNull: true
       }
     },
     {

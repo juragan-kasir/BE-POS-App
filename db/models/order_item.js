@@ -98,6 +98,12 @@ module.exports = (sequelize, DataTypes) => {
       roundId: {
         type: DataTypes.INTEGER,
         allowNull: true
+      },
+      // Historical laundry pricing snapshot (actual vs billed qty, unit,
+      // channel, min/rounding, requiresIroning, HPP components).
+      serviceSnapshot: {
+        type: DataTypes.JSONB,
+        allowNull: true
       }
     },
     {

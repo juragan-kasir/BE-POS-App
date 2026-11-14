@@ -36,6 +36,7 @@ const { assertSellableProductAssignment } = require('../validation/schemas')
 // W3-1 (DR-11): shared authoritative outlet-price resolution (checkout +
 // display use one rule).
 const { getEffectivePriceMap, normalizePriceTiers } = require('../../utils/outletPricing')
+const { normalizeServiceConfig, validateServiceConfig } = require('../service/laundryPricing')
 
 const normalizeStores = (stores) => {
   if (!Array.isArray(stores)) return []
@@ -732,6 +733,7 @@ exports.postAddProduct = async (req, res) => {
     currencyId,
     currencyCode,
     tipeProduk,
+    serviceConfig,
     inventoryMode,
     inventoryLinks,
     allowDecimalQty,
@@ -897,6 +899,19 @@ exports.postAddProduct = async (req, res) => {
       }
     }
 
+    const normalizedServiceConfig = normalizeServiceConfig(serviceConfig)
+    if (tipeProduk === 'laundry_service') {
+      const serviceCheck = validateServiceConfig(normalizedServiceConfig)
+      if (!serviceCheck.ok) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_SERVICE_CONFIG',
+          field: 'serviceConfig',
+          message: serviceCheck.message
+        })
+      }
+    }
+
     const createAssignmentError = await assertProductStoresAssignable(
       null,
       parsedStores
@@ -956,6 +971,7 @@ exports.postAddProduct = async (req, res) => {
       status: normalizeStatus(status),
       createdBy,
       tipeProduk,
+      serviceConfig: normalizedServiceConfig,
       inventoryMode,
       allowDecimalQty: allowDecimalQty === true,
       image: imageUrl || image,
@@ -1083,6 +1099,7 @@ exports.editProductByLocationAndId = async (req, res) => {
     currencyId,
     currencyCode,
     tipeProduk,
+    serviceConfig,
     inventoryMode,
     inventoryLinks,
     allowDecimalQty,
@@ -1104,6 +1121,18 @@ exports.editProductByLocationAndId = async (req, res) => {
   // ponytail: modifiedBy TIDAK terisi dari reqBody & hook beforeBulkUpdate
   // terbukti tidak jalan untuk Model.update — set eksplisit dari JWT (trusted).
   const actorId = toIntOrNull(req.user?.id ?? req.body.modifiedBy)
+  const normalizedServiceConfig = normalizeServiceConfig(serviceConfig)
+  if (tipeProduk === 'laundry_service') {
+    const serviceCheck = validateServiceConfig(normalizedServiceConfig)
+    if (!serviceCheck.ok) {
+      return res.status(400).json({
+        success: false,
+        code: 'INVALID_SERVICE_CONFIG',
+        field: 'serviceConfig',
+        message: serviceCheck.message
+      })
+    }
+  }
 
   try {
     // IDOR fix: was findOne({where:{id}}) with no ownership check — any
@@ -1309,6 +1338,7 @@ exports.editProductByLocationAndId = async (req, res) => {
       ...(sent(currencyId) ? { currencyId: currencyId || null } : {}),
       ...(sent(currencyCode) ? { currencyCode: currencyCode || null } : {}),
       ...(sent(tipeProduk) ? { tipeProduk } : {}),
+      ...(serviceConfig !== undefined ? { serviceConfig: normalizedServiceConfig } : {}),
       ...(inventoryMode !== undefined ? { inventoryMode } : {}),
       ...(allowDecimalQty !== undefined ? { allowDecimalQty: allowDecimalQty === true } : {}),
       // BA finding #3: composition is not editable here — it is the BOM's

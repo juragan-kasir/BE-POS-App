@@ -2010,7 +2010,8 @@ const createOrderItems = async (
           notes: item.notes,
           hppSnapshot: bundleUnitCost(bundle, unitCosts),
           status: 'pending',
-          roundId
+          roundId,
+          serviceSnapshot: item.serviceSnapshot || null
         },
         { transaction: t }
       )
@@ -2036,7 +2037,8 @@ const createOrderItems = async (
         notes: item.notes,
         hppSnapshot: unitCosts.get(Number(item.product || item.productId)) ?? null,
         status: 'pending',
-        roundId
+        roundId,
+        serviceSnapshot: item.serviceSnapshot || null
       },
       { transaction: t }
     )
@@ -2353,7 +2355,8 @@ const recordOrderPayment = async (
       cashRegisterId: attribution.cashRegisterId ?? null,
       splitBillId: attribution.splitBillId ?? null,
       referenceNumber: attribution.referenceNumber ?? null,
-      paymentMethodName: attribution.paymentMethodName ?? null
+      paymentMethodName: attribution.paymentMethodName ?? null,
+      idempotencyKey: attribution.idempotencyKey ?? null
     },
     { transaction }
   )
@@ -3079,6 +3082,105 @@ const deductStockForPaidOrder = async (
   }
   return shortages
 }
+
+
+const collectOrderPaymentInTransaction = async (orderId, store, body, user, t) => {
+  const { paymentMethod, amount, cashAmount, changeAmount, referenceNumber, idempotencyKey, expectedOutstanding } = body
+  if (!idempotencyKey) {
+    const err = new Error('idempotencyKey is required')
+    err.statusCode = 422
+    err.code = 'IDEMPOTENCY_KEY_REQUIRED'
+    throw err
+  }
+  const existing = await db.transaction.findOne({ where: { order: orderId, idempotencyKey }, transaction: t })
+  if (existing) {
+    const order = await Order.findOne({ where: { id: orderId, store }, transaction: t })
+    const finReplay = await computeOrderFinancials(order, t)
+    return { order, fin: finReplay, replay: true }
+  }
+  const order = await Order.findOne({ where: { id: orderId, ...(store ? { store } : {}) }, transaction: t, lock: t.LOCK.UPDATE })
+  if (!order) {
+    const err = new Error('Order not found')
+    err.statusCode = 404
+    err.code = 'NOT_FOUND'
+    throw err
+  }
+  const fin = await computeOrderFinancials(order, t)
+  if (fin.O <= 0) {
+    const err = new Error('Order is already paid')
+    err.statusCode = 409
+    err.code = 'ALREADY_PAID'
+    throw err
+  }
+  const payAmount = Math.max(0, Number(amount) || 0)
+  if (expectedOutstanding !== undefined && Number(expectedOutstanding) !== fin.O) {
+    const err = new Error('Outstanding amount changed')
+    err.statusCode = 409
+    err.code = 'OUTSTANDING_CHANGED'
+    throw err
+  }
+  if (!(payAmount > 0) || payAmount > fin.O) {
+    const err = new Error('Invalid payment amount')
+    err.statusCode = 422
+    err.code = 'INVALID_AMOUNT'
+    throw err
+  }
+  const method = normalizePaymentMethod(paymentMethod)
+  if (!method) {
+    const err = new Error('paymentMethod is required')
+    err.statusCode = 422
+    err.code = 'PAYMENT_METHOD_REQUIRED'
+    throw err
+  }
+  const reference = requireTenderReference(method, referenceNumber)
+  const { cashReceived, changeGiven } = validateCashTender({ paymentMethod: method, cashAmount, changeAmount, amountDue: payAmount })
+  const register = await resolveAttributedRegister(store || order.store, t)
+  await assertSettlementReferenceUnused({ store: store || order.store, method, reference, transaction: t })
+  const paymentMethodName = await resolvePaymentMethodName({ method, store: store || order.store, transaction: t })
+  await recordOrderPayment(order, method, payAmount, user?.id, t, cashReceived, changeGiven, {
+    cashRegisterId: register.id,
+    referenceNumber: reference,
+    paymentMethodName,
+    idempotencyKey
+  })
+  const after = await computeOrderFinancials(order, t)
+  const nextStatus = after.state === FINANCIAL_STATES.PAID ? 'paid' : order.status
+  await order.update({
+    paymentStatus: legacyPaymentStatusFor(after.state),
+    ...(after.state === FINANCIAL_STATES.PAID ? { status: 'paid' } : {}),
+    paymentMethod: method,
+    paymentMethodName,
+    cashRegisterId: order.cashRegisterId || register.id
+  }, { transaction: t })
+  let accountingJobs = null
+  if (after.state === FINANCIAL_STATES.PAID && order.paymentStatus !== 'paid') {
+    await deductStockForPaidOrder(order.id, store || order.store, order.orderNumber, user?.id, t)
+    accountingJobs = await enqueueOrderAccountingJobs(order, store || order.store, order.orderNumber, {
+      subTotal: order.subTotal,
+      discountAmount: order.discountAmount,
+      taxAmount: order.taxAmount,
+      serviceChargeAmount: order.serviceChargeAmount,
+      totalPrice: order.totalPrice
+    }, 'counter', user?.id, t)
+  }
+  return { order, fin: after, accountingJobs }
+}
+
+exports.collectOrderPaymentInTransaction = collectOrderPaymentInTransaction
+exports.collectOrderPayment = async (req, res) => {
+  try {
+    const scope = resolveCounterStore(req)
+    if (!scope.store) return res.status(scope.status).json(scope.body)
+    const id = req.params.id
+    const result = await withDeadlockRetry(() => db.sequelize.transaction((t) => collectOrderPaymentInTransaction(id, scope.store, req.body, req.user, t)))
+    if (result.accountingJobs) await attemptOrderAccountingEntries(result.accountingJobs)
+    const data = await fetchFullOrder(id).catch(() => null)
+    return res.status(200).json({ success: true, data: data || result.order })
+  } catch (e) {
+    return res.status(e.statusCode || 500).json({ success: false, message: e.message, code: e.code })
+  }
+}
+
 exports.deductStockForPaidOrder = deductStockForPaidOrder
 // P1: split-bill settlement reuses the same server-side cash-tender
 // invariant (exact change math, integer rupiah) instead of duplicating it.
@@ -6107,3 +6209,13 @@ exports.addCustomerOrderItems = (req, res) =>
     present: presentCustomerOrder,
     findOrder: () => Order.findOne({ where: { publicToken: req.params.token, source: 'qr' } })
   })
+
+
+// Shared helpers (laundry extension)
+exports.resolveCounterStore = resolveCounterStore
+exports.loadAndPriceOrderItems = loadAndPriceOrderItems
+exports.createOrderItems = createOrderItems
+exports.sessionCashier = sessionCashier
+exports.generateOrderNumber = generateOrderNumber
+exports.recordOrderPayment = recordOrderPayment
+exports.fetchFullOrder = fetchFullOrder

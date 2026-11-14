@@ -219,6 +219,12 @@ module.exports = (sequelize, DataTypes) => {
       as: 'transactions'
     })
     order.belongsTo(models.location, { foreignKey: 'store', as: 'storeData' })
+    if (models.laundry_order) {
+      order.hasOne(models.laundry_order, {
+        foreignKey: 'orderId',
+        as: 'laundryOrder'
+      })
+    }
   }
 
   return order

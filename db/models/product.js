@@ -167,6 +167,11 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.BOOLEAN,
         allowNull: false,
         defaultValue: false
+      },
+      // Laundry service configuration (null for F&B/retail products).
+      serviceConfig: {
+        type: DataTypes.JSONB,
+        allowNull: true
       }
     },
     {
