@@ -318,6 +318,8 @@ describe('T1 — ramai, banyak promo', () => {
     const c2 = await request(app).post(`/laundry/order/${r2.body.data.id}/cancel`).set(ctx.a1)
       .send({ store: ctx.s1.id, reason: 'pelanggan batal', refundAmount: 50000, refundMethod: 'CASH', idempotencyKey: k })
     const tx = await orderTx(r2.body.data.id)
+    const o2 = await db.order.findByPk(r2.body.data.id)
+    soft('3.7 order header', 'refunded cancel → order void + paymentStatus refunded (not NULL)', [o2.status, o2.paymentStatus], ['void', 'refunded'])
     soft('3.7', 'CANCELLED, net 0, one refund row (idempotent)', [c1.status, c1.body.data?.laundryOrder?.processStatus, tx.reduce((s, t) => s + Number(t.amount), 0), tx.length, c2.status], [200, 'CANCELLED', 0, 2, 200])
   })
 
@@ -332,6 +334,8 @@ describe('T1 — ramai, banyak promo', () => {
     soft('G6 PATCH', 'PATCH toStatus=CANCELLED refused', [patch.status, patch.body.code], [409, 'USE_CANCEL_ENDPOINT'])
     const ok = await request(app).post(`/laundry/order/${id}/cancel`).set(ctx.a1).send({ store: ctx.s1.id, reason: 'x', approverPin: '1234' })
     const revive = await request(app).patch(`/laundry/order/${id}/status`).set(ctx.a1).send({ store: ctx.s1.id, toStatus: 'WASHING', reason: 'hidupkan lagi' })
+    const og = await db.order.findByPk(id)
+    soft('G6 order header', 'unpaid cancel → order cancelled + unpaid', [og.status, og.paymentStatus], ['cancelled', 'unpaid'])
     soft('G6 PATCH', 'right PIN cancels; admin cannot revive CANCELLED', [ok.status, revive.status, revive.body.code], [200, 409, 'ORDER_CLOSED'])
   })
 

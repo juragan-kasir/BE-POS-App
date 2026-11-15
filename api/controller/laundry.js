@@ -9,7 +9,7 @@ const { resolvePaymentMethodName } = require('../service/paymentTypeName')
 const { resolveAttributedRegister } = require('../service/settlementAttribution')
 const { validateCashTender } = require('./order')
 const { assertSettlementReferenceUnused } = require('../service/settlementReference')
-const { computeOrderFinancials, legacyPaymentStatusFor, FINANCIAL_STATES } = require('../service/orderFinancials')
+const { computeOrderFinancials, FINANCIAL_STATES } = require('../service/orderFinancials')
 const { withDeadlockRetry } = require('../../utils/deadlockRetry')
 const orderController = require('./order')
 const { evaluateLaundryPromos } = require('../service/laundryPromo')
@@ -664,8 +664,19 @@ exports.cancelOrder = async (req, res) => {
         modifiedBy: req.user?.id
       }, { transaction: t })
       await writeHistory(laundry.id, from, 'CANCELLED', req.user?.id, reason, t)
-      const after = await computeOrderFinancials(order, t)
-      await order.update({ paymentStatus: legacyPaymentStatusFor(after.state) }, { transaction: t })
+      // The sale ends here too: order.status is what F&B order lists, sales
+      // reports and the financial ledger read. Left as 'paid', a cancelled +
+      // refunded laundry order still counted as a sale and its paymentStatus
+      // became NULL (state INVALID). Same convention as POS orders: 'void'
+      // when money was collected, else 'cancelled'.
+      const rows = await db.transaction.findAll({ where: { order: order.id }, attributes: ['amount'], transaction: t })
+      const collected = rows.filter((r) => Number(r.amount) > 0).reduce((sum, r) => sum + Number(r.amount), 0)
+      const refunded = rows.filter((r) => Number(r.amount) < 0).reduce((sum, r) => sum + Math.abs(Number(r.amount)), 0)
+      await order.update({
+        status: collected > 0 ? 'void' : 'cancelled',
+        paymentStatus: collected === 0 ? 'unpaid' : refunded >= collected ? 'refunded' : 'partially_refunded',
+        modifiedBy: req.user?.id
+      }, { transaction: t })
       return order
     }))
     const data = await getFullLaundryOrder(result.id, scope.store)
