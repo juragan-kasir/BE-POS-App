@@ -108,6 +108,102 @@ const surchargeFor = (subtotal, turnaround) => {
 const addHours = (date, hours) =>
   new Date(new Date(date).getTime() + (Number(hours) || 0) * 36e5)
 
+const { DEFAULT_TIMEZONE, isValidTimezone, getTimezoneOffsetMs, getStoreLocalDate } = require('../../utils/businessDate')
+const DAY_NAMES = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday']
+const parseMinutes = (v) => {
+  if (typeof v !== 'string') return null
+  const m = /^(\d{1,2}):(\d{2})$/.exec(v.trim())
+  if (!m) return null
+  const h = Number(m[1]), mm = Number(m[2])
+  if (h<0||h>23||mm<0||mm>59) return null
+  return h*60+mm
+}
+const minutesToHHMM = (mins) => `${String(Math.floor(mins/60)).padStart(2,'0')}:${String(mins%60).padStart(2,'0')}`
+const dateStringUTC = (d) => `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`
+const localToInstant = (dateStr, minutes, tz) => {
+  const [y,mo,da] = dateStr.split('-').map(Number)
+  const hour = Math.floor(minutes/60), minute = minutes%60
+  const guess = Date.UTC(y, mo-1, da, hour, minute, 0)
+  const first = new Date(guess - getTimezoneOffsetMs(tz, new Date(guess)))
+  return new Date(guess - getTimezoneOffsetMs(tz, first))
+}
+const addDaysUTC = (dateStr, n) => {
+  const d = new Date(`${dateStr}T00:00:00Z`); d.setUTCDate(d.getUTCDate()+n); return dateStringUTC(d)
+}
+const localParts = (inst, tz) => {
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', hourCycle:'h23', weekday:'long' }).formatToParts(inst)
+  const g = (t)=>parts.find(p=>p.type===t)?.value
+  return { date: `${g('year')}-${g('month')}-${g('day')}`, minutes: Number(g('hour'))*60 + Number(g('minute')), dayName: (g('weekday')||'').toLowerCase() }
+}
+// Convert BE openingHours array to a simple per-day map usable for due calc
+const openingMap = (openingHours) => {
+  if (!Array.isArray(openingHours) || !openingHours.length) return null
+  const map = {}
+  for (const e of openingHours) {
+    if (!e || typeof e !== 'object') continue
+    const day = String(e.day||'').toLowerCase()
+    if (!DAY_NAMES.includes(day)) continue
+    if (e.isOpen === false) { map[day] = { closed:true }; continue }
+    if (e.is24Hours) { map[day] = { open:0, close:1440 }; continue }
+    const o = parseMinutes(e.open), c = parseMinutes(e.close)
+    if (o==null || c==null) continue
+    map[day] = { open:o, close:c }
+  }
+  return Object.keys(map).length ? map : null
+}
+const windowFor = (dateStr, map) => {
+  const dow = DAY_NAMES[new Date(`${dateStr}T00:00:00Z`).getUTCDay()]
+  const e = map[dow]
+  if (!e || e.closed) return null
+  return e
+}
+const nextOpenMoment = (inst, map, tz) => {
+  let p = localParts(inst, tz)
+  let date = p.date
+  for (let i=0;i<14;i++) {
+    const w = windowFor(date, map)
+    if (w) {
+      const startMin = (i===0) ? Math.max(p.minutes, w.open) : w.open
+      if (startMin < w.close) return { date, minutes: startMin }
+    }
+    date = addDaysUTC(date, 1)
+  }
+  return { date: p.date, minutes: p.minutes }
+}
+const addOpenHours = (start, hours, map, tz) => {
+  let remaining = (Number(hours)||0) * 60
+  let cur = { ...start }
+  for (let i=0;i<120 && remaining>0;i++) {
+    const w = windowFor(cur.date, map)
+    if (!w || cur.minutes >= w.close) {
+      const inst = localToInstant(addDaysUTC(cur.date,1), 0, tz)
+      cur = nextOpenMoment(inst, map, tz); continue
+    }
+    const avail = w.close - cur.minutes
+    if (remaining <= avail) return { date: cur.date, minutes: cur.minutes + remaining }
+    remaining -= avail
+    const inst = localToInstant(addDaysUTC(cur.date,1), 0, tz)
+    cur = nextOpenMoment(inst, map, tz)
+  }
+  return cur
+}
+const dueAtFrom = (receivedAt, hours, openingHours, timezone) => {
+  const duration = Number(hours)||0
+  const tz = isValidTimezone(timezone) ? timezone : DEFAULT_TIMEZONE
+  const inst = receivedAt instanceof Date ? receivedAt : new Date(receivedAt)
+  const map = openingMap(openingHours)
+  if (!map) return addHours(inst, duration)
+  const start = nextOpenMoment(inst, map, tz)
+  let end
+  if (duration < 24) end = addOpenHours(start, duration, map, tz)
+  else {
+    // day packages: add calendar time to start, then snap to next open if closed
+    const startInst = localToInstant(start.date, start.minutes, tz)
+    end = nextOpenMoment(addHours(startInst, duration), map, tz)
+  }
+  return localToInstant(end.date, end.minutes, tz)
+}
+
 const normalizeServiceConfig = (value) => {
   if (value === null || value === undefined || value === '') return null
   let parsed = value
@@ -189,6 +285,7 @@ module.exports = {
   lineTotal,
   surchargeFor,
   addHours,
+  dueAtFrom,
   normalizeServiceConfig,
   normalizeLaundrySettings,
   publicLaundrySettings,
