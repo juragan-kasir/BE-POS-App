@@ -682,8 +682,16 @@ exports.getReport = async (req, res) => {
 
     const todayOrders = active.filter((o) => sameLocalDay(o.laundryOrder?.receivedAt || o.createdAt))
     const todayKg = todayOrders.reduce((sum, o) => sum + (o.items || []).filter((it) => (it.serviceSnapshot || {}).type === 'kiloan').reduce((s, it) => s + Number((it.serviceSnapshot || {}).billQty ?? it.quantity ?? 0), 0), 0)
+    // Receipts are net of refunds paid out the same day: a 50.000 order paid
+    // then cancelled with a 50.000 refund adds 0, not 50.000 (skema 3.7/3.11).
     let todayPayments = 0
-    orders.forEach((o) => (o.transactions || []).forEach((t) => { if (sameLocalDay(t.createdAt) && Number(t.amount) > 0) todayPayments += Number(t.amount || 0) }))
+    let todayRefunds = 0
+    orders.forEach((o) => (o.transactions || []).forEach((t) => {
+      if (!sameLocalDay(t.createdAt)) return
+      const amount = Number(t.amount || 0)
+      todayPayments += amount
+      if (amount < 0) todayRefunds += -amount
+    }))
     // self-service: diproses & selesai di kasir (picked up saat diterima, layanan channel self)
     const isSelfOrder = (o) => {
       const l = o.laundryOrder || {}
@@ -712,8 +720,14 @@ exports.getReport = async (req, res) => {
       const dayActive = active.filter((o) => dayKeyOf(o.laundryOrder?.receivedAt || o.createdAt) === key)
       const kg = dayActive.reduce((sum, o) => sum + (o.items || []).filter((it) => (it.serviceSnapshot || {}).type === 'kiloan').reduce((s, it) => s + Number((it.serviceSnapshot || {}).billQty ?? it.quantity ?? 0), 0), 0)
       let omzet = 0
-      orders.forEach((o) => (o.transactions || []).forEach((t) => { if (dayKeyOf(t.createdAt) === key && Number(t.amount) > 0) omzet += Number(t.amount || 0) }))
-      days.push({ date: key, orders: dayActive.length, kg, omzet })
+      let refunds = 0
+      orders.forEach((o) => (o.transactions || []).forEach((t) => {
+        if (dayKeyOf(t.createdAt) !== key) return
+        const amount = Number(t.amount || 0)
+        omzet += amount
+        if (amount < 0) refunds += -amount
+      }))
+      days.push({ date: key, orders: dayActive.length, kg: Number(kg.toFixed(2)), omzet, refunds })
     }
 
     // per service
@@ -757,8 +771,9 @@ exports.getReport = async (req, res) => {
     return res.json({ success: true, data: {
       summary: {
         todayOrders: todayOrders.length,
-        todayKg,
+        todayKg: Number(todayKg.toFixed(2)),
         todayPayments,
+        todayRefunds,
         todaySelf: todaySelfOrders.length,
         todaySelfOmzet,
         unpaidCount: unpaidOrders.length,
