@@ -289,10 +289,14 @@ describe('T1 — ramai, banyak promo', () => {
       paymentAmount: 20000, paymentMethod: 'CASH', cashAmount: 20000, changeAmount: 0
     })
     soft('3.6', 'Kilat +30% total / status after DP', [r.status, Number(r.body.data?.totalPrice), r.body.data?.serviceChargeAmount, r.body.data?.paymentStatus], [201, 65000, 15000, 'partially_paid'])
+    soft('3.6 tx in response', 'create response carries the DP transaction', (r.body.data?.transactions || []).map((t) => Number(t.amount)), [20000])
     const id = r.body.data.id
     const pay = await request(app).post(`/order/${id}/payments`).set(ctx.a1)
       .send({ store: ctx.s1.id, paymentMethod: 'QRIS', amount: 45000, referenceNumber: `QR-${RUN}`, idempotencyKey: key('pay') })
     const tx = await orderTx(id)
+    const detail = await request(app).get(`/laundry/order/${id}?store=${ctx.s1.id}`).set(ctx.a1)
+    const list = await request(app).get(`/laundry/order?store=${ctx.s1.id}`).set(ctx.a1)
+    soft('3.6 tx in detail/list', 'GET detail & list carry payments', [(detail.body.data?.transactions || []).map((t) => Number(t.amount)), (list.body.data || []).find((o) => o.id === id)?.transactions?.map((t) => Number(t.amount))], [[20000, 45000], [20000, 45000]])
     soft('3.6', 'after QRIS 45000: paymentStatus / methods / amounts', [pay.status, pay.body.data?.paymentStatus, tx.map((t) => [t.typePayment, Number(t.amount)])], [200, 'paid', [['CASH', 20000], ['QRIS', 45000]]])
     const over = await request(app).post(`/order/${id}/payments`).set(ctx.a1)
       .send({ store: ctx.s1.id, paymentMethod: 'CASH', amount: 1000, cashAmount: 1000, idempotencyKey: key('pay') })
@@ -314,6 +318,8 @@ describe('T1 — ramai, banyak promo', () => {
     const c2 = await request(app).post(`/laundry/order/${r2.body.data.id}/cancel`).set(ctx.a1)
       .send({ store: ctx.s1.id, reason: 'pelanggan batal', refundAmount: 50000, refundMethod: 'CASH', idempotencyKey: k })
     const tx = await orderTx(r2.body.data.id)
+    const o2 = await db.order.findByPk(r2.body.data.id)
+    soft('3.7 order header', 'refunded cancel → order void + paymentStatus refunded (not NULL)', [o2.status, o2.paymentStatus], ['void', 'refunded'])
     soft('3.7', 'CANCELLED, net 0, one refund row (idempotent)', [c1.status, c1.body.data?.laundryOrder?.processStatus, tx.reduce((s, t) => s + Number(t.amount), 0), tx.length, c2.status], [200, 'CANCELLED', 0, 2, 200])
   })
 
@@ -328,6 +334,8 @@ describe('T1 — ramai, banyak promo', () => {
     soft('G6 PATCH', 'PATCH toStatus=CANCELLED refused', [patch.status, patch.body.code], [409, 'USE_CANCEL_ENDPOINT'])
     const ok = await request(app).post(`/laundry/order/${id}/cancel`).set(ctx.a1).send({ store: ctx.s1.id, reason: 'x', approverPin: '1234' })
     const revive = await request(app).patch(`/laundry/order/${id}/status`).set(ctx.a1).send({ store: ctx.s1.id, toStatus: 'WASHING', reason: 'hidupkan lagi' })
+    const og = await db.order.findByPk(id)
+    soft('G6 order header', 'unpaid cancel → order cancelled + unpaid', [og.status, og.paymentStatus], ['cancelled', 'unpaid'])
     soft('G6 PATCH', 'right PIN cancels; admin cannot revive CANCELLED', [ok.status, revive.status, revive.body.code], [200, 409, 'ORDER_CLOSED'])
   })
 
