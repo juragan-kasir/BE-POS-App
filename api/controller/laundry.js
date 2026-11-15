@@ -12,6 +12,7 @@ const { assertSettlementReferenceUnused } = require('../service/settlementRefere
 const { computeOrderFinancials, legacyPaymentStatusFor, FINANCIAL_STATES } = require('../service/orderFinancials')
 const { withDeadlockRetry } = require('../../utils/deadlockRetry')
 const orderController = require('./order')
+const { evaluateLaundryPromos } = require('../service/laundryPromo')
 
 const LaundryTurnaround = db.laundry_turnaround
 const LaundryOrder = db.laundry_order
@@ -115,6 +116,29 @@ const resolveTurnaround = async (store, turnaroundId, transaction) => {
 const writeHistory = (laundryOrderId, fromStatus, toStatus, actorId, reason, t) =>
   LaundryStatusHistory.create({ laundryOrderId, fromStatus, toStatus, actorId, reason: reason || null }, { transaction: t })
 
+// Promo discount for a laundry cart. Base = service subtotal (no surcharge),
+// same rules as FE-LAUNDRY. An unusable typed code is reported as
+// promoError (quote) or refused (create) — never swapped for another promo.
+const resolveDiscounts = async ({ body, lines, outlet, transaction }) => {
+  const promo = await evaluateLaundryPromos({
+    store: outlet.id,
+    tenantId: outlet.tenantId ?? null,
+    lines: lines.map((l) => ({ productId: l.productId, subtotal: l.subtotal })),
+    customerId: body.customerId || null,
+    promoCode: body.promoCode || null,
+    orderType: body.orderType === 'self' ? 'self' : 'full',
+    timezone: outlet.timezone || undefined,
+    transaction
+  })
+  return {
+    discounts: promo.discounts,
+    discountAmount: promo.discountAmount,
+    promoCampaignId: promo.discounts[0]?.campaignId || null,
+    promoCampaignName: promo.discounts[0]?.name || null,
+    promoError: promo.error
+  }
+}
+
 exports.listTurnarounds = async (req, res) => {
   try {
     const scope = resolveCounterStore(req)
@@ -199,28 +223,15 @@ exports.quote = async (req, res) => {
   try {
     const scope = resolveCounterStore(req)
     if (!scope.store) return res.status(scope.status).json(scope.body)
-    await ensureLaundryStore(scope.store)
+    const outlet = await ensureLaundryStore(scope.store)
     const { lines, subtotal, hppTotal, pieceRequired } = await quoteLines(req.body.items || [], scope.store)
     const turnaround = req.body.orderType === 'self' ? null : await resolveTurnaround(scope.store, req.body.turnaroundId)
     const surcharge = req.body.orderType === 'self' ? 0 : surchargeFor(subtotal, turnaround)
-    let discountAmount = 0
-    let promoCampaignId = null
-    let promoCampaignName = null
-    if (req.body.promoCode) {
-      const promo = await orderController.evaluatePromoCampaign(
-        lines.map(l => ({ productId: l.productId, quantity: l.qty, unitPrice: l.price })),
-        scope.store,
-        req.body.customerId || null,
-        subtotal + surcharge
-      )
-      discountAmount = Math.max(0, Math.min(subtotal + surcharge, Number(promo.discountAmount) || 0))
-      promoCampaignId = promo.campaignId || null
-      promoCampaignName = promo.campaignName || null
-    }
+    const { discounts, discountAmount, promoCampaignId, promoCampaignName, promoError } =
+      await resolveDiscounts({ body: req.body, lines, outlet })
     const total = Math.max(0, subtotal + surcharge - discountAmount)
-    const outlet = await Location.findByPk(scope.store)
     const dueAt = req.body.orderType === 'self' ? new Date() : dueAtFrom(new Date(), turnaround?.durationHours || 72, outlet?.openingHours, outlet?.timezone)
-    return res.json({ success: true, data: { lines: lines.map(l => l.serviceSnapshot), subtotal, surcharge, discountAmount, promoCampaignId, promoCampaignName, total, hppTotal, pieceRequired, dueAt, turnaroundId: turnaround?.id || null } })
+    return res.json({ success: true, data: { lines: lines.map(l => l.serviceSnapshot), subtotal, surcharge, discountAmount, discounts, promoCampaignId, promoCampaignName, promoError: promoError ? promoError.message : null, promoErrorCode: promoError ? promoError.code : null, total, hppTotal, pieceRequired, dueAt, turnaroundId: turnaround?.id || null } })
   } catch (e) {
     if (e.code === 'PRICE_CHANGED') return res.status(409).json({ success: false, code: e.code, mismatches: e.mismatches })
     return res.status(e.statusCode || 500).json({ success: false, message: e.message, code: e.code })
@@ -231,7 +242,7 @@ exports.createOrder = async (req, res) => {
   try {
     const scope = resolveCounterStore(req)
     if (!scope.store) return res.status(scope.status).json(scope.body)
-    await ensureLaundryStore(scope.store)
+    const outlet = await ensureLaundryStore(scope.store)
     const idempotencyKey = req.body.idempotencyKey
     if (!idempotencyKey) refuse(422, 'IDEMPOTENCY_KEY_REQUIRED', 'idempotencyKey is required')
     const existing = await Order.findOne({ where: { store: scope.store, idempotencyKey } })
@@ -247,18 +258,8 @@ exports.createOrder = async (req, res) => {
     }
     const turnaround = isSelf ? null : await resolveTurnaround(scope.store, body.turnaroundId)
     const surcharge = isSelf ? 0 : surchargeFor(subtotal, turnaround)
-    let discountAmount = 0
-    let promoCampaignId = null
-    if (body.promoCode) {
-      const promo = await orderController.evaluatePromoCampaign(
-        lines.map(l => ({ productId: l.productId, quantity: l.qty, unitPrice: l.price })),
-        scope.store,
-        body.customerId || null,
-        subtotal + surcharge
-      )
-      discountAmount = Math.max(0, Math.min(subtotal + surcharge, Number(promo.discountAmount) || 0))
-      promoCampaignId = promo.campaignId || null
-    }
+    const { discounts, discountAmount, promoCampaignId, promoError } = await resolveDiscounts({ body, lines, outlet })
+    if (promoError) refuse(422, promoError.code, promoError.message)
     const total = Math.max(0, subtotal + surcharge - discountAmount)
     if (body.expectedTotal !== undefined && Number(body.expectedTotal) !== total) {
       refuse(409, 'PRICE_CHANGED', 'Total berubah, muat ulang dan konfirmasi ulang')
@@ -267,7 +268,6 @@ exports.createOrder = async (req, res) => {
     if (isSelf && paymentAmount < total) refuse(422, 'SELF_PAYMENT_REQUIRED', 'Self-service requires full payment')
     if (paymentAmount > total) refuse(422, 'OVERPAYMENT', 'Payment amount exceeds total')
     const receivedAt = new Date()
-    const outlet = await Location.findByPk(scope.store)
     const dueAt = isSelf ? receivedAt : dueAtFrom(receivedAt, turnaround?.durationHours || 72, outlet?.openingHours, outlet?.timezone)
     const customer = body.customerId ? await Member.findByPk(body.customerId) : null
 
@@ -335,12 +335,12 @@ exports.createOrder = async (req, res) => {
       }, { transaction: t })
       await writeHistory(laundry.id, null, laundry.processStatus, req.user?.id, isSelf ? 'Self-service selesai di kasir' : '', t)
 
-      if (promoCampaignId && discountAmount > 0) {
+      for (const discount of discounts) {
         await orderController.recordPromoUsageIfApplied(
           created,
-          promoCampaignId,
+          discount.campaignId,
           body.customerId || null,
-          discountAmount,
+          discount.amount,
           { reward: null },
           req.user?.id || null,
           t

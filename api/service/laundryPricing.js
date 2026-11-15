@@ -305,6 +305,7 @@ const publicLaundrySettings = (value) => {
 }
 
 module.exports = {
+  allocateProportionally,
   roundQty,
   ceilQty,
   billableQty,
