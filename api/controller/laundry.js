@@ -469,12 +469,26 @@ exports.updateStatus = async (req, res) => {
     const scope = resolveCounterStore(req)
     if (!scope.store) return res.status(scope.status).json(scope.body)
     const { toStatus, reason } = req.body
+    // Cancelling and handing over carry money rules (owner PIN + refund,
+    // outstanding payment) that live only in /cancel and /pickup, so the
+    // generic status endpoint must never reach those two states (G6).
+    if (toStatus === 'CANCELLED') {
+      return res.status(409).json({ success: false, code: 'USE_CANCEL_ENDPOINT', message: 'Gunakan POST /laundry/order/:id/cancel untuk membatalkan order' })
+    }
+    if (toStatus === 'PICKED_UP') {
+      return res.status(409).json({ success: false, code: 'USE_PICKUP_ENDPOINT', message: 'Gunakan POST /laundry/order/:id/pickup untuk serah terima order' })
+    }
     const data = await withDeadlockRetry(() => db.sequelize.transaction(async (t) => {
       const order = await Order.findOne({ where: { id: req.params.id, store: scope.store }, transaction: t, lock: t.LOCK.UPDATE })
       if (!order) refuse(404, 'NOT_FOUND', 'Order not found')
       const laundry = await LaundryOrder.findOne({ where: { orderId: order.id, store: scope.store }, transaction: t, lock: t.LOCK.UPDATE })
       if (!laundry) refuse(404, 'NOT_FOUND', 'Order not found')
       const from = laundry.processStatus
+      // Terminal states are final: an admin override must not revive a
+      // refunded/cancelled order or one already handed over.
+      if (from === 'CANCELLED' || from === 'PICKED_UP') {
+        refuse(409, 'ORDER_CLOSED', `Order ${from} tidak bisa diubah statusnya`)
+      }
       const allowed = ALLOWED[from] || []
       const isAdmin = ['admin', 'super_admin'].includes(req.user?.roleType)
       if (!allowed.includes(toStatus) && !(isAdmin && reason)) {
@@ -486,8 +500,6 @@ exports.updateStatus = async (req, res) => {
         if (req.body.rackCode !== undefined) patch.rackCode = String(req.body.rackCode || '').trim()
       }
       if (req.body.rackCode !== undefined && toStatus !== 'READY') patch.rackCode = String(req.body.rackCode || '').trim()
-      if (toStatus === 'CANCELLED') patch.cancelledReason = reason || ''
-      if (toStatus === 'PICKED_UP') patch.pickedUpAt = new Date()
       await laundry.update(patch, { transaction: t })
       await writeHistory(laundry.id, from, toStatus, req.user?.id, reason, t)
       return laundry
