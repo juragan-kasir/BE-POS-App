@@ -30,7 +30,8 @@ describe('laundryPricing', () => {
       minDpPercent: 0,
       reminderDays: 0,
       terms: '',
-      conditionTags: []
+      conditionTags: [],
+      ownerPinHash: null
     })
     expect(normalizeLaundrySettings({ serviceModel: 'invalid' }).serviceModel).toBe('full')
     expect(normalizeLaundrySettings(null)).toBeNull()

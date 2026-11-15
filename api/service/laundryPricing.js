@@ -171,8 +171,16 @@ const normalizeLaundrySettings = (value) => {
     terms: typeof parsed.terms === 'string' ? parsed.terms : '',
     conditionTags: Array.isArray(parsed.conditionTags)
       ? parsed.conditionTags.filter((tag) => typeof tag === 'string')
-      : []
+      : [],
+    ownerPinHash:
+      typeof parsed.ownerPinHash === 'string' && parsed.ownerPinHash ? parsed.ownerPinHash : null
   }
+}
+
+const publicLaundrySettings = (value) => {
+  if (!value || typeof value !== 'object') return value ?? null
+  const { ownerPinHash, ownerPin, ...rest } = value
+  return { ...rest, hasOwnerPin: Boolean(ownerPinHash) }
 }
 
 module.exports = {
@@ -183,6 +191,7 @@ module.exports = {
   addHours,
   normalizeServiceConfig,
   normalizeLaundrySettings,
+  publicLaundrySettings,
   validateServiceConfig,
   hppFor
 }
