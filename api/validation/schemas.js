@@ -2686,7 +2686,8 @@ exports.createLaundryOrderSchema = exports.laundryQuoteSchema.extend({
 exports.updateLaundryStatusSchema = z.object({
   store: strToNum().optional(),
   toStatus: z.enum(['RECEIVED', 'WASHING', 'IRONING', 'READY', 'PICKED_UP', 'CANCELLED']),
-  reason: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().default('')
+  reason: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().default(''),
+  rackCode: z.string().max(FIELD_MAX.SHORT_LABEL, tooLong(FIELD_MAX.SHORT_LABEL)).optional().default('')
 })
 
 exports.laundryPickupSchema = z.object({

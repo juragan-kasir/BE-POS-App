@@ -460,7 +460,11 @@ exports.updateStatus = async (req, res) => {
         refuse(403, 'INVALID_TRANSITION', `Cannot move ${from} to ${toStatus}`)
       }
       const patch = { processStatus: toStatus, modifiedBy: req.user?.id }
-      if (toStatus === 'READY') patch.readyAt = new Date()
+      if (toStatus === 'READY') {
+        patch.readyAt = new Date()
+        if (req.body.rackCode !== undefined) patch.rackCode = String(req.body.rackCode || '').trim()
+      }
+      if (req.body.rackCode !== undefined && toStatus !== 'READY') patch.rackCode = String(req.body.rackCode || '').trim()
       if (toStatus === 'CANCELLED') patch.cancelledReason = reason || ''
       if (toStatus === 'PICKED_UP') patch.pickedUpAt = new Date()
       await laundry.update(patch, { transaction: t })
