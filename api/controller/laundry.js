@@ -406,6 +406,8 @@ const getFullLaundryOrder = async (id, store) => {
     where: { id, ...(store ? { store } : {}) },
     include: [
       { model: OrderItem, as: 'items' },
+      // payments (+) and refunds (−): FE derives Dibayar / Sisa from these
+      { model: db.transaction, as: 'transactions', separate: true, order: [['id', 'ASC']] },
       {
         model: LaundryOrder,
         as: 'laundryOrder',
@@ -449,6 +451,7 @@ exports.listOrders = async (req, res) => {
       where,
       include: [
         { model: OrderItem, as: 'items' },
+        { model: db.transaction, as: 'transactions', separate: true, order: [['id', 'ASC']] },
         { model: LaundryOrder, as: 'laundryOrder', required: true, where: laundryWhere, include: [{ model: LaundryTurnaround, as: 'turnaround' }] }
       ],
       distinct: true,
