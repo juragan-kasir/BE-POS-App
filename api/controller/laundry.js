@@ -634,3 +634,125 @@ exports.cancelOrder = async (req, res) => {
     return res.status(e.statusCode || 500).json({ success: false, message: e.message, code: e.code })
   }
 }
+
+
+exports.getReport = async (req, res) => {
+  try {
+    const scope = resolveCounterStore(req)
+    if (!scope.store) return res.status(scope.status).json(scope.body)
+    const { Op } = require('sequelize')
+    const { getStoreDayBounds, getStoreLocalDate, DEFAULT_TIMEZONE } = require('../../utils/businessDate')
+    const outlet = await Location.findByPk(scope.store)
+    const tz = outlet?.timezone || DEFAULT_TIMEZONE
+    const todayStr = getStoreLocalDate(tz)
+    const todayBounds = getStoreDayBounds(todayStr, tz)
+    const storeWhere = { store: scope.store }
+
+    const orders = await Order.findAll({
+      where: storeWhere,
+      include: [
+        { model: OrderItem, as: 'items' },
+        { model: db.transaction, as: 'transactions' },
+        { model: LaundryOrder, as: 'laundryOrder', required: true }
+      ],
+      order: [['createdAt', 'DESC']]
+    })
+
+    const sameLocalDay = (value) => value && getStoreLocalDate(tz, new Date(value)) === todayStr
+    const dayKeyOf = (value) => (value ? getStoreLocalDate(tz, new Date(value)) : null)
+    const active = orders.filter((o) => o.laundryOrder?.processStatus !== 'CANCELLED')
+
+    const todayOrders = active.filter((o) => sameLocalDay(o.laundryOrder?.receivedAt || o.createdAt))
+    const todayKg = todayOrders.reduce((sum, o) => sum + (o.items || []).filter((it) => (it.serviceSnapshot || {}).type === 'kiloan').reduce((s, it) => s + Number((it.serviceSnapshot || {}).billQty ?? it.quantity ?? 0), 0), 0)
+    let todayPayments = 0
+    orders.forEach((o) => (o.transactions || []).forEach((t) => { if (sameLocalDay(t.createdAt) && Number(t.amount) > 0) todayPayments += Number(t.amount || 0) }))
+    // self-service: diproses & selesai di kasir (picked up saat diterima, layanan channel self)
+    const isSelfOrder = (o) => {
+      const l = o.laundryOrder || {}
+      const received = new Date(l.receivedAt || o.createdAt).getTime()
+      const picked = l.pickedUpAt ? new Date(l.pickedUpAt).getTime() : null
+      const selfChannel = (o.items || []).length > 0 && (o.items || []).every((it) => (it.serviceSnapshot || {}).channel === 'self')
+      return l.processStatus === 'PICKED_UP' && picked != null && Math.abs(picked - received) < 60000 && selfChannel
+    }
+    const todaySelfOrders = todayOrders.filter(isSelfOrder)
+    const todaySelfOmzet = todaySelfOrders.reduce((sum, o) => sum + Number(o.totalPrice || 0), 0)
+
+    const computeRemaining = (o) => {
+      const paid = (o.transactions || []).filter(t => Number(t.amount)>0).reduce((s,t)=>s+Number(t.amount||0),0)
+      const refunded = (o.transactions || []).filter(t => Number(t.amount)<0).reduce((s,t)=>s+Math.abs(Number(t.amount||0)),0)
+      return Math.max(0, Number(o.totalPrice||0) - (paid - refunded))
+    }
+    const unpaidOrders = active.filter((o) => computeRemaining(o) > 0)
+    const unpaidAmount = unpaidOrders.reduce((s,o)=>s+computeRemaining(o),0)
+    const readyOrders = active.filter((o) => o.laundryOrder?.processStatus === 'READY')
+
+    // daily last 7 days
+    const days = []
+    for (let offset = 6; offset >= 0; offset -= 1) {
+      const d = new Date(todayBounds.start.getTime() - offset * 86400000)
+      const key = getStoreLocalDate(tz, d)
+      const dayActive = active.filter((o) => dayKeyOf(o.laundryOrder?.receivedAt || o.createdAt) === key)
+      const kg = dayActive.reduce((sum, o) => sum + (o.items || []).filter((it) => (it.serviceSnapshot || {}).type === 'kiloan').reduce((s, it) => s + Number((it.serviceSnapshot || {}).billQty ?? it.quantity ?? 0), 0), 0)
+      let omzet = 0
+      orders.forEach((o) => (o.transactions || []).forEach((t) => { if (dayKeyOf(t.createdAt) === key && Number(t.amount) > 0) omzet += Number(t.amount || 0) }))
+      days.push({ date: key, orders: dayActive.length, kg, omzet })
+    }
+
+    // per service
+    const svcMap = new Map()
+    active.forEach((o) => (o.items || []).forEach((it) => {
+      const snap = it.serviceSnapshot || {}
+      const sid = snap.serviceId || it.product
+      const cur = svcMap.get(sid) || { serviceId: sid, name: it.productName || snap.name || '-', unit: snap.unit || '', qty: 0, omzet: 0 }
+      cur.qty += Number(snap.billQty ?? it.quantity ?? 0)
+      cur.omzet += Number(it.totalPrice ?? it.subtotal ?? 0)
+      svcMap.set(sid, cur)
+    }))
+    const perService = [...svcMap.values()].sort((a,b)=>b.omzet-a.omzet)
+
+    const paymentStatusFe = (s) => (s === 'partially_paid' ? 'partial' : s || 'unpaid')
+    const orderDto = (o) => {
+      const paid = (o.transactions || []).filter(t => Number(t.amount)>0).reduce((s,t)=>s+Number(t.amount||0),0)
+      const refunded = (o.transactions || []).filter(t => Number(t.amount)<0).reduce((s,t)=>s+Math.abs(Number(t.amount||0)),0)
+      const netPaid = paid - refunded
+      return {
+        id: o.id,
+        orderNo: o.orderNumber,
+        customerName: o.customerName || '',
+        customerPhone: o.customerPhone || '',
+        total: Number(o.totalPrice || 0),
+        paid: netPaid,
+        remaining: Math.max(0, Number(o.totalPrice||0)-netPaid),
+        paymentStatus: paymentStatusFe(o.paymentStatus),
+        processStatus: o.laundryOrder?.processStatus,
+        readyAt: o.laundryOrder?.readyAt,
+        dueAt: o.laundryOrder?.dueAt,
+        receivedAt: o.laundryOrder?.receivedAt || o.createdAt
+      }
+    }
+
+    const notPickedUp = readyOrders
+      .map(orderDto)
+      .sort((a,b)=> new Date(a.readyAt || a.dueAt || 0) - new Date(b.readyAt || b.dueAt || 0))
+    const unpaid = unpaidOrders.map(orderDto).sort((a,b)=> new Date(a.dueAt||0)-new Date(b.dueAt||0))
+
+    return res.json({ success: true, data: {
+      summary: {
+        todayOrders: todayOrders.length,
+        todayKg,
+        todayPayments,
+        todaySelf: todaySelfOrders.length,
+        todaySelfOmzet,
+        unpaidCount: unpaidOrders.length,
+        unpaidAmount,
+        readyCount: readyOrders.length
+      },
+      daily: days,
+      perService,
+      notPickedUp,
+      unpaid
+    } })
+  } catch (e) {
+    return res.status(e.statusCode || 500).json({ success: false, message: e.message })
+  }
+}
