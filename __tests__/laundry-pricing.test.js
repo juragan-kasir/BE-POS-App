@@ -1,4 +1,4 @@
-const { billableQty, lineTotal, surchargeFor, roundQty, ceilQty, normalizeLaundrySettings } = require('../api/service/laundryPricing')
+const { billableQty, lineTotal, surchargeFor, roundQty, ceilQty, dueAtFrom, normalizeLaundrySettings } = require('../api/service/laundryPricing')
 
 describe('laundryPricing', () => {
   test('kiloan applies minimum and rounding', () => {
@@ -26,6 +26,19 @@ describe('laundryPricing', () => {
     expect(line.subtotal).toBe(24000)
     expect(line.hppTotal).toBe(3000)
     expect(line.minimumApplied).toBe(true)
+  })
+
+  test('dueAtFrom reads array and compact {open,close,closedDays} hours alike', () => {
+    const local = (d) => new Date(d.getTime() + 7 * 36e5).toISOString().slice(0, 16)
+    const at = new Date('2026-11-16T18:30:00+07:00')
+    const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
+    const arr = days.map((day) => ({ day, open: '07:00', close: '22:00' }))
+    expect(local(dueAtFrom(at, 6, arr, 'Asia/Jakarta'))).toBe('2026-11-17T09:30')
+    expect(local(dueAtFrom(at, 6, { open: '07:00', close: '22:00', closedDays: [] }, 'Asia/Jakarta'))).toBe('2026-11-17T09:30')
+    // Friday 10:00 + 48 h lands on a closed Sunday → next open Monday 08:00
+    const fri = new Date('2026-11-20T10:00:00+07:00')
+    expect(local(dueAtFrom(fri, 48, { open: '08:00', close: '20:00', closedDays: [0] }, 'Asia/Jakarta'))).toBe('2026-11-23T08:00')
+    expect(local(dueAtFrom(at, 6, { open: 'x' }, 'Asia/Jakarta'))).toBe('2026-11-17T00:30')
   })
 
   test('surcharge percent and fixed', () => {

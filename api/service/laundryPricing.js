@@ -145,7 +145,23 @@ const localParts = (inst, tz) => {
   return { date: `${g('year')}-${g('month')}-${g('day')}`, minutes: Number(g('hour'))*60 + Number(g('minute')), dayName: (g('weekday')||'').toLowerCase() }
 }
 // Convert BE openingHours array to a simple per-day map usable for due calc
+// Also accepts the compact laundry shape { open, close, closedDays: [0..6] }
+// (0 = Sunday) that FE-LAUNDRY saves, so its outlets get opening-hours due
+// dates instead of silently falling back to elapsed time.
+const compactOpeningMap = (hours) => {
+  const o = parseMinutes(hours.open), c = parseMinutes(hours.close)
+  if (o == null || c == null) return null
+  const closed = new Set((Array.isArray(hours.closedDays) ? hours.closedDays : []).map(Number))
+  const map = {}
+  DAY_NAMES.forEach((day, index) => {
+    map[day] = closed.has(index) ? { closed: true } : { open: o, close: c }
+  })
+  return map
+}
 const openingMap = (openingHours) => {
+  if (openingHours && typeof openingHours === 'object' && !Array.isArray(openingHours)) {
+    return compactOpeningMap(openingHours)
+  }
   if (!Array.isArray(openingHours) || !openingHours.length) return null
   const map = {}
   for (const e of openingHours) {
