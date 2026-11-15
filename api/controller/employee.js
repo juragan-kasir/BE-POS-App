@@ -469,7 +469,8 @@ exports.getAllEmployee = async (req, res) => {
               model: Department,
               as: 'departmentData',
               attributes: ['id', 'name']
-            }
+            },
+            { model: db.role, as: 'role', attributes: ['id', 'name', 'roleType'] }
           ],
           limit,
           offset,
@@ -530,7 +531,8 @@ exports.getEmployeeById = async (req, res) => {
       include: [
         { model: Location, as: 'storeData', attributes: ['id', 'name'] },
         { model: Position, as: 'positionData', attributes: ['id', 'name'] },
-        { model: Department, as: 'departmentData', attributes: ['id', 'name'] }
+        { model: Department, as: 'departmentData', attributes: ['id', 'name'] },
+        { model: db.role, as: 'role', attributes: ['id', 'name', 'roleType'] }
       ]
     })
 
@@ -570,7 +572,8 @@ exports.getEmployeeByEmployeeID = async (req, res) => {
       include: [
         { model: Location, as: 'storeData', attributes: ['id', 'name'] },
         { model: Position, as: 'positionData', attributes: ['id', 'name'] },
-        { model: Department, as: 'departmentData', attributes: ['id', 'name'] }
+        { model: Department, as: 'departmentData', attributes: ['id', 'name'] },
+        { model: db.role, as: 'role', attributes: ['id', 'name', 'roleType'] }
       ]
     })
 
