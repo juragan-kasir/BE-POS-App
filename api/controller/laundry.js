@@ -2,7 +2,7 @@
 
 const db = require('../../db/models')
 const { resolveCounterStore, loadAndPriceOrderItems, createOrderItems, sessionCashier, generateOrderNumber } = require('./order')
-const { normalizeServiceConfig, validateServiceConfig, lineTotal, surchargeFor, addHours, dueAtFrom, normalizeLaundrySettings } = require('../service/laundryPricing')
+const { normalizeServiceConfig, validateServiceConfig, lineTotal, surchargeFor, addHours, dueAtFrom, normalizeLaundrySettings, manualDiscountCap } = require('../service/laundryPricing')
 const bcrypt = require('bcrypt')
 const { normalizePaymentMethod, requireTenderReference } = require('../service/canonicalPayment')
 const { resolvePaymentMethodName } = require('../service/paymentTypeName')
@@ -120,6 +120,23 @@ const writeHistory = (laundryOrderId, fromStatus, toStatus, actorId, reason, t) 
 // same rules as FE-LAUNDRY. An unusable typed code is reported as
 // promoError (quote) or refused (create) — never swapped for another promo.
 const resolveDiscounts = async ({ body, lines, outlet, transaction }) => {
+  const requestedManual = Math.max(0, Math.round(Number(body.manualDiscount?.amount) || 0))
+  if (requestedManual > 0) {
+    // Manual beats promos (FE chooseDiscounts); a reason is mandatory.
+    const reason = String(body.manualDiscount?.reason || '').trim()
+    if (!reason) refuse(422, 'MANUAL_DISCOUNT_REASON_REQUIRED', 'Alasan diskon manual wajib diisi')
+    const subtotal = lines.reduce((sum, l) => sum + l.subtotal, 0)
+    const settings = normalizeLaundrySettings(outlet.laundrySettings)
+    const amount = Math.min(requestedManual, manualDiscountCap(settings, subtotal))
+    return {
+      discounts: amount > 0 ? [{ campaignId: null, name: 'Diskon manual', code: null, mode: 'manual', reason, amount, allocations: [] }] : [],
+      discountAmount: amount,
+      manualReason: reason,
+      promoCampaignId: null,
+      promoCampaignName: null,
+      promoError: null
+    }
+  }
   const promo = await evaluateLaundryPromos({
     store: outlet.id,
     tenantId: outlet.tenantId ?? null,
@@ -258,7 +275,7 @@ exports.createOrder = async (req, res) => {
     }
     const turnaround = isSelf ? null : await resolveTurnaround(scope.store, body.turnaroundId)
     const surcharge = isSelf ? 0 : surchargeFor(subtotal, turnaround)
-    const { discounts, discountAmount, promoCampaignId, promoError } = await resolveDiscounts({ body, lines, outlet })
+    const { discounts, discountAmount, promoCampaignId, promoError, manualReason } = await resolveDiscounts({ body, lines, outlet })
     if (promoError) refuse(422, promoError.code, promoError.message)
     const total = Math.max(0, subtotal + surcharge - discountAmount)
     if (body.expectedTotal !== undefined && Number(body.expectedTotal) !== total) {
@@ -298,7 +315,9 @@ exports.createOrder = async (req, res) => {
         source: 'pos',
         idempotencyKey,
         publicToken: require('crypto').randomBytes(24).toString('hex'),
-        notes: body.note || '',
+        notes: manualReason
+          ? [body.note, `Diskon manual Rp${discountAmount}: ${manualReason}`].filter(Boolean).join(' | ')
+          : body.note || '',
         createdBy: req.user?.id
       }, { transaction: t })
 
@@ -335,7 +354,7 @@ exports.createOrder = async (req, res) => {
       }, { transaction: t })
       await writeHistory(laundry.id, null, laundry.processStatus, req.user?.id, isSelf ? 'Self-service selesai di kasir' : '', t)
 
-      for (const discount of discounts) {
+      for (const discount of discounts.filter((d) => d.campaignId)) {
         await orderController.recordPromoUsageIfApplied(
           created,
           discount.campaignId,

@@ -2658,7 +2658,16 @@ exports.laundryQuoteSchema = z.object({
   orderType: z.enum(['full', 'self']).optional().default('full'),
   turnaroundId: strToNum().optional().nullable(),
   customerId: strToNum().optional().nullable(),
-  promoCode: z.string().max(FIELD_MAX.CODE, tooLong(FIELD_MAX.CODE)).optional().nullable()
+  promoCode: z.string().max(FIELD_MAX.CODE, tooLong(FIELD_MAX.CODE)).optional().nullable(),
+  // Cashier's manual discount (rupiah). Overrides promos; the server caps
+  // it at the outlet limit (default 20% of subtotal) and the subtotal.
+  manualDiscount: z
+    .object({
+      amount: strToNum().refine((v) => Number.isInteger(v) && v >= 0, { message: 'manualDiscount.amount must be an integer >= 0' }),
+      reason: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().default('')
+    })
+    .optional()
+    .nullable()
 })
 
 exports.createLaundryOrderSchema = exports.laundryQuoteSchema.extend({

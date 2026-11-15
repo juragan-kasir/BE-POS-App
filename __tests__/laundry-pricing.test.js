@@ -1,4 +1,4 @@
-const { billableQty, lineTotal, surchargeFor, roundQty, ceilQty, dueAtFrom, normalizeLaundrySettings } = require('../api/service/laundryPricing')
+const { billableQty, lineTotal, surchargeFor, roundQty, ceilQty, dueAtFrom, manualDiscountCap, normalizeLaundrySettings } = require('../api/service/laundryPricing')
 
 describe('laundryPricing', () => {
   test('kiloan applies minimum and rounding', () => {
@@ -41,6 +41,12 @@ describe('laundryPricing', () => {
     expect(local(dueAtFrom(at, 6, { open: 'x' }, 'Asia/Jakarta'))).toBe('2026-11-17T00:30')
   })
 
+  test('manual discount cap: configured, else 20% of subtotal, ≤ subtotal', () => {
+    expect(manualDiscountCap(null, 100000)).toBe(20000)
+    expect(manualDiscountCap({ maxManualDiscount: 50000 }, 100000)).toBe(50000)
+    expect(manualDiscountCap({ maxManualDiscount: 50000 }, 30000)).toBe(30000)
+  })
+
   test('surcharge percent and fixed', () => {
     expect(surchargeFor(100000, { surchargeType: 'percent', surchargeValue: 10 })).toBe(10000)
     expect(surchargeFor(100000, { surchargeType: 'fixed', surchargeValue: 5000 })).toBe(5000)
@@ -52,6 +58,7 @@ describe('laundryPricing', () => {
       serviceModel: 'self',
       storageDays: 7,
       minDpPercent: 0,
+      maxManualDiscount: 0,
       reminderDays: 0,
       terms: '',
       conditionTags: [],

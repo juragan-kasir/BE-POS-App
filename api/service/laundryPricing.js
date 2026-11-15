@@ -288,6 +288,8 @@ const normalizeLaundrySettings = (value) => {
       : 'full',
     storageDays: Math.max(0, Number(parsed.storageDays) || 0),
     minDpPercent: Math.min(100, Math.max(0, Number(parsed.minDpPercent) || 0)),
+    // Max manual discount per order in rupiah; 0 = default 20% of subtotal.
+    maxManualDiscount: Math.max(0, Math.round(Number(parsed.maxManualDiscount) || 0)),
     reminderDays: Math.max(0, Number(parsed.reminderDays) || 0),
     terms: typeof parsed.terms === 'string' ? parsed.terms : '',
     conditionTags: Array.isArray(parsed.conditionTags)
@@ -296,6 +298,15 @@ const normalizeLaundrySettings = (value) => {
     ownerPinHash:
       typeof parsed.ownerPinHash === 'string' && parsed.ownerPinHash ? parsed.ownerPinHash : null
   }
+}
+
+// Cap for a cashier's manual discount, same rule as FE-LAUNDRY
+// setManualDiscount: the configured limit, else 20% of subtotal, never more
+// than the subtotal.
+const manualDiscountCap = (settings, subtotal) => {
+  const configured = Math.max(0, Math.round(Number(settings?.maxManualDiscount) || 0))
+  const base = Math.max(0, Math.round(Number(subtotal) || 0))
+  return Math.min(configured || Math.round(base * 0.2), base)
 }
 
 const publicLaundrySettings = (value) => {
@@ -316,6 +327,7 @@ module.exports = {
   normalizeServiceConfig,
   normalizeLaundrySettings,
   publicLaundrySettings,
+  manualDiscountCap,
   validateServiceConfig,
   hppFor
 }
