@@ -587,7 +587,11 @@ exports.cancelOrder = async (req, res) => {
 
       const fin = await computeOrderFinancials(order, t)
       const paidTotal = Math.max(0, Number(order.totalPrice || 0) - Number(fin.O || 0))
-      const refund = Math.min(Math.max(0, Number(refundAmount) || 0), paidTotal)
+      const requestedRefund = Math.max(0, Math.round(Number(refundAmount) || 0))
+      if (requestedRefund > paidTotal) {
+        refuse(422, 'REFUND_EXCEEDS_PAID', `Refund ${requestedRefund} melebihi jumlah terbayar ${paidTotal}`)
+      }
+      const refund = requestedRefund
       const needsApproval = !['RECEIVED'].includes(laundry.processStatus)
       if (needsApproval) {
         const outlet = await Location.findByPk(scope.store, { transaction: t })
