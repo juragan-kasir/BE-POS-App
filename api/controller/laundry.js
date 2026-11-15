@@ -283,8 +283,10 @@ exports.createOrder = async (req, res) => {
         paymentStatus: paymentAmount >= total && total >= 0 ? 'paid' : paymentAmount > 0 ? 'partially_paid' : 'unpaid',
         subTotal: subtotal,
         totalQuantity: lines.reduce((s, l) => s + Number(l.qty || 0), 0),
-        discountType: promoCampaignId ? 'promo' : 'none',
-        discountValue: 0,
+        // order.discountType is an enum (none/percent/nominal); a laundry
+        // promo is stored as the rupiah amount it took off, like F&B promos.
+        discountType: discountAmount > 0 ? 'nominal' : 'none',
+        discountValue: discountAmount > 0 ? discountAmount : 0,
         discountAmount,
         promoCampaignId,
         taxRate: 0,
