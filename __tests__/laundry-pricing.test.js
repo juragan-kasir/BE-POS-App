@@ -1,4 +1,4 @@
-const { billableQty, lineTotal, surchargeFor, roundQty } = require('../api/service/laundryPricing')
+const { billableQty, lineTotal, surchargeFor, roundQty, normalizeLaundrySettings } = require('../api/service/laundryPricing')
 
 describe('laundryPricing', () => {
   test('kiloan applies minimum and rounding', () => {
@@ -21,5 +21,18 @@ describe('laundryPricing', () => {
     expect(surchargeFor(100000, { surchargeType: 'percent', surchargeValue: 10 })).toBe(10000)
     expect(surchargeFor(100000, { surchargeType: 'fixed', surchargeValue: 5000 })).toBe(5000)
     expect(surchargeFor(100000, null)).toBe(0)
+  })
+
+  test('normalizeLaundrySettings preserves serviceModel', () => {
+    expect(normalizeLaundrySettings({ serviceModel: 'self', storageDays: 7 })).toEqual({
+      serviceModel: 'self',
+      storageDays: 7,
+      minDpPercent: 0,
+      reminderDays: 0,
+      terms: '',
+      conditionTags: []
+    })
+    expect(normalizeLaundrySettings({ serviceModel: 'invalid' }).serviceModel).toBe('full')
+    expect(normalizeLaundrySettings(null)).toBeNull()
   })
 })
