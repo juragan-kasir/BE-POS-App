@@ -1,9 +1,20 @@
-const { billableQty, lineTotal, surchargeFor, roundQty, normalizeLaundrySettings } = require('../api/service/laundryPricing')
+const { billableQty, lineTotal, surchargeFor, roundQty, ceilQty, normalizeLaundrySettings } = require('../api/service/laundryPricing')
 
 describe('laundryPricing', () => {
   test('kiloan applies minimum and rounding', () => {
     expect(billableQty({ pricingType: 'kiloan', minQty: 3, rounding: 0.1 }, 2.24)).toBe(3)
     expect(roundQty(2.24, 0.1)).toBe(2.2)
+  })
+
+  test('kiloan weight rounds UP to the next step (S-1)', () => {
+    const cfg = { pricingType: 'kiloan', minQty: 3, rounding: 0.5 }
+    expect(billableQty(cfg, 2.0)).toBe(3)
+    expect(billableQty(cfg, 3.2)).toBe(3.5)
+    expect(billableQty(cfg, 4.7)).toBe(5)
+    expect(billableQty(cfg, 5.0)).toBe(5)
+    expect(billableQty({ pricingType: 'kiloan', minQty: 0.1, rounding: 0.1 }, 0.3)).toBe(0.3)
+    expect(ceilQty(4.01, 0.1)).toBe(4.1)
+    expect(billableQty({ pricingType: 'satuan' }, 2)).toBe(2)
   })
 
   test('line total uses billed qty and component HPP', () => {

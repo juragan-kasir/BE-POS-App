@@ -8,11 +8,20 @@ const roundQty = (qty, rounding = 0.1) => {
   return Number((Math.round(Number(qty) / step) * step).toFixed(2))
 }
 
+// Kiloan weight is billed rounded UP to the next step (3.2 kg at 0.5 →
+// 3.5 kg), the usual practice at Indonesian laundries (owner decision
+// 2026-11-15, S-1). toFixed(6) strips float noise so 0.3/0.1 stays 3.
+const ceilQty = (qty, rounding = 0.1) => {
+  const step = Number(rounding) > 0 ? Number(rounding) : 0.1
+  const steps = Math.ceil(Number((Number(qty) / step).toFixed(6)))
+  return Number((steps * step).toFixed(2))
+}
+
 const billableQty = (serviceConfig = {}, qty = 0) => {
   const raw = Number(qty) || 0
   if (serviceConfig.pricingType !== 'kiloan') return raw
   const minQty = Number(serviceConfig.minQty) || 0
-  return roundQty(Math.max(raw, minQty), serviceConfig.rounding)
+  return ceilQty(Math.max(raw, minQty), serviceConfig.rounding)
 }
 
 const allocateProportionally = (total, weights = []) => {
@@ -281,6 +290,7 @@ const publicLaundrySettings = (value) => {
 
 module.exports = {
   roundQty,
+  ceilQty,
   billableQty,
   lineTotal,
   surchargeFor,
