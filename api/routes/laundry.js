@@ -29,5 +29,6 @@ router.patch('/order/:id/status', authorization, validateStoreAccess, validate(u
 router.post('/order/:id/pickup', authorization, validateStoreAccess, validate(laundryPickupSchema), laundry.pickup)
 router.post('/order/:id/cancel', authorization, validateStoreAccess, validate(cancelLaundryOrderSchema), laundry.cancelOrder)
 router.get('/order/:id/wa-text', authorization, validateStoreAccess, laundry.waText)
+router.get('/report', authorization, validateStoreAccess, laundry.getReport)
 
 module.exports = router
