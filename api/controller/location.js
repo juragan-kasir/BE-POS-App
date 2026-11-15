@@ -47,7 +47,20 @@ const {
 const { getStoreOpenStatus } = require('../../utils/storeHours')
 const { page: pageOf, paginated } = require('../service/scopeVisibilityService')
 const { assertOperationalStoreTenant, resolveRequestedLifecycleStatus } = require('../validation/schemas')
-const { normalizeLaundrySettings } = require('../service/laundryPricing')
+const { normalizeLaundrySettings, publicLaundrySettings } = require('../service/laundryPricing')
+const bcrypt = require('bcrypt')
+
+const hashOwnerPinIfPresent = async (rawSettings, existingSettings) => {
+  if (rawSettings === undefined) return undefined
+  const normalized = normalizeLaundrySettings(rawSettings) || {}
+  const pin = typeof rawSettings === 'object' && rawSettings && rawSettings.ownerPin != null
+    ? String(rawSettings.ownerPin).trim()
+    : ''
+  if (pin) normalized.ownerPinHash = await bcrypt.hash(pin, 10)
+  else normalized.ownerPinHash = existingSettings?.ownerPinHash || null
+  delete normalized.ownerPin
+  return normalized
+}
 
 // Store ownership/lifecycle is decided from persisted authorization state
 // only. req.user.store, the JWT store claim, cookies, query params and the
@@ -514,7 +527,7 @@ exports.addNewLocation = async (req, res) => {
       socialMedia: socialMedia || [],
       timezone: timezone || undefined,
       businessType: businessType || 'fnb',
-      laundrySettings: normalizeLaundrySettings(laundrySettings),
+      laundrySettings: await hashOwnerPinIfPresent(laundrySettings, null),
       createdBy: req.user?.id || null
     })
 
@@ -668,7 +681,7 @@ exports.editLocationById = async (req, res) => {
       updatedData.businessType = rest.businessType || 'fnb'
     }
     if (rest.laundrySettings !== undefined) {
-      updatedData.laundrySettings = normalizeLaundrySettings(rest.laundrySettings)
+      updatedData.laundrySettings = await hashOwnerPinIfPresent(rest.laundrySettings, dataExist.laundrySettings)
     }
 
     // A store that already has a tenant keeps it: assertOperationalStoreTenant
@@ -997,7 +1010,7 @@ const buildLocationDetailData = async (location, { includeConfiguration = false 
     mainBranch: location.mainBranch,
     dailyTarget: location.dailyTarget,
     businessType: location.businessType || 'fnb',
-    laundrySettings: location.laundrySettings || null,
+    laundrySettings: publicLaundrySettings(location.laundrySettings) || null,
     createdAt: location.createdAt,
     updatedAt: location.updatedAt,
     createdBy: location.createdBy,

@@ -3,6 +3,7 @@
 const db = require('../../db/models')
 const { resolveCounterStore, loadAndPriceOrderItems, createOrderItems, sessionCashier, generateOrderNumber } = require('./order')
 const { normalizeServiceConfig, validateServiceConfig, lineTotal, surchargeFor, addHours, normalizeLaundrySettings } = require('../service/laundryPricing')
+const bcrypt = require('bcrypt')
 const { normalizePaymentMethod, requireTenderReference } = require('../service/canonicalPayment')
 const { resolvePaymentMethodName } = require('../service/paymentTypeName')
 const { resolveAttributedRegister } = require('../service/settlementAttribution')
@@ -485,5 +486,86 @@ exports.waText = async (req, res) => {
     return res.json({ success: true, data: { text, waUrl } })
   } catch (e) {
     return res.status(e.statusCode || 500).json({ success: false, message: e.message })
+  }
+}
+
+exports.cancelOrder = async (req, res) => {
+  try {
+    const scope = resolveCounterStore(req)
+    if (!scope.store) return res.status(scope.status).json(scope.body)
+    const { reason, refundAmount = 0, refundMethod, referenceNumber, approverPin, idempotencyKey } = req.body
+    const result = await withDeadlockRetry(() => db.sequelize.transaction(async (t) => {
+      const order = await Order.findOne({ where: { id: req.params.id, store: scope.store }, transaction: t, lock: t.LOCK.UPDATE })
+      if (!order) refuse(404, 'NOT_FOUND', 'Order not found')
+      const laundry = await LaundryOrder.findOne({ where: { orderId: order.id, store: scope.store }, transaction: t, lock: t.LOCK.UPDATE })
+      if (!laundry) refuse(404, 'NOT_FOUND', 'Order not found')
+      if (laundry.processStatus === 'CANCELLED') {
+        return order
+      }
+      if (!ALLOWED[laundry.processStatus]?.includes('CANCELLED')) {
+        refuse(403, 'INVALID_TRANSITION', `Cannot cancel from ${laundry.processStatus}`)
+      }
+
+      const fin = await computeOrderFinancials(order, t)
+      const paidTotal = Math.max(0, Number(order.totalPrice || 0) - Number(fin.O || 0))
+      const refund = Math.min(Math.max(0, Number(refundAmount) || 0), paidTotal)
+      const needsApproval = !['RECEIVED'].includes(laundry.processStatus)
+      if (needsApproval) {
+        const outlet = await Location.findByPk(scope.store, { transaction: t })
+        const hash = outlet?.laundrySettings?.ownerPinHash
+        if (!hash) refuse(422, 'OWNER_PIN_NOT_SET', 'Owner PIN is not configured for this outlet')
+        const ok = await bcrypt.compare(String(approverPin || ''), hash)
+        if (!ok) refuse(403, 'INVALID_OWNER_PIN', 'Invalid owner PIN')
+      }
+
+      if (idempotencyKey) {
+        const idem = await db.transaction.findOne({ where: { order: order.id, idempotencyKey }, transaction: t })
+        if (idem) return order
+      }
+
+      if (refund > 0) {
+        const method = normalizePaymentMethod(refundMethod)
+        if (!method) refuse(422, 'PAYMENT_METHOD_REQUIRED', 'refundMethod is required')
+        const ref = requireTenderReference(method, referenceNumber)
+        let cashRegisterId = null
+        if (method === 'CASH') {
+          const reg = await resolveAttributedRegister(scope.store, t)
+          cashRegisterId = reg.id
+        } else {
+          const opportunistic = await db.cashRegister.findOne({ where: { store: scope.store, status: 'open' }, lock: t.LOCK.SHARE, transaction: t })
+          if (opportunistic) cashRegisterId = opportunistic.id
+        }
+        await assertSettlementReferenceUnused({ store: scope.store, method, reference: ref, transaction: t })
+        const paymentMethodName = await resolvePaymentMethodName({ method, store: scope.store, transaction: t })
+        await db.transaction.create({
+          order: order.id,
+          typePayment: method,
+          amount: -Math.abs(refund),
+          cashReceived: null,
+          changeGiven: 0,
+          createdBy: req.user?.id,
+          cashRegisterId,
+          referenceNumber: ref,
+          paymentMethodName,
+          idempotencyKey: idempotencyKey || null,
+          notes: `Refund pembatalan laundry: ${reason}`
+        }, { transaction: t })
+      }
+
+      const from = laundry.processStatus
+      await laundry.update({
+        processStatus: 'CANCELLED',
+        cancelledReason: String(reason || ''),
+        modifiedBy: req.user?.id
+      }, { transaction: t })
+      await writeHistory(laundry.id, from, 'CANCELLED', req.user?.id, reason, t)
+      const after = await computeOrderFinancials(order, t)
+      await order.update({ paymentStatus: legacyPaymentStatusFor(after.state) }, { transaction: t })
+      return order
+    }))
+    const data = await getFullLaundryOrder(result.id, scope.store)
+    return res.json({ success: true, data })
+  } catch (e) {
+    return res.status(e.statusCode || 500).json({ success: false, message: e.message, code: e.code })
   }
 }

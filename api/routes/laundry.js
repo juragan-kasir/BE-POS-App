@@ -12,7 +12,8 @@ const {
   laundryQuoteSchema,
   createLaundryOrderSchema,
   updateLaundryStatusSchema,
-  laundryPickupSchema
+  laundryPickupSchema,
+  cancelLaundryOrderSchema
 } = require('../validation/schemas')
 
 router.get('/turnaround', authorization, validateStoreAccess, laundry.listTurnarounds)
@@ -26,6 +27,7 @@ router.get('/order', authorization, validateStoreAccess, laundry.listOrders)
 router.get('/order/:id', authorization, validateStoreAccess, laundry.getOrder)
 router.patch('/order/:id/status', authorization, validateStoreAccess, validate(updateLaundryStatusSchema), laundry.updateStatus)
 router.post('/order/:id/pickup', authorization, validateStoreAccess, validate(laundryPickupSchema), laundry.pickup)
+router.post('/order/:id/cancel', authorization, validateStoreAccess, validate(cancelLaundryOrderSchema), laundry.cancelOrder)
 router.get('/order/:id/wa-text', authorization, validateStoreAccess, laundry.waText)
 
 module.exports = router

@@ -2695,6 +2695,16 @@ exports.laundryPickupSchema = z.object({
   pickupNote: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().default('')
 })
 
+exports.cancelLaundryOrderSchema = z.object({
+  store: strToNum().optional(),
+  reason: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).min(1, 'reason is required'),
+  refundAmount: strToNum().optional().default(0),
+  refundMethod: z.string().max(50).optional().nullable(),
+  referenceNumber: z.string().max(255).optional().nullable(),
+  approverPin: z.string().max(20).optional().nullable(),
+  idempotencyKey: z.string().min(1).max(255).optional().nullable()
+})
+
 exports.collectOrderPaymentSchema = z.object({
   store: strToNum().optional(),
   paymentMethod: z.string().min(1),
