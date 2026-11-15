@@ -162,6 +162,9 @@ const normalizeLaundrySettings = (value) => {
   }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
   return {
+    serviceModel: ['full', 'self', 'hybrid'].includes(parsed.serviceModel)
+      ? parsed.serviceModel
+      : 'full',
     storageDays: Math.max(0, Number(parsed.storageDays) || 0),
     minDpPercent: Math.min(100, Math.max(0, Number(parsed.minDpPercent) || 0)),
     reminderDays: Math.max(0, Number(parsed.reminderDays) || 0),
