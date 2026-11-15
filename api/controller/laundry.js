@@ -2,7 +2,7 @@
 
 const db = require('../../db/models')
 const { resolveCounterStore, loadAndPriceOrderItems, createOrderItems, sessionCashier, generateOrderNumber } = require('./order')
-const { normalizeServiceConfig, validateServiceConfig, lineTotal, surchargeFor, addHours, normalizeLaundrySettings } = require('../service/laundryPricing')
+const { normalizeServiceConfig, validateServiceConfig, lineTotal, surchargeFor, addHours, dueAtFrom, normalizeLaundrySettings } = require('../service/laundryPricing')
 const bcrypt = require('bcrypt')
 const { normalizePaymentMethod, requireTenderReference } = require('../service/canonicalPayment')
 const { resolvePaymentMethodName } = require('../service/paymentTypeName')
@@ -218,7 +218,8 @@ exports.quote = async (req, res) => {
       promoCampaignName = promo.campaignName || null
     }
     const total = Math.max(0, subtotal + surcharge - discountAmount)
-    const dueAt = req.body.orderType === 'self' ? new Date() : addHours(new Date(), turnaround?.durationHours || 72)
+    const outlet = await Location.findByPk(scope.store)
+    const dueAt = req.body.orderType === 'self' ? new Date() : dueAtFrom(new Date(), turnaround?.durationHours || 72, outlet?.openingHours, outlet?.timezone)
     return res.json({ success: true, data: { lines: lines.map(l => l.serviceSnapshot), subtotal, surcharge, discountAmount, promoCampaignId, promoCampaignName, total, hppTotal, pieceRequired, dueAt, turnaroundId: turnaround?.id || null } })
   } catch (e) {
     if (e.code === 'PRICE_CHANGED') return res.status(409).json({ success: false, code: e.code, mismatches: e.mismatches })
@@ -266,7 +267,8 @@ exports.createOrder = async (req, res) => {
     if (isSelf && paymentAmount < total) refuse(422, 'SELF_PAYMENT_REQUIRED', 'Self-service requires full payment')
     if (paymentAmount > total) refuse(422, 'OVERPAYMENT', 'Payment amount exceeds total')
     const receivedAt = new Date()
-    const dueAt = isSelf ? receivedAt : addHours(receivedAt, turnaround?.durationHours || 72)
+    const outlet = await Location.findByPk(scope.store)
+    const dueAt = isSelf ? receivedAt : dueAtFrom(receivedAt, turnaround?.durationHours || 72, outlet?.openingHours, outlet?.timezone)
     const customer = body.customerId ? await Member.findByPk(body.customerId) : null
 
     const order = await withDeadlockRetry(() => db.sequelize.transaction(async (t) => {
