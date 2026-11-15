@@ -8,11 +8,20 @@ const roundQty = (qty, rounding = 0.1) => {
   return Number((Math.round(Number(qty) / step) * step).toFixed(2))
 }
 
+// Kiloan weight is billed rounded UP to the next step (3.2 kg at 0.5 →
+// 3.5 kg), the usual practice at Indonesian laundries (owner decision
+// 2026-11-15, S-1). toFixed(6) strips float noise so 0.3/0.1 stays 3.
+const ceilQty = (qty, rounding = 0.1) => {
+  const step = Number(rounding) > 0 ? Number(rounding) : 0.1
+  const steps = Math.ceil(Number((Number(qty) / step).toFixed(6)))
+  return Number((steps * step).toFixed(2))
+}
+
 const billableQty = (serviceConfig = {}, qty = 0) => {
   const raw = Number(qty) || 0
   if (serviceConfig.pricingType !== 'kiloan') return raw
   const minQty = Number(serviceConfig.minQty) || 0
-  return roundQty(Math.max(raw, minQty), serviceConfig.rounding)
+  return ceilQty(Math.max(raw, minQty), serviceConfig.rounding)
 }
 
 const allocateProportionally = (total, weights = []) => {
@@ -136,7 +145,23 @@ const localParts = (inst, tz) => {
   return { date: `${g('year')}-${g('month')}-${g('day')}`, minutes: Number(g('hour'))*60 + Number(g('minute')), dayName: (g('weekday')||'').toLowerCase() }
 }
 // Convert BE openingHours array to a simple per-day map usable for due calc
+// Also accepts the compact laundry shape { open, close, closedDays: [0..6] }
+// (0 = Sunday) that FE-LAUNDRY saves, so its outlets get opening-hours due
+// dates instead of silently falling back to elapsed time.
+const compactOpeningMap = (hours) => {
+  const o = parseMinutes(hours.open), c = parseMinutes(hours.close)
+  if (o == null || c == null) return null
+  const closed = new Set((Array.isArray(hours.closedDays) ? hours.closedDays : []).map(Number))
+  const map = {}
+  DAY_NAMES.forEach((day, index) => {
+    map[day] = closed.has(index) ? { closed: true } : { open: o, close: c }
+  })
+  return map
+}
 const openingMap = (openingHours) => {
+  if (openingHours && typeof openingHours === 'object' && !Array.isArray(openingHours)) {
+    return compactOpeningMap(openingHours)
+  }
   if (!Array.isArray(openingHours) || !openingHours.length) return null
   const map = {}
   for (const e of openingHours) {
@@ -263,6 +288,8 @@ const normalizeLaundrySettings = (value) => {
       : 'full',
     storageDays: Math.max(0, Number(parsed.storageDays) || 0),
     minDpPercent: Math.min(100, Math.max(0, Number(parsed.minDpPercent) || 0)),
+    // Max manual discount per order in rupiah; 0 = default 20% of subtotal.
+    maxManualDiscount: Math.max(0, Math.round(Number(parsed.maxManualDiscount) || 0)),
     reminderDays: Math.max(0, Number(parsed.reminderDays) || 0),
     terms: typeof parsed.terms === 'string' ? parsed.terms : '',
     conditionTags: Array.isArray(parsed.conditionTags)
@@ -273,6 +300,15 @@ const normalizeLaundrySettings = (value) => {
   }
 }
 
+// Cap for a cashier's manual discount, same rule as FE-LAUNDRY
+// setManualDiscount: the configured limit, else 20% of subtotal, never more
+// than the subtotal.
+const manualDiscountCap = (settings, subtotal) => {
+  const configured = Math.max(0, Math.round(Number(settings?.maxManualDiscount) || 0))
+  const base = Math.max(0, Math.round(Number(subtotal) || 0))
+  return Math.min(configured || Math.round(base * 0.2), base)
+}
+
 const publicLaundrySettings = (value) => {
   if (!value || typeof value !== 'object') return value ?? null
   const { ownerPinHash, ownerPin, ...rest } = value
@@ -280,7 +316,9 @@ const publicLaundrySettings = (value) => {
 }
 
 module.exports = {
+  allocateProportionally,
   roundQty,
+  ceilQty,
   billableQty,
   lineTotal,
   surchargeFor,
@@ -289,6 +327,7 @@ module.exports = {
   normalizeServiceConfig,
   normalizeLaundrySettings,
   publicLaundrySettings,
+  manualDiscountCap,
   validateServiceConfig,
   hppFor
 }

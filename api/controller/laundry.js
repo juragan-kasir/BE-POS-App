@@ -2,7 +2,7 @@
 
 const db = require('../../db/models')
 const { resolveCounterStore, loadAndPriceOrderItems, createOrderItems, sessionCashier, generateOrderNumber } = require('./order')
-const { normalizeServiceConfig, validateServiceConfig, lineTotal, surchargeFor, addHours, dueAtFrom, normalizeLaundrySettings } = require('../service/laundryPricing')
+const { normalizeServiceConfig, validateServiceConfig, lineTotal, surchargeFor, addHours, dueAtFrom, normalizeLaundrySettings, manualDiscountCap } = require('../service/laundryPricing')
 const bcrypt = require('bcrypt')
 const { normalizePaymentMethod, requireTenderReference } = require('../service/canonicalPayment')
 const { resolvePaymentMethodName } = require('../service/paymentTypeName')
@@ -12,6 +12,7 @@ const { assertSettlementReferenceUnused } = require('../service/settlementRefere
 const { computeOrderFinancials, legacyPaymentStatusFor, FINANCIAL_STATES } = require('../service/orderFinancials')
 const { withDeadlockRetry } = require('../../utils/deadlockRetry')
 const orderController = require('./order')
+const { evaluateLaundryPromos } = require('../service/laundryPromo')
 
 const LaundryTurnaround = db.laundry_turnaround
 const LaundryOrder = db.laundry_order
@@ -115,6 +116,46 @@ const resolveTurnaround = async (store, turnaroundId, transaction) => {
 const writeHistory = (laundryOrderId, fromStatus, toStatus, actorId, reason, t) =>
   LaundryStatusHistory.create({ laundryOrderId, fromStatus, toStatus, actorId, reason: reason || null }, { transaction: t })
 
+// Promo discount for a laundry cart. Base = service subtotal (no surcharge),
+// same rules as FE-LAUNDRY. An unusable typed code is reported as
+// promoError (quote) or refused (create) — never swapped for another promo.
+const resolveDiscounts = async ({ body, lines, outlet, transaction }) => {
+  const requestedManual = Math.max(0, Math.round(Number(body.manualDiscount?.amount) || 0))
+  if (requestedManual > 0) {
+    // Manual beats promos (FE chooseDiscounts); a reason is mandatory.
+    const reason = String(body.manualDiscount?.reason || '').trim()
+    if (!reason) refuse(422, 'MANUAL_DISCOUNT_REASON_REQUIRED', 'Alasan diskon manual wajib diisi')
+    const subtotal = lines.reduce((sum, l) => sum + l.subtotal, 0)
+    const settings = normalizeLaundrySettings(outlet.laundrySettings)
+    const amount = Math.min(requestedManual, manualDiscountCap(settings, subtotal))
+    return {
+      discounts: amount > 0 ? [{ campaignId: null, name: 'Diskon manual', code: null, mode: 'manual', reason, amount, allocations: [] }] : [],
+      discountAmount: amount,
+      manualReason: reason,
+      promoCampaignId: null,
+      promoCampaignName: null,
+      promoError: null
+    }
+  }
+  const promo = await evaluateLaundryPromos({
+    store: outlet.id,
+    tenantId: outlet.tenantId ?? null,
+    lines: lines.map((l) => ({ productId: l.productId, subtotal: l.subtotal })),
+    customerId: body.customerId || null,
+    promoCode: body.promoCode || null,
+    orderType: body.orderType === 'self' ? 'self' : 'full',
+    timezone: outlet.timezone || undefined,
+    transaction
+  })
+  return {
+    discounts: promo.discounts,
+    discountAmount: promo.discountAmount,
+    promoCampaignId: promo.discounts[0]?.campaignId || null,
+    promoCampaignName: promo.discounts[0]?.name || null,
+    promoError: promo.error
+  }
+}
+
 exports.listTurnarounds = async (req, res) => {
   try {
     const scope = resolveCounterStore(req)
@@ -199,28 +240,15 @@ exports.quote = async (req, res) => {
   try {
     const scope = resolveCounterStore(req)
     if (!scope.store) return res.status(scope.status).json(scope.body)
-    await ensureLaundryStore(scope.store)
+    const outlet = await ensureLaundryStore(scope.store)
     const { lines, subtotal, hppTotal, pieceRequired } = await quoteLines(req.body.items || [], scope.store)
     const turnaround = req.body.orderType === 'self' ? null : await resolveTurnaround(scope.store, req.body.turnaroundId)
     const surcharge = req.body.orderType === 'self' ? 0 : surchargeFor(subtotal, turnaround)
-    let discountAmount = 0
-    let promoCampaignId = null
-    let promoCampaignName = null
-    if (req.body.promoCode) {
-      const promo = await orderController.evaluatePromoCampaign(
-        lines.map(l => ({ productId: l.productId, quantity: l.qty, unitPrice: l.price })),
-        scope.store,
-        req.body.customerId || null,
-        subtotal + surcharge
-      )
-      discountAmount = Math.max(0, Math.min(subtotal + surcharge, Number(promo.discountAmount) || 0))
-      promoCampaignId = promo.campaignId || null
-      promoCampaignName = promo.campaignName || null
-    }
+    const { discounts, discountAmount, promoCampaignId, promoCampaignName, promoError } =
+      await resolveDiscounts({ body: req.body, lines, outlet })
     const total = Math.max(0, subtotal + surcharge - discountAmount)
-    const outlet = await Location.findByPk(scope.store)
     const dueAt = req.body.orderType === 'self' ? new Date() : dueAtFrom(new Date(), turnaround?.durationHours || 72, outlet?.openingHours, outlet?.timezone)
-    return res.json({ success: true, data: { lines: lines.map(l => l.serviceSnapshot), subtotal, surcharge, discountAmount, promoCampaignId, promoCampaignName, total, hppTotal, pieceRequired, dueAt, turnaroundId: turnaround?.id || null } })
+    return res.json({ success: true, data: { lines: lines.map(l => l.serviceSnapshot), subtotal, surcharge, discountAmount, discounts, promoCampaignId, promoCampaignName, promoError: promoError ? promoError.message : null, promoErrorCode: promoError ? promoError.code : null, total, hppTotal, pieceRequired, dueAt, turnaroundId: turnaround?.id || null } })
   } catch (e) {
     if (e.code === 'PRICE_CHANGED') return res.status(409).json({ success: false, code: e.code, mismatches: e.mismatches })
     return res.status(e.statusCode || 500).json({ success: false, message: e.message, code: e.code })
@@ -231,7 +259,7 @@ exports.createOrder = async (req, res) => {
   try {
     const scope = resolveCounterStore(req)
     if (!scope.store) return res.status(scope.status).json(scope.body)
-    await ensureLaundryStore(scope.store)
+    const outlet = await ensureLaundryStore(scope.store)
     const idempotencyKey = req.body.idempotencyKey
     if (!idempotencyKey) refuse(422, 'IDEMPOTENCY_KEY_REQUIRED', 'idempotencyKey is required')
     const existing = await Order.findOne({ where: { store: scope.store, idempotencyKey } })
@@ -247,18 +275,8 @@ exports.createOrder = async (req, res) => {
     }
     const turnaround = isSelf ? null : await resolveTurnaround(scope.store, body.turnaroundId)
     const surcharge = isSelf ? 0 : surchargeFor(subtotal, turnaround)
-    let discountAmount = 0
-    let promoCampaignId = null
-    if (body.promoCode) {
-      const promo = await orderController.evaluatePromoCampaign(
-        lines.map(l => ({ productId: l.productId, quantity: l.qty, unitPrice: l.price })),
-        scope.store,
-        body.customerId || null,
-        subtotal + surcharge
-      )
-      discountAmount = Math.max(0, Math.min(subtotal + surcharge, Number(promo.discountAmount) || 0))
-      promoCampaignId = promo.campaignId || null
-    }
+    const { discounts, discountAmount, promoCampaignId, promoError, manualReason } = await resolveDiscounts({ body, lines, outlet })
+    if (promoError) refuse(422, promoError.code, promoError.message)
     const total = Math.max(0, subtotal + surcharge - discountAmount)
     if (body.expectedTotal !== undefined && Number(body.expectedTotal) !== total) {
       refuse(409, 'PRICE_CHANGED', 'Total berubah, muat ulang dan konfirmasi ulang')
@@ -267,7 +285,6 @@ exports.createOrder = async (req, res) => {
     if (isSelf && paymentAmount < total) refuse(422, 'SELF_PAYMENT_REQUIRED', 'Self-service requires full payment')
     if (paymentAmount > total) refuse(422, 'OVERPAYMENT', 'Payment amount exceeds total')
     const receivedAt = new Date()
-    const outlet = await Location.findByPk(scope.store)
     const dueAt = isSelf ? receivedAt : dueAtFrom(receivedAt, turnaround?.durationHours || 72, outlet?.openingHours, outlet?.timezone)
     const customer = body.customerId ? await Member.findByPk(body.customerId) : null
 
@@ -283,8 +300,10 @@ exports.createOrder = async (req, res) => {
         paymentStatus: paymentAmount >= total && total >= 0 ? 'paid' : paymentAmount > 0 ? 'partially_paid' : 'unpaid',
         subTotal: subtotal,
         totalQuantity: lines.reduce((s, l) => s + Number(l.qty || 0), 0),
-        discountType: promoCampaignId ? 'promo' : 'none',
-        discountValue: 0,
+        // order.discountType is an enum (none/percent/nominal); a laundry
+        // promo is stored as the rupiah amount it took off, like F&B promos.
+        discountType: discountAmount > 0 ? 'nominal' : 'none',
+        discountValue: discountAmount > 0 ? discountAmount : 0,
         discountAmount,
         promoCampaignId,
         taxRate: 0,
@@ -296,7 +315,9 @@ exports.createOrder = async (req, res) => {
         source: 'pos',
         idempotencyKey,
         publicToken: require('crypto').randomBytes(24).toString('hex'),
-        notes: body.note || '',
+        notes: manualReason
+          ? [body.note, `Diskon manual Rp${discountAmount}: ${manualReason}`].filter(Boolean).join(' | ')
+          : body.note || '',
         createdBy: req.user?.id
       }, { transaction: t })
 
@@ -333,12 +354,12 @@ exports.createOrder = async (req, res) => {
       }, { transaction: t })
       await writeHistory(laundry.id, null, laundry.processStatus, req.user?.id, isSelf ? 'Self-service selesai di kasir' : '', t)
 
-      if (promoCampaignId && discountAmount > 0) {
+      for (const discount of discounts.filter((d) => d.campaignId)) {
         await orderController.recordPromoUsageIfApplied(
           created,
-          promoCampaignId,
+          discount.campaignId,
           body.customerId || null,
-          discountAmount,
+          discount.amount,
           { reward: null },
           req.user?.id || null,
           t
@@ -467,12 +488,26 @@ exports.updateStatus = async (req, res) => {
     const scope = resolveCounterStore(req)
     if (!scope.store) return res.status(scope.status).json(scope.body)
     const { toStatus, reason } = req.body
+    // Cancelling and handing over carry money rules (owner PIN + refund,
+    // outstanding payment) that live only in /cancel and /pickup, so the
+    // generic status endpoint must never reach those two states (G6).
+    if (toStatus === 'CANCELLED') {
+      return res.status(409).json({ success: false, code: 'USE_CANCEL_ENDPOINT', message: 'Gunakan POST /laundry/order/:id/cancel untuk membatalkan order' })
+    }
+    if (toStatus === 'PICKED_UP') {
+      return res.status(409).json({ success: false, code: 'USE_PICKUP_ENDPOINT', message: 'Gunakan POST /laundry/order/:id/pickup untuk serah terima order' })
+    }
     const data = await withDeadlockRetry(() => db.sequelize.transaction(async (t) => {
       const order = await Order.findOne({ where: { id: req.params.id, store: scope.store }, transaction: t, lock: t.LOCK.UPDATE })
       if (!order) refuse(404, 'NOT_FOUND', 'Order not found')
       const laundry = await LaundryOrder.findOne({ where: { orderId: order.id, store: scope.store }, transaction: t, lock: t.LOCK.UPDATE })
       if (!laundry) refuse(404, 'NOT_FOUND', 'Order not found')
       const from = laundry.processStatus
+      // Terminal states are final: an admin override must not revive a
+      // refunded/cancelled order or one already handed over.
+      if (from === 'CANCELLED' || from === 'PICKED_UP') {
+        refuse(409, 'ORDER_CLOSED', `Order ${from} tidak bisa diubah statusnya`)
+      }
       const allowed = ALLOWED[from] || []
       const isAdmin = ['admin', 'super_admin'].includes(req.user?.roleType)
       if (!allowed.includes(toStatus) && !(isAdmin && reason)) {
@@ -484,8 +519,6 @@ exports.updateStatus = async (req, res) => {
         if (req.body.rackCode !== undefined) patch.rackCode = String(req.body.rackCode || '').trim()
       }
       if (req.body.rackCode !== undefined && toStatus !== 'READY') patch.rackCode = String(req.body.rackCode || '').trim()
-      if (toStatus === 'CANCELLED') patch.cancelledReason = reason || ''
-      if (toStatus === 'PICKED_UP') patch.pickedUpAt = new Date()
       await laundry.update(patch, { transaction: t })
       await writeHistory(laundry.id, from, toStatus, req.user?.id, reason, t)
       return laundry
@@ -573,7 +606,11 @@ exports.cancelOrder = async (req, res) => {
 
       const fin = await computeOrderFinancials(order, t)
       const paidTotal = Math.max(0, Number(order.totalPrice || 0) - Number(fin.O || 0))
-      const refund = Math.min(Math.max(0, Number(refundAmount) || 0), paidTotal)
+      const requestedRefund = Math.max(0, Math.round(Number(refundAmount) || 0))
+      if (requestedRefund > paidTotal) {
+        refuse(422, 'REFUND_EXCEEDS_PAID', `Refund ${requestedRefund} melebihi jumlah terbayar ${paidTotal}`)
+      }
+      const refund = requestedRefund
       const needsApproval = !['RECEIVED'].includes(laundry.processStatus)
       if (needsApproval) {
         const outlet = await Location.findByPk(scope.store, { transaction: t })
@@ -664,8 +701,16 @@ exports.getReport = async (req, res) => {
 
     const todayOrders = active.filter((o) => sameLocalDay(o.laundryOrder?.receivedAt || o.createdAt))
     const todayKg = todayOrders.reduce((sum, o) => sum + (o.items || []).filter((it) => (it.serviceSnapshot || {}).type === 'kiloan').reduce((s, it) => s + Number((it.serviceSnapshot || {}).billQty ?? it.quantity ?? 0), 0), 0)
+    // Receipts are net of refunds paid out the same day: a 50.000 order paid
+    // then cancelled with a 50.000 refund adds 0, not 50.000 (skema 3.7/3.11).
     let todayPayments = 0
-    orders.forEach((o) => (o.transactions || []).forEach((t) => { if (sameLocalDay(t.createdAt) && Number(t.amount) > 0) todayPayments += Number(t.amount || 0) }))
+    let todayRefunds = 0
+    orders.forEach((o) => (o.transactions || []).forEach((t) => {
+      if (!sameLocalDay(t.createdAt)) return
+      const amount = Number(t.amount || 0)
+      todayPayments += amount
+      if (amount < 0) todayRefunds += -amount
+    }))
     // self-service: diproses & selesai di kasir (picked up saat diterima, layanan channel self)
     const isSelfOrder = (o) => {
       const l = o.laundryOrder || {}
@@ -694,8 +739,14 @@ exports.getReport = async (req, res) => {
       const dayActive = active.filter((o) => dayKeyOf(o.laundryOrder?.receivedAt || o.createdAt) === key)
       const kg = dayActive.reduce((sum, o) => sum + (o.items || []).filter((it) => (it.serviceSnapshot || {}).type === 'kiloan').reduce((s, it) => s + Number((it.serviceSnapshot || {}).billQty ?? it.quantity ?? 0), 0), 0)
       let omzet = 0
-      orders.forEach((o) => (o.transactions || []).forEach((t) => { if (dayKeyOf(t.createdAt) === key && Number(t.amount) > 0) omzet += Number(t.amount || 0) }))
-      days.push({ date: key, orders: dayActive.length, kg, omzet })
+      let refunds = 0
+      orders.forEach((o) => (o.transactions || []).forEach((t) => {
+        if (dayKeyOf(t.createdAt) !== key) return
+        const amount = Number(t.amount || 0)
+        omzet += amount
+        if (amount < 0) refunds += -amount
+      }))
+      days.push({ date: key, orders: dayActive.length, kg: Number(kg.toFixed(2)), omzet, refunds })
     }
 
     // per service
@@ -739,8 +790,9 @@ exports.getReport = async (req, res) => {
     return res.json({ success: true, data: {
       summary: {
         todayOrders: todayOrders.length,
-        todayKg,
+        todayKg: Number(todayKg.toFixed(2)),
         todayPayments,
+        todayRefunds,
         todaySelf: todaySelfOrders.length,
         todaySelfOmzet,
         unpaidCount: unpaidOrders.length,
