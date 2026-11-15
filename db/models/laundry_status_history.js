@@ -40,6 +40,12 @@ module.exports = (sequelize, DataTypes) => {
       foreignKey: 'laundryOrderId',
       as: 'laundryOrder'
     })
+    if (models.user) {
+      LaundryStatusHistory.belongsTo(models.user, {
+        foreignKey: 'actorId',
+        as: 'actorData'
+      })
+    }
   }
 
   return LaundryStatusHistory

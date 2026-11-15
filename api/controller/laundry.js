@@ -130,7 +130,7 @@ exports.createTurnaround = async (req, res) => {
   try {
     const scope = resolveCounterStore(req)
     if (!scope.store) return res.status(scope.status).json(scope.body)
-    await ensureLaundryStore(scope.store)
+    const location = await ensureLaundryStore(scope.store)
     const body = req.body
     const data = await withDeadlockRetry(() => db.sequelize.transaction(async (t) => {
       if (normalizeBool(body.isDefault)) {
@@ -138,7 +138,7 @@ exports.createTurnaround = async (req, res) => {
       }
       return LaundryTurnaround.create({
         store: scope.store,
-        tenantId: null,
+        tenantId: location.tenantId ?? null,
         name: body.name,
         durationHours: Number(body.durationHours) || 72,
         surchargeType: body.surchargeType || 'none',
@@ -319,7 +319,7 @@ exports.createOrder = async (req, res) => {
       const laundry = await LaundryOrder.create({
         orderId: created.id,
         store: scope.store,
-        tenantId: null,
+        tenantId: outlet?.tenantId ?? null,
         processStatus: isSelf ? 'PICKED_UP' : 'RECEIVED',
         turnaroundId: turnaround?.id || null,
         receivedAt,
@@ -385,9 +385,26 @@ const getFullLaundryOrder = async (id, store) => {
     where: { id, ...(store ? { store } : {}) },
     include: [
       { model: OrderItem, as: 'items' },
-      { model: LaundryOrder, as: 'laundryOrder', include: [{ model: LaundryStatusHistory, as: 'history', separate: true, order: [['createdAt', 'ASC']] }, { model: LaundryTurnaround, as: 'turnaround' }] }
+      {
+        model: LaundryOrder,
+        as: 'laundryOrder',
+        include: [
+          {
+            model: LaundryStatusHistory,
+            as: 'history',
+            separate: true,
+            order: [['createdAt', 'ASC']],
+            ...(db.user ? { include: [{ model: db.user, as: 'actorData', attributes: ['id', 'fullName'] }] } : {})
+          },
+          { model: LaundryTurnaround, as: 'turnaround' }
+        ]
+      }
     ]
   })
+  if (order && order.customerId && db.member) {
+    const member = await db.member.findByPk(order.customerId, { attributes: ['id', 'isCredit', 'name', 'phoneNumber'] })
+    if (member) order.setDataValue('customerData', member)
+  }
   return order
 }
 
