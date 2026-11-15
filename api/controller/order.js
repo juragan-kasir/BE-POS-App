@@ -6200,6 +6200,9 @@ exports.addOrderItems = (req, res) => {
 
 // POST /order/customer-order/:token/items — the QR diner adds a round to
 // their own unpaid QR order (opaque publicToken, like getCustomerOrder).
+exports.evaluatePromoCampaign = evaluatePromoCampaign
+exports.recordPromoUsageIfApplied = recordPromoUsageIfApplied
+
 exports.addCustomerOrderItems = (req, res) =>
   addOrderRound({
     req,

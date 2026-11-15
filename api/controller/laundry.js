@@ -203,9 +203,23 @@ exports.quote = async (req, res) => {
     const { lines, subtotal, hppTotal, pieceRequired } = await quoteLines(req.body.items || [], scope.store)
     const turnaround = req.body.orderType === 'self' ? null : await resolveTurnaround(scope.store, req.body.turnaroundId)
     const surcharge = req.body.orderType === 'self' ? 0 : surchargeFor(subtotal, turnaround)
-    const total = subtotal + surcharge
+    let discountAmount = 0
+    let promoCampaignId = null
+    let promoCampaignName = null
+    if (req.body.promoCode) {
+      const promo = await orderController.evaluatePromoCampaign(
+        lines.map(l => ({ productId: l.productId, quantity: l.qty, unitPrice: l.price })),
+        scope.store,
+        req.body.customerId || null,
+        subtotal + surcharge
+      )
+      discountAmount = Math.max(0, Math.min(subtotal + surcharge, Number(promo.discountAmount) || 0))
+      promoCampaignId = promo.campaignId || null
+      promoCampaignName = promo.campaignName || null
+    }
+    const total = Math.max(0, subtotal + surcharge - discountAmount)
     const dueAt = req.body.orderType === 'self' ? new Date() : addHours(new Date(), turnaround?.durationHours || 72)
-    return res.json({ success: true, data: { lines: lines.map(l => l.serviceSnapshot), subtotal, surcharge, total, hppTotal, pieceRequired, dueAt, turnaroundId: turnaround?.id || null } })
+    return res.json({ success: true, data: { lines: lines.map(l => l.serviceSnapshot), subtotal, surcharge, discountAmount, promoCampaignId, promoCampaignName, total, hppTotal, pieceRequired, dueAt, turnaroundId: turnaround?.id || null } })
   } catch (e) {
     if (e.code === 'PRICE_CHANGED') return res.status(409).json({ success: false, code: e.code, mismatches: e.mismatches })
     return res.status(e.statusCode || 500).json({ success: false, message: e.message, code: e.code })
@@ -232,7 +246,22 @@ exports.createOrder = async (req, res) => {
     }
     const turnaround = isSelf ? null : await resolveTurnaround(scope.store, body.turnaroundId)
     const surcharge = isSelf ? 0 : surchargeFor(subtotal, turnaround)
-    const total = subtotal + surcharge
+    let discountAmount = 0
+    let promoCampaignId = null
+    if (body.promoCode) {
+      const promo = await orderController.evaluatePromoCampaign(
+        lines.map(l => ({ productId: l.productId, quantity: l.qty, unitPrice: l.price })),
+        scope.store,
+        body.customerId || null,
+        subtotal + surcharge
+      )
+      discountAmount = Math.max(0, Math.min(subtotal + surcharge, Number(promo.discountAmount) || 0))
+      promoCampaignId = promo.campaignId || null
+    }
+    const total = Math.max(0, subtotal + surcharge - discountAmount)
+    if (body.expectedTotal !== undefined && Number(body.expectedTotal) !== total) {
+      refuse(409, 'PRICE_CHANGED', 'Total berubah, muat ulang dan konfirmasi ulang')
+    }
     const paymentAmount = Math.max(0, Number(body.paymentAmount) || 0)
     if (isSelf && paymentAmount < total) refuse(422, 'SELF_PAYMENT_REQUIRED', 'Self-service requires full payment')
     if (paymentAmount > total) refuse(422, 'OVERPAYMENT', 'Payment amount exceeds total')
@@ -252,9 +281,10 @@ exports.createOrder = async (req, res) => {
         paymentStatus: paymentAmount >= total && total >= 0 ? 'paid' : paymentAmount > 0 ? 'partially_paid' : 'unpaid',
         subTotal: subtotal,
         totalQuantity: lines.reduce((s, l) => s + Number(l.qty || 0), 0),
-        discountType: 'none',
+        discountType: promoCampaignId ? 'promo' : 'none',
         discountValue: 0,
-        discountAmount: 0,
+        discountAmount,
+        promoCampaignId,
         taxRate: 0,
         taxAmount: 0,
         serviceChargeRate: 0,
@@ -300,6 +330,18 @@ exports.createOrder = async (req, res) => {
         createdBy: req.user?.id
       }, { transaction: t })
       await writeHistory(laundry.id, null, laundry.processStatus, req.user?.id, isSelf ? 'Self-service selesai di kasir' : '', t)
+
+      if (promoCampaignId && discountAmount > 0) {
+        await orderController.recordPromoUsageIfApplied(
+          created,
+          promoCampaignId,
+          body.customerId || null,
+          discountAmount,
+          { reward: null },
+          req.user?.id || null,
+          t
+        )
+      }
 
       if (paymentAmount > 0) {
         const method = normalizePaymentMethod(body.paymentMethod)
