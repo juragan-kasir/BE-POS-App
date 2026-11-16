@@ -8,6 +8,7 @@ const locationController = require('../controller/location')
 const authorization = require('../../utils/authorization')
 const { requireRole, requireCanonicalPermission } = require('../../utils/authorization')
 const { validateStoreAccess } = require('../../utils/storeValidation')
+const { requireStoreCreator } = require('../../utils/firstOutletOwner')
 const {
   authorizationContextMiddleware
 } = require('../../utils/authorizationContextMiddleware')
@@ -74,12 +75,12 @@ router.get(
   locationController.generateLocationId
 )
 
-// Add new location - Super Admin only
+// Add new location - Super Admin, or a store-less tenant_admin owner creating
+// the first outlet of their own tenant (utils/firstOutletOwner).
 router.post(
   '/add-new-location',
   authorization,
-  validateStoreAccess,
-  requireRole('super_admin'),
+  requireStoreCreator,
   upload,
   validate(createLocationSchema),
   locationController.addNewLocation
