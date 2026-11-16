@@ -49,6 +49,7 @@ const { page: pageOf, paginated } = require('../service/scopeVisibilityService')
 const { assertOperationalStoreTenant, resolveRequestedLifecycleStatus } = require('../validation/schemas')
 const { normalizeLaundrySettings, publicLaundrySettings } = require('../service/laundryPricing')
 const bcrypt = require('bcrypt')
+const { bindFirstOutlet } = require('../../utils/firstOutletOwner')
 
 const hashOwnerPinIfPresent = async (rawSettings, existingSettings) => {
   if (rawSettings === undefined) return undefined
@@ -456,6 +457,15 @@ exports.addNewLocation = async (req, res) => {
         message: approvedTenant.message
       })
     }
+    // A store-less owner creates outlets only in the tenant they administer.
+    if (req.firstOutletOwner && Number(lifecycle.tenantId) !== req.firstOutletOwner.tenantId) {
+      return res.status(422).json({
+        success: false,
+        code: 'FOREIGN_TENANT',
+        field: 'tenantId',
+        message: 'outlet must belong to your own tenant'
+      })
+    }
 
     // F1: sequence-authoritative allocation. A supplied locationId is
     // accepted but ignored (FE preview round-trip): the id always comes
@@ -534,6 +544,15 @@ exports.addNewLocation = async (req, res) => {
     const newLocationId = `loc-${String(newLocation.id).padStart(3, '0')}`
     const storeId = `ST-${String(newLocation.id).padStart(3, '0')}`
 
+    // A store-less owner's first outlet becomes their home outlet.
+    let ownerBound = false
+    if (req.firstOutletOwner) {
+      ownerBound = await bindFirstOutlet({ userId: req.user.id, storeId: newLocation.id })
+      if (ownerBound) {
+        createAudit(req, 'update', 'user', req.user.id, `Owner bound to first outlet: ${name}`)
+      }
+    }
+
     createNotification({
       type: 'location_created',
       store: newLocation.store,
@@ -557,7 +576,8 @@ exports.addNewLocation = async (req, res) => {
         id: newLocation.id,
         locationId: newLocationId,
         storeId,
-        ...newLocation.dataValues
+        ...newLocation.dataValues,
+        ...(req.firstOutletOwner ? { ownerBound } : {})
       }
     })
   } catch (error) {
