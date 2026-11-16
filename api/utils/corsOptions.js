@@ -10,6 +10,8 @@ const allowedOrigins = (
     'https://bisa-nota-demo.vercel.app',
     // Production Order Website
     'https://order-app-dun.vercel.app',
+    // Production Laundry Cashier Website
+    'https://fe-laundry-app-dusky.vercel.app',
     // Local Development Admin Website
     'http://localhost:3000',
     'http://localhost:3001',
