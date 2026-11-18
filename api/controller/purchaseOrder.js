@@ -1,4 +1,5 @@
 const db = require('../../db/models')
+const { nextDocumentNumber } = require('../../utils/documentNumber')
 const { Op } = require('sequelize')
 const ExcelJS = require('exceljs')
 const { createAudit } = require('../../utils/auditLog')
@@ -8,17 +9,6 @@ const { resolveStoreId, callerStoreIds } = require('../../utils/tenantScope')
 const {
   calculatePurchaseOrderFulfillmentStatus
 } = require('../service/purchaseOrderFulfillmentService')
-
-const generateOrderNumber = (prefix) => {
-  const date = new Date()
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  const random = Math.floor(Math.random() * 10000)
-    .toString()
-    .padStart(4, '0')
-  return `${prefix}-${year}${month}${day}-${random}`
-}
 
 // T-02/T-03/T-12 Authoritative PO monetary calculation — single source of truth
 // for totalAmount/discount/taxRate→taxAmount/additionalCost→finalAmount.
@@ -607,7 +597,7 @@ const purchaseOrderController = {
         }
       }
 
-      const orderNumber = generateOrderNumber('PO')
+      const orderNumber = await nextDocumentNumber('purchase_order', store)
 
       const totalAmount =
         items?.length > 0
@@ -1816,7 +1806,7 @@ const purchaseOrderController = {
 
         const order = await db.purchase_order.create({
           store: data.store,
-          orderNumber: generateOrderNumber('PO'),
+          orderNumber: await nextDocumentNumber('purchase_order', data.store),
           totalAmount: data.items.reduce((s, i) => s + i.quantity * i.price, 0),
           discount: 0,
           finalAmount: data.items.reduce((s, i) => s + i.quantity * i.price, 0),

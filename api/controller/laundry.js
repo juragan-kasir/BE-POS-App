@@ -1,7 +1,8 @@
 'use strict'
 
 const db = require('../../db/models')
-const { resolveCounterStore, createOrderItems, sessionCashier, generateOrderNumber } = require('./order')
+const { nextDocumentNumber } = require('../../utils/documentNumber')
+const { resolveCounterStore, createOrderItems, sessionCashier } = require('./order')
 const { normalizeServiceConfig, validateServiceConfig, lineTotal, surchargeFor, dueAtFrom, normalizeLaundrySettings, manualDiscountCap } = require('../service/laundryPricing')
 const bcrypt = require('bcrypt')
 const { normalizePaymentMethod, requireTenderReference } = require('../service/canonicalPayment')
@@ -293,7 +294,7 @@ exports.createOrder = async (req, res) => {
     const order = await withDeadlockRetry(() => db.sequelize.transaction(async (t) => {
       accountingJobs = null
       const created = await Order.create({
-        orderNumber: generateOrderNumber(),
+        orderNumber: await nextDocumentNumber('order', scope.store, { transaction: t }),
         store: scope.store,
         customerId: body.customerId || null,
         customerName: body.customerName || customer?.name || (isSelf ? 'Pelanggan Self-Service' : null),

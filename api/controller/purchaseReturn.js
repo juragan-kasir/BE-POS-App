@@ -1,4 +1,5 @@
 const db = require('../../db/models')
+const { nextDocumentNumber } = require('../../utils/documentNumber')
 const { tenantStoreWhere, storesInCallerTenant } = require('../../utils/tenantScope')
 const { Op } = require('sequelize')
 const { createAudit } = require('../../utils/auditLog')
@@ -14,17 +15,6 @@ const {
 const {
   calculatePurchaseOrderFulfillmentStatus
 } = require('../service/purchaseOrderFulfillmentService')
-
-const generateOrderNumber = (prefix) => {
-  const date = new Date()
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  const random = Math.floor(Math.random() * 10000)
-    .toString()
-    .padStart(4, '0')
-  return `${prefix}-${year}${month}${day}-${random}`
-}
 
 async function attachPriceInfo(json, poId) {
   if (!json.items || json.items.length === 0) return json
@@ -497,7 +487,7 @@ const purchaseReturnController = {
             const replacementPO = await db.purchase_order.create(
               {
                 store: ret.store || null,
-                orderNumber: generateOrderNumber('RPL'),
+                orderNumber: await nextDocumentNumber('replacement_po', ret.store, { transaction: t }),
                 totalAmount: total,
                 discount: 0,
                 taxRate: replacementTaxRate,
@@ -1077,18 +1067,10 @@ const purchaseReturnController = {
         })
       }
 
-      const date = new Date()
-      const rand = Math.random().toString(36).substring(2, 6).toUpperCase()
-      // returnNumber has a bare (non-store-scoped) global unique
-      // constraint, so it must be collision-resistant across every store
-      // in the deployment, not just within one store's daily count. The
-      // previous format (date + 4-char random, no time-of-day) gave only
-      // ~1.68M combinations PER CALENDAR DAY shared by every store —
-      // meaningful collision odds at realistic multi-tenant volume. The
-      // millisecond-timestamp tail adds ~1M more distinct values on top
-      // of that, matching the collision-resistance already proven safe
-      // for order.orderNumber and sales_return.returnNumber.
-      const returnNumber = `PR-${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, '0')}${String(date.getDate()).padStart(2, '0')}-${Date.now().toString().slice(-6)}${rand}`
+      // returnNumber has a bare global unique constraint. W3-6: a per-outlet
+      // daily counter (utils/documentNumber) — the outlet id in the number
+      // makes it unique across every store, with no random collision odds.
+      const returnNumber = await nextDocumentNumber('purchase_return', store, { transaction: t })
 
       // Upload documentation files to Cloudinary
       let documentation = null

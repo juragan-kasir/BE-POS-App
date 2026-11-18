@@ -66,10 +66,10 @@ const MAINTENANCE_DB = 'postgres'
 
 // Locked accounting model (W-02R.4 discovery): any repository growth forces
 // a manifest review instead of silently changing the rehearsal.
-const EXPECTED_REPO_MIGRATIONS = 262
+const EXPECTED_REPO_MIGRATIONS = 263
 const EXPECTED_MANIFEST_ROWS = 197
 const EXPECTED_LEDGER_ROWS = 26
-const EXPECTED_E2_COUNT = 39
+const EXPECTED_E2_COUNT = 40
 
 // November foundation migrations (part of the 26 production ledger rows).
 // SCHEMA ONLY, additive, safe to execute against the snapshot baseline via

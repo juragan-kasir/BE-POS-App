@@ -1,18 +1,9 @@
 const db = require('../../db/models')
+const { nextDocumentNumber } = require('../../utils/documentNumber')
 const { Op } = require('sequelize')
 const { enrichAuditFields } = require('../../utils/auditFields')
 const { emitToStore } = require('../service/socket')
 const { arrayStoreScope, listStoreIds } = require('../../utils/tenantScope')
-
-const generateRequestNumber = () => {
-  const date = new Date()
-  const hours = String(date.getHours()).padStart(2, '0')
-  const minutes = String(date.getMinutes()).padStart(2, '0')
-  const random = Math.floor(Math.random() * 10000)
-    .toString()
-    .padStart(4, '0')
-  return `WR${hours}${minutes}-${random}`
-}
 
 const waiterRequestController = {
   // ——— Public (no auth) — customer submits a waiter request ———
@@ -47,7 +38,7 @@ const waiterRequestController = {
         return res.status(400).json({ message: 'Invalid request type' })
       }
 
-      const requestNumber = generateRequestNumber()
+      const requestNumber = await nextDocumentNumber('waiter_request', storeId)
 
       const orderIdNum =
         orderId === '' || orderId == null ? null : Number(orderId)

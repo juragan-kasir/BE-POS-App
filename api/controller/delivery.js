@@ -1,4 +1,5 @@
 const db = require('../../db/models')
+const { nextDocumentNumber } = require('../../utils/documentNumber')
 const { Op } = require('sequelize')
 const { enrichAuditFields } = require('../../utils/auditFields')
 const { emitToStore } = require('../service/socket')
@@ -8,17 +9,6 @@ const {
   tenantStoreWhere
 } = require('../../utils/tenantScope')
 const { authorizedStoreIds } = require('../../utils/storeValidation')
-
-const generateDeliveryNumber = () => {
-  const date = new Date()
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  const random = Math.floor(Math.random() * 10000)
-    .toString()
-    .padStart(4, '0')
-  return `DLV-${year}${month}${day}-${random}`
-}
 
 const deliveryController = {
   // ─── Delivery Orders ─────────────────────────────────────────────
@@ -190,7 +180,7 @@ const deliveryController = {
         }
       }
 
-      const orderNumber = generateDeliveryNumber()
+      const orderNumber = await nextDocumentNumber('delivery', store)
 
       const deliveryOrder = await db.delivery_order.create({
         orderNumber,

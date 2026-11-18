@@ -1,4 +1,5 @@
 const db = require('../../db/models')
+const { nextDocumentNumber } = require('../../utils/documentNumber')
 const { Op } = require('sequelize')
 const { createAudit } = require('../../utils/auditLog')
 const { resolveStoreId } = require('../../utils/tenantScope')
@@ -125,17 +126,6 @@ const validateSingleEmployeeForStore = async (employeeId, store) => {
     }
   }
   return null
-}
-
-const generateTripNumber = () => {
-  const date = new Date()
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  const random = Math.floor(Math.random() * 10000)
-    .toString()
-    .padStart(4, '0')
-  return `BT-${year}${month}${day}-${random}`
 }
 
 const normalizeBudgetItems = (items = []) =>
@@ -387,7 +377,7 @@ const businessTripController = {
           .json({ success: false, message: employeeError.message })
       }
 
-      const tripNumber = generateTripNumber()
+      const tripNumber = await nextDocumentNumber('business_trip', store)
       const trip = await db.sequelize.transaction(async (transaction) => {
         const created = await db.businessTrip.create(
           {
