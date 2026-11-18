@@ -244,6 +244,20 @@ module.exports = async () => {
       code character varying(50) NOT NULL UNIQUE,
       name character varying(100) NOT NULL,
       status character varying(20) NOT NULL DEFAULT 'active',
+      "ownerId" integer,
+      "businessType" character varying(20),
+      "createdAt" timestamp with time zone NOT NULL,
+      "updatedAt" timestamp with time zone NOT NULL,
+      "deletedAt" timestamp with time zone
+    )`,
+    // Owner/tenant hierarchy Phase 1 (migration 20261116000001): platform
+    // administrator grants. Same R-4 shell precedent — logged-in grant
+    // records point at user, never at a tenant.
+    `CREATE TABLE IF NOT EXISTS platform_admin (
+      id SERIAL PRIMARY KEY,
+      "userId" integer NOT NULL,
+      "grantedBy" integer,
+      status character varying(20) NOT NULL DEFAULT 'ACTIVE',
       "createdAt" timestamp with time zone NOT NULL,
       "updatedAt" timestamp with time zone NOT NULL,
       "deletedAt" timestamp with time zone
@@ -385,6 +399,11 @@ module.exports = async () => {
     // Wave 4 per-tenant master data (migration 20261106000001, batch B12).
     ['department', 'store', 'INTEGER REFERENCES "location"(id) ON UPDATE CASCADE ON DELETE SET NULL'],
     ['ingredient_category', 'store', 'INTEGER REFERENCES "location"(id) ON UPDATE CASCADE ON DELETE SET NULL'],
+    // Owner/tenant hierarchy Phase 1 (migration 20261116000001): tenant
+    // ownership + vertical profile. Both nullable by contract; no-op on a
+    // migrated DB, converges snapshot-built test DBs.
+    ['tenant', 'ownerId', 'INTEGER'],
+    ['tenant', 'businessType', 'VARCHAR(20)']
   ]
 
   // Phase 34: stock_opname_item's quantity columns are migration-owned
@@ -453,7 +472,10 @@ module.exports = async () => {
     `CREATE INDEX IF NOT EXISTS ix_location_tenant ON "location" ("tenantId")`,
     // F5 session indexes (migration 20261009000001).
     `CREATE UNIQUE INDEX IF NOT EXISTS uq_authorization_context_session_id ON "authorization_context_session" ("sessionId")`,
-    `CREATE INDEX IF NOT EXISTS ix_authorization_context_session_user ON "authorization_context_session" ("userId")`
+    `CREATE INDEX IF NOT EXISTS ix_authorization_context_session_user ON "authorization_context_session" ("userId")`,
+    // Owner/tenant hierarchy Phase 1 (migration 20261116000001).
+    `CREATE INDEX IF NOT EXISTS ix_tenant_owner ON "tenant" ("ownerId")`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS uq_platform_admin_user ON "platform_admin" ("userId")`
   ]
 
   for (const ddl of R4_TABLE_DDL) {
@@ -691,7 +713,9 @@ module.exports = async () => {
     // F5 session table (migration 20261009000001).
     'authorization_context_session',
     // E2E audit #8 open bill (migration 20261101000002, batch B9).
-    'order_round'
+    'order_round',
+    // Owner/tenant hierarchy Phase 1 (migration 20261116000001).
+    'platform_admin'
   ]
   const missingTables = []
   for (const table of R4_REQUIRED_TABLES) {
@@ -718,10 +742,12 @@ module.exports = async () => {
     overtime: ['id', 'store', 'shift_id', 'employee_id', 'date', 'start_time', 'end_time', 'duration_hours', 'note', 'status', 'decidedBy', 'decidedAt', 'status_history', 'accounting_status', 'postedAt', 'journalId', 'createdBy', 'modifiedBy', 'createdAt', 'updatedAt', 'deletedAt'],
     // AUTH-1 foundation tables: every model column must exist, mirroring the
     // migration exactly (location.tenantId is covered by R4_COLUMNS above).
-    tenant: ['id', 'code', 'name', 'status', 'createdAt', 'updatedAt', 'deletedAt'],
+    tenant: ['id', 'code', 'name', 'status', 'ownerId', 'businessType', 'createdAt', 'updatedAt', 'deletedAt'],
     tenant_membership: ['id', 'userId', 'tenantId', 'role', 'status', 'createdAt', 'updatedAt', 'deletedAt', 'reactivatedAt'],
     store_assignment: ['id', 'userId', 'tenantId', 'storeId', 'createdAt', 'updatedAt'],
-    authorization_context_session: ['id', 'sessionId', 'userId', 'activeTenantId', 'activeStoreId', 'version', 'expiresAt', 'revokedAt', 'createdAt', 'updatedAt']
+    authorization_context_session: ['id', 'sessionId', 'userId', 'activeTenantId', 'activeStoreId', 'version', 'expiresAt', 'revokedAt', 'createdAt', 'updatedAt'],
+    // Owner/tenant hierarchy Phase 1 (migration 20261116000001).
+    platform_admin: ['id', 'userId', 'grantedBy', 'status', 'createdAt', 'updatedAt', 'deletedAt']
   }
   for (const [table, cols] of Object.entries(R4_TABLE_COLUMNS)) {
     if (missingTables.includes(table)) continue
@@ -774,7 +800,10 @@ module.exports = async () => {
     'ix_store_assignment_tenant',
     'ix_location_tenant',
     'uq_authorization_context_session_id',
-    'ix_authorization_context_session_user'
+    'ix_authorization_context_session_user',
+    // Owner/tenant hierarchy Phase 1 (migration 20261116000001).
+    'ix_tenant_owner',
+    'uq_platform_admin_user'
   ]) {
     const c = run('psql', [
       '-h', DB_HOST, '-p', DB_PORT, '-U', DB_USER, '-d', TEST_DB,

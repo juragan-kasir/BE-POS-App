@@ -258,6 +258,19 @@ const E2_BATCHES = Object.freeze({
     // production by an unbatched run on 2026-11-15 (SequelizeMeta 255);
     // this batch only makes the inventory explicit for the D-08 tooling.
     openGates: []
+  }),
+  B17: deepFreeze({
+    id: 'B17',
+    title: 'Owner hierarchy expand: tenant.ownerId/businessType + platform_admin',
+    expectedCount: 1,
+    migrations: ['20261116000001-owner-hierarchy-expand.js'],
+    // Owner -> tenant -> outlet hierarchy, phase 1 (spec 2026-11-16, BE audit
+    // FIXING-PLAN W2-a). Additive only: two nullable tenant columns (ownerId
+    // FK user ON DELETE SET NULL, businessType), ix_tenant_owner, and the
+    // platform_admin grant table with uq_platform_admin_user. Guarded and
+    // replay-safe; existing rows are never rewritten. The tenant model reads
+    // the new columns, so B17 must be recorded before this code deploys.
+    openGates: []
   })
 })
 
@@ -277,7 +290,8 @@ const BATCH_ORDER = Object.freeze([
   'B13',
   'B14',
   'B15',
-  'B16'
+  'B16',
+  'B17'
 ])
 
 // D-08 B1 resume contracts. A resume finishes a batch whose earlier members

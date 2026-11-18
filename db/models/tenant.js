@@ -32,6 +32,24 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.STRING(20),
         allowNull: false,
         defaultValue: 'active'
+      },
+      // Owner/tenant hierarchy Phase 1: the tenant's owning user. Nullable
+      // so pre-hierarchy tenants stay valid; onboarding assigns it in a
+      // later task. SET NULL on user delete — a retired owner never blocks
+      // account cleanup.
+      ownerId: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        references: { model: 'user', key: 'id' },
+        onDelete: 'SET NULL'
+      },
+      // Vertical profile of the tenant, set at onboarding (later task).
+      // STRING (not ENUM) so the vocabulary can grow without a type
+      // migration; app-side validation keeps the current set closed.
+      businessType: {
+        type: DataTypes.STRING(20),
+        allowNull: true,
+        validate: { isIn: [['fnb', 'retail', 'laundry', 'salon']] }
       }
     },
     {
@@ -43,6 +61,9 @@ module.exports = (sequelize, DataTypes) => {
   )
 
   Tenant.associate = (models) => {
+    if (models.user) {
+      Tenant.belongsTo(models.user, { foreignKey: 'ownerId', as: 'owner' })
+    }
     if (models.location) {
       Tenant.hasMany(models.location, { foreignKey: 'tenantId', as: 'stores' })
     }
