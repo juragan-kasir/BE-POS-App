@@ -568,6 +568,16 @@ app.get('/', (_, res) => {
 app.use((err, req, res, _next) => {
   const tooLong = valueTooLongFromError(err)
   if (tooLong) return res.status(400).json(bodyFor(tooLong))
+  // multer upload caps (BE audit 2026-11-18, S-14): a refused oversize file
+  // is a client error, not a 500.
+  if (err && err.name === 'MulterError') {
+    const tooLarge = err.code === 'LIMIT_FILE_SIZE'
+    return res.status(tooLarge ? 413 : 400).json({
+      success: false,
+      code: tooLarge ? 'FILE_TOO_LARGE' : 'UPLOAD_REJECTED',
+      message: tooLarge ? 'Ukuran file melebihi batas 5 MB' : 'Upload ditolak'
+    })
+  }
   console.error(err.stack)
   Sentry.captureException(err)
   res.status(err.status || 500).json({
