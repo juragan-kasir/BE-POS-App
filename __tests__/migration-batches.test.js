@@ -59,7 +59,8 @@ const B15 = batches.E2_BATCHES.B15.migrations
 const B16 = batches.E2_BATCHES.B16.migrations
 const B17 = batches.E2_BATCHES.B17.migrations
 const B18 = batches.E2_BATCHES.B18.migrations
-const ALL_E2 = [...B1, ...B2, ...B3, ...B4, ...B5, ...B6, ...B7, ...B8, ...B9, ...B10, ...B11, ...B12, ...B13, ...B14, ...B15, ...B16, ...B17, ...B18]
+const B19 = batches.E2_BATCHES.B19.migrations
+const ALL_E2 = [...B1, ...B2, ...B3, ...B4, ...B5, ...B6, ...B7, ...B8, ...B9, ...B10, ...B11, ...B12, ...B13, ...B14, ...B15, ...B16, ...B17, ...B18, ...B19]
 
 // Production-like ledger after stamping: every non-E2 file recorded, plus
 // whichever batches the scenario says have already run.
@@ -71,9 +72,9 @@ const gatesCleared = () =>
 const withBatch = (id, patch) => ({ ...gatesCleared(), [id]: { ...gatesCleared()[id], ...patch } })
 
 describe('D-08 E2 batch contract (Option C)', () => {
-  test('exactly eighteen batches, B1 → … → B17 → B18', () => {
-    expect(batches.BATCH_ORDER).toEqual(['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B9', 'B10', 'B11', 'B12', 'B13', 'B14', 'B15', 'B16', 'B17', 'B18'])
-    expect(Object.keys(batches.E2_BATCHES).sort()).toEqual(['B1', 'B10', 'B11', 'B12', 'B13', 'B14', 'B15', 'B16', 'B17', 'B18', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B9'])
+  test('exactly nineteen batches, B1 → … → B18 → B19', () => {
+    expect(batches.BATCH_ORDER).toEqual(['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B9', 'B10', 'B11', 'B12', 'B13', 'B14', 'B15', 'B16', 'B17', 'B18', 'B19'])
+    expect(Object.keys(batches.E2_BATCHES).sort()).toEqual(['B1', 'B10', 'B11', 'B12', 'B13', 'B14', 'B15', 'B16', 'B17', 'B18', 'B19', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B9'])
     expect(Object.isFrozen(batches.E2_BATCHES)).toBe(true)
     for (const id of batches.BATCH_ORDER) {
       expect(Object.isFrozen(batches.E2_BATCHES[id])).toBe(true)
@@ -194,15 +195,21 @@ describe('D-08 E2 batch contract (Option C)', () => {
     expect(batches.E2_BATCHES.B18.openGates).toEqual([])
   })
 
-  test('ordering: M1 < M2 < M5 < M3 < B4 < B5 < B6 < B7 < B8 < B9 < B10 < B11 < B12 < B13 < B14 < B15 < B16 < B17 < B18 in filename (runner) order', () => {
-    const order = [M1, M2, M5, M3, ...B4, ...B5, ...B6, ...B7, ...B8, ...B9, ...B10, ...B11, ...B12, ...B13, ...B14, ...B15, ...B16, ...B17, ...B18]
+  test('B19 is the catalog tenant id', () => {
+    expect(B19).toEqual(['20261119000001-product-tenant-id.js'])
+    expect(batches.E2_BATCHES.B19.expectedCount).toBe(1)
+    expect(batches.E2_BATCHES.B19.openGates).toEqual([])
+  })
+
+  test('ordering: M1 < M2 < M5 < M3 < B4 < B5 < B6 < B7 < B8 < B9 < B10 < B11 < B12 < B13 < B14 < B15 < B16 < B17 < B18 < B19 in filename (runner) order', () => {
+    const order = [M1, M2, M5, M3, ...B4, ...B5, ...B6, ...B7, ...B8, ...B9, ...B10, ...B11, ...B12, ...B13, ...B14, ...B15, ...B16, ...B17, ...B18, ...B19]
     expect([...order].sort()).toEqual(order)
     const idx = order.map((m) => FILES.indexOf(m))
     expect(idx.every((i) => i >= 0)).toBe(true)
     expect([...idx].sort((a, b) => a - b)).toEqual(idx)
   })
 
-  test('B1 … B18 cover the derived E2 inventory exactly, in runner order', () => {
+  test('B1 … B19 cover the derived E2 inventory exactly, in runner order', () => {
     const staging = rules.readDispositionManifest(rules.STAGING_DISPOSITIONS_PATH).manifest
     const { e2 } = harness.deriveRehearsalSets({
       files: FILES,
@@ -210,7 +217,7 @@ describe('D-08 E2 batch contract (Option C)', () => {
       fixtureLedgerNames: harness.fixtureLedgerNames(FILES)
     })
     expect(e2).toEqual(ALL_E2)
-    expect(e2).toHaveLength(34)
+    expect(e2).toHaveLength(35)
   })
 
   test('M3 rename changed ordering only: old name gone, CHECK semantics intact', () => {
@@ -360,9 +367,9 @@ describe('D-08 E2 batch evaluation (runner safety)', () => {
 
   test('pendingBatchMembers lists every pending E2 member by batch', () => {
     const pending = batches.pendingBatchMembers({ files: FILES, metaNames: ledgerWith(B1) })
-    expect(pending.map((p) => p.migration)).toEqual([M1, M2, M5, M3, ...B4, ...B5, ...B6, ...B7, ...B8, ...B9, ...B10, ...B11, ...B12, ...B13, ...B14, ...B15, ...B16, ...B17, ...B18])
-    expect(pending.map((p) => p.batch)).toEqual(['B2', 'B2', 'B2', 'B3', 'B4', 'B4', 'B5', 'B6', 'B7', 'B8', 'B9', 'B10', 'B11', 'B12', 'B13', 'B13', 'B14', 'B15', 'B16', 'B17', 'B18'])
-    expect(batches.pendingBatchMembers({ files: FILES, metaNames: ledgerWith(B1, B2, B3, B4, B5, B6, B7, B8, B9, B10, B11, B12, B13, B14, B15, B16, B17, B18) })).toEqual([])
+    expect(pending.map((p) => p.migration)).toEqual([M1, M2, M5, M3, ...B4, ...B5, ...B6, ...B7, ...B8, ...B9, ...B10, ...B11, ...B12, ...B13, ...B14, ...B15, ...B16, ...B17, ...B18, ...B19])
+    expect(pending.map((p) => p.batch)).toEqual(['B2', 'B2', 'B2', 'B3', 'B4', 'B4', 'B5', 'B6', 'B7', 'B8', 'B9', 'B10', 'B11', 'B12', 'B13', 'B13', 'B14', 'B15', 'B16', 'B17', 'B18', 'B19'])
+    expect(batches.pendingBatchMembers({ files: FILES, metaNames: ledgerWith(B1, B2, B3, B4, B5, B6, B7, B8, B9, B10, B11, B12, B13, B14, B15, B16, B17, B18, B19) })).toEqual([])
   })
 
   test('post-run verification accepts exactly the batch and flags anything else', () => {

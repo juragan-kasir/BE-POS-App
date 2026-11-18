@@ -283,6 +283,18 @@ const E2_BATCHES = Object.freeze({
     // than one ACTIVE owner; legacy tenant_admin rows are not constrained.
     // No code reads it; run it before or after the deploy.
     openGates: []
+  }),
+  B19: deepFreeze({
+    id: 'B19',
+    title: 'W3-1 catalog: product.tenantId + SKU unique per tenant',
+    expectedCount: 1,
+    migrations: ['20261119000001-product-tenant-id.js'],
+    // FIXING-PLAN W3-1 (BE audit S-04/S-05): nullable product.tenantId (FK
+    // tenant, RESTRICT) + index, backfilled only where every live outlet of a
+    // product belongs to exactly one tenant; product_sku_key (global) becomes
+    // uq_product_tenant_sku + uq_product_tenantless_sku. The product model
+    // reads tenantId, so B19 must be recorded before this code deploys.
+    openGates: []
   })
 })
 
@@ -304,7 +316,8 @@ const BATCH_ORDER = Object.freeze([
   'B15',
   'B16',
   'B17',
-  'B18'
+  'B18',
+  'B19'
 ])
 
 // D-08 B1 resume contracts. A resume finishes a batch whose earlier members
