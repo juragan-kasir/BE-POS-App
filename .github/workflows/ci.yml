@@ -1,10 +1,17 @@
 name: CI
 
+# `development` is the production branch (merge = deploy), so it carries the
+# gate; master stays covered for the legacy flow.
 on:
   push:
-    branches: [master]
+    branches: [master, development]
   pull_request:
-    branches: [master]
+    branches: [master, development]
+
+# A newer push to the same PR/branch cancels the older run (saves minutes).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
@@ -124,6 +131,6 @@ jobs:
           DB_DEV_PASSWORD: postgres
 
 # Deploy is NOT performed by GitHub Actions: this backend is shipped via the
-# Vercel Git integration on merge to master. CI here only validates the
+# Vercel Git integration on merge to development. CI here only validates the
 # changes (tests against a real Postgres + lint); see the release runbook in
 # RELEASING.md.
