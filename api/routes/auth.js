@@ -4,9 +4,13 @@ const authController = require('../controller/auth')
 
 // ponytail: 30 login attempts per 15min window (per-IP; POS terminals behind
 // NAT share one IP, so a store-wide shift change must not lock everyone out)
-const loginKeyGenerator = (req, res) => {
+// ipKeyGenerator collapses an IPv6 address to its /56 subnet: keying on the
+// raw req.ip let one IPv6 client rotate addresses inside its own prefix and
+// bypass the limit (express-rate-limit ERR_ERL_KEY_GEN_IPV6).
+const { ipKeyGenerator } = rateLimit
+const loginKeyGenerator = (req) => {
   const userName = typeof req.body?.userName === 'string' ? req.body.userName.trim().toLowerCase() : ''
-  return `login:${req.ip}:${userName}`
+  return `login:${ipKeyGenerator(req.ip)}:${userName}`
 }
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
