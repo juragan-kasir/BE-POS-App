@@ -40,7 +40,8 @@ module.exports = (sequelize, DataTypes) => {
       ownerId: {
         type: DataTypes.INTEGER,
         allowNull: true,
-        references: { model: 'user', key: 'id' }
+        references: { model: 'user', key: 'id' },
+        onDelete: 'SET NULL'
       },
       // Vertical profile of the tenant, set at onboarding (later task).
       // STRING (not ENUM) so the vocabulary can grow without a type

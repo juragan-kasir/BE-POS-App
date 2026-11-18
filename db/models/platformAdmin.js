@@ -2,9 +2,10 @@
 
 // Owner/tenant hierarchy Phase 1 (expand): platform-level administrator
 // grants. A grant points at a user (userId), never at a tenant — platform
-// admins sit above the tenant hierarchy. Unique per user; REVOKED grants
-// remain as paranoid tombstones so grant/revoke history is auditable and a
-// re-grant is a new decision, not an implicit resurrection.
+// admins sit above the tenant hierarchy. Unique per user (also across
+// soft-deleted rows), so grant/revoke is a STATUS change (ACTIVE <-> REVOKED)
+// on the one row, audited in the same transaction — never destroy(): a
+// soft-deleted row would block the re-grant through uq_platform_admin_user.
 const PLATFORM_ADMIN_STATUS = Object.freeze(['ACTIVE', 'REVOKED'])
 
 module.exports = (sequelize, DataTypes) => {
