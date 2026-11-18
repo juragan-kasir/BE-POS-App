@@ -1,4 +1,14 @@
 'use strict'
+
+// Public view of laundry settings: never expose the owner-PIN hash (a short
+// numeric PIN behind bcrypt is brute-forceable offline). Kept local to the
+// model so models do not depend on the service layer.
+const publicLaundrySettingsView = (value) => {
+  if (!value || typeof value !== 'object') return value ?? null
+  // eslint-disable-next-line no-unused-vars
+  const { ownerPinHash, ownerPin, hasOwnerPin, ...rest } = value
+  return { ...rest, hasOwnerPin: Boolean(ownerPinHash) }
+}
 module.exports = (sequelize, DataTypes) => {
   const Location = sequelize.define(
     'location',
@@ -138,9 +148,17 @@ module.exports = (sequelize, DataTypes) => {
         defaultValue: 'fnb'
       },
       // Laundry-only outlet settings. Null for fnb/retail outlets.
+      // The getter is the PUBLIC view (no ownerPinHash, `hasOwnerPin` derived
+      // from it) so every serialization — res.json(instance), get({plain}),
+      // nested includes in other controllers — is safe by default. Code that
+      // needs the stored hash (owner-PIN approval, PIN-preserving update) reads
+      // getDataValue('laundrySettings') explicitly.
       laundrySettings: {
         type: DataTypes.JSONB,
-        allowNull: true
+        allowNull: true,
+        get() {
+          return publicLaundrySettingsView(this.getDataValue('laundrySettings'))
+        }
       }
     },
     {

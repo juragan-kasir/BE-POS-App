@@ -54,6 +54,10 @@ const BASE_PROJECTION_KEYS = [
   'longitude',
   'mainBranch',
   'dailyTarget',
+  // Shared-domain fields (2026-11-14). laundrySettings is the public view
+  // (no ownerPinHash) — see db/models/location.js.
+  'businessType',
+  'laundrySettings',
   'createdAt',
   'updatedAt',
   'createdBy',

@@ -617,7 +617,7 @@ exports.cancelOrder = async (req, res) => {
       const needsApproval = !['RECEIVED'].includes(laundry.processStatus)
       if (needsApproval) {
         const outlet = await Location.findByPk(scope.store, { transaction: t })
-        const hash = outlet?.laundrySettings?.ownerPinHash
+        const hash = outlet?.getDataValue('laundrySettings')?.ownerPinHash
         if (!hash) refuse(422, 'OWNER_PIN_NOT_SET', 'Owner PIN is not configured for this outlet')
         const ok = await bcrypt.compare(String(approverPin || ''), hash)
         if (!ok) refuse(403, 'INVALID_OWNER_PIN', 'Invalid owner PIN')

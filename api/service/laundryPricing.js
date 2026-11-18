@@ -311,7 +311,9 @@ const manualDiscountCap = (settings, subtotal) => {
 
 const publicLaundrySettings = (value) => {
   if (!value || typeof value !== 'object') return value ?? null
-  const { ownerPinHash, ownerPin, ...rest } = value
+  // A stored `hasOwnerPin` is never trusted: it is always derived from the hash.
+  // eslint-disable-next-line no-unused-vars
+  const { ownerPinHash, ownerPin, hasOwnerPin, ...rest } = value
   return { ...rest, hasOwnerPin: Boolean(ownerPinHash) }
 }
 
