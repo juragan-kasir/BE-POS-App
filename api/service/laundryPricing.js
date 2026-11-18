@@ -117,7 +117,7 @@ const surchargeFor = (subtotal, turnaround) => {
 const addHours = (date, hours) =>
   new Date(new Date(date).getTime() + (Number(hours) || 0) * 36e5)
 
-const { DEFAULT_TIMEZONE, isValidTimezone, getTimezoneOffsetMs, getStoreLocalDate } = require('../../utils/businessDate')
+const { DEFAULT_TIMEZONE, isValidTimezone, getTimezoneOffsetMs } = require('../../utils/businessDate')
 const DAY_NAMES = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday']
 const parseMinutes = (v) => {
   if (typeof v !== 'string') return null
@@ -127,7 +127,6 @@ const parseMinutes = (v) => {
   if (h<0||h>23||mm<0||mm>59) return null
   return h*60+mm
 }
-const minutesToHHMM = (mins) => `${String(Math.floor(mins/60)).padStart(2,'0')}:${String(mins%60).padStart(2,'0')}`
 const dateStringUTC = (d) => `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`
 const localToInstant = (dateStr, minutes, tz) => {
   const [y,mo,da] = dateStr.split('-').map(Number)

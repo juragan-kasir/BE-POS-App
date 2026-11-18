@@ -113,8 +113,6 @@ const productionOrderController = {
   async getById(req, res) {
     try {
       const { id } = req.params
-      const store = resolveStoreId(req)
-      const userRole = req.user?.roleType
 
       const where = { id }
       Object.assign(where, await tenantStoreWhere(req))
@@ -245,8 +243,6 @@ const productionOrderController = {
   async update(req, res) {
     try {
       const { id } = req.params
-      const store = resolveStoreId(req)
-      const userRole = req.user?.roleType
       const { productItemId, plannedQty, scheduledDate, notes, status } =
         req.body
 
@@ -301,8 +297,6 @@ const productionOrderController = {
   async delete(req, res) {
     try {
       const { id } = req.params
-      const store = resolveStoreId(req)
-      const userRole = req.user?.roleType
 
       const where = { id }
       Object.assign(where, await tenantStoreWhere(req))
@@ -345,8 +339,6 @@ const productionOrderController = {
     try {
       const { id } = req.params
       const { status } = req.body
-      const store = resolveStoreId(req)
-      const userRole = req.user?.roleType
 
       const validStatuses = [
         'draft',
@@ -468,8 +460,6 @@ const productionOrderController = {
   async startProduction(req, res) {
     try {
       const { id } = req.params
-      const store = resolveStoreId(req)
-      const userRole = req.user?.roleType
 
       const where = { id }
       Object.assign(where, await tenantStoreWhere(req))
@@ -674,8 +664,6 @@ const productionOrderController = {
     try {
       const { id } = req.params
       const { producedQty } = req.body
-      const store = resolveStoreId(req)
-      const userRole = req.user?.roleType
 
       const where = { id }
       Object.assign(where, await tenantStoreWhere(req))

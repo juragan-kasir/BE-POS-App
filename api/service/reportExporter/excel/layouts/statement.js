@@ -111,9 +111,14 @@ const buildExcelWorkbook = async (spec) => {
   // Right cell: value
   saldoRow.getCell(2).value = formatValue(saldo, nominalCol.type)
   saldoRow.getCell(2).font = { bold: true, size: 12 }
-  // Fill background with accent
+  // Fill background with the report accent; white text stays readable on it
+  // (same pairing as the section header above). `argb` used to be an
+  // undefined identifier here, so every Cash Flow Excel export threw.
+  const argb = style.accentToArgb(spec.accentColor || '#0f172a')
   saldoRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb } }
   saldoRow.getCell(2).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb } }
+  saldoRow.getCell(1).font = { bold: true, size: 12, color: { argb: 'FFFFFFFF' } }
+  saldoRow.getCell(2).font = { bold: true, size: 12, color: { argb: 'FFFFFFFF' } }
   // Add top border
   saldoRow.getCell(1).border = { top: { style: 'medium', color: { argb: 'FF0F172A' } } }
   saldoRow.getCell(2).border = { top: { style: 'medium', color: { argb: 'FF0F172A' } } }

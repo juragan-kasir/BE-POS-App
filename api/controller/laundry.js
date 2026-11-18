@@ -1,15 +1,15 @@
 'use strict'
 
 const db = require('../../db/models')
-const { resolveCounterStore, loadAndPriceOrderItems, createOrderItems, sessionCashier, generateOrderNumber } = require('./order')
-const { normalizeServiceConfig, validateServiceConfig, lineTotal, surchargeFor, addHours, dueAtFrom, normalizeLaundrySettings, manualDiscountCap } = require('../service/laundryPricing')
+const { resolveCounterStore, createOrderItems, sessionCashier, generateOrderNumber } = require('./order')
+const { normalizeServiceConfig, validateServiceConfig, lineTotal, surchargeFor, dueAtFrom, normalizeLaundrySettings, manualDiscountCap } = require('../service/laundryPricing')
 const bcrypt = require('bcrypt')
 const { normalizePaymentMethod, requireTenderReference } = require('../service/canonicalPayment')
 const { resolvePaymentMethodName } = require('../service/paymentTypeName')
 const { resolveAttributedRegister } = require('../service/settlementAttribution')
 const { validateCashTender } = require('./order')
 const { assertSettlementReferenceUnused } = require('../service/settlementReference')
-const { computeOrderFinancials, FINANCIAL_STATES } = require('../service/orderFinancials')
+const { computeOrderFinancials } = require('../service/orderFinancials')
 const { withDeadlockRetry } = require('../../utils/deadlockRetry')
 const orderController = require('./order')
 const { evaluateLaundryPromos } = require('../service/laundryPromo')
@@ -42,7 +42,7 @@ const ensureLaundryStore = async (storeId, transaction) => {
 
 const normalizeBool = (v) => v === true || v === 'true'
 
-const quoteLines = async (items, store) => {
+const quoteLines = async (items, _store) => {
   const ids = [...new Set(items.map((i) => Number(i.product)).filter(Boolean))]
   const products = await Product.findAll({ where: { id: ids } })
   const byId = new Map(products.map((p) => [p.id, p]))
@@ -748,7 +748,6 @@ exports.getReport = async (req, res) => {
   try {
     const scope = resolveCounterStore(req)
     if (!scope.store) return res.status(scope.status).json(scope.body)
-    const { Op } = require('sequelize')
     const { getStoreDayBounds, getStoreLocalDate, DEFAULT_TIMEZONE } = require('../../utils/businessDate')
     const outlet = await Location.findByPk(scope.store)
     const tz = outlet?.timezone || DEFAULT_TIMEZONE
