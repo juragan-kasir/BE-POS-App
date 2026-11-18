@@ -3105,6 +3105,11 @@ const collectOrderPaymentInTransaction = async (orderId, store, body, user, t) =
     err.code = 'NOT_FOUND'
     throw err
   }
+  // Read BEFORE order.update below rewrites it: whether this collection is the
+  // one that completes the sale (BE audit 2026-11-18 — the check used to run
+  // after the update, so it was always false and a collected sale never
+  // deducted stock or posted its sale/COGS journals).
+  const wasPaid = order.paymentStatus === 'paid'
   const fin = await computeOrderFinancials(order, t)
   if (fin.O <= 0) {
     const err = new Error('Order is already paid')
@@ -3144,7 +3149,6 @@ const collectOrderPaymentInTransaction = async (orderId, store, body, user, t) =
     idempotencyKey
   })
   const after = await computeOrderFinancials(order, t)
-  const nextStatus = after.state === FINANCIAL_STATES.PAID ? 'paid' : order.status
   await order.update({
     paymentStatus: legacyPaymentStatusFor(after.state),
     ...(after.state === FINANCIAL_STATES.PAID ? { status: 'paid' } : {}),
@@ -3153,7 +3157,7 @@ const collectOrderPaymentInTransaction = async (orderId, store, body, user, t) =
     cashRegisterId: order.cashRegisterId || register.id
   }, { transaction: t })
   let accountingJobs = null
-  if (after.state === FINANCIAL_STATES.PAID && order.paymentStatus !== 'paid') {
+  if (after.state === FINANCIAL_STATES.PAID && !wasPaid) {
     await deductStockForPaidOrder(order.id, store || order.store, order.orderNumber, user?.id, t)
     accountingJobs = await enqueueOrderAccountingJobs(order, store || order.store, order.orderNumber, {
       subTotal: order.subTotal,
@@ -3161,7 +3165,7 @@ const collectOrderPaymentInTransaction = async (orderId, store, body, user, t) =
       taxAmount: order.taxAmount,
       serviceChargeAmount: order.serviceChargeAmount,
       totalPrice: order.totalPrice
-    }, 'counter', user?.id, t)
+    }, method, user?.id, t)
   }
   return { order, fin: after, accountingJobs }
 }
@@ -3192,6 +3196,186 @@ exports.validateCashTender = validateCashTender
 // outbox a second, parallel way.
 exports.enqueueOrderAccountingJobs = enqueueOrderAccountingJobs
 exports.attemptOrderAccountingEntries = attemptOrderAccountingEntries
+
+// Restores the stock a paid sale took, driven by the immutable stock_history
+// 'sale' snapshot (F-REV1). Shared by the POS void/cancel path and the laundry
+// cancellation of an already-recognized sale (BE audit 2026-11-18).
+const reverseSaleStockForOrder = async ({ id, effectiveStore, order, changedBy }, t) => {
+  // F-REV1: reversal is driven by the immutable stock_history 'sale'
+  // snapshot written when the order was paid — NOT by re-reading the
+  // bundle config and NOT by the order_item rows (a bundle's order_item
+  // carries only its first component's product). A bundle sale deducts
+  // FG stock for EVERY component (see the flatItems expansion in
+  // deductStockForPaidOrder / deductStockForOrder), so the reversal
+  // restores exactly the products and quantities the 'sale' rows
+  // recorded — even if the bundle configuration has since changed.
+  const saleHistory = await db.stock_history.findAll({
+    where: { referenceType: 'sale', referenceId: id },
+    transaction: t
+  })
+
+  // Finished-good restore: every product the sale dipped goes back by
+  // the exact recorded quantity. Ingredient rows (ingredient set) are
+  // the BOM consumption trail, handled separately below — a
+  // make_to_order product has no FG 'sale' row, so it never receives a
+  // FG restore here.
+  const fgRestore = new Map()
+  for (const row of saleHistory) {
+    if (row.ingredient != null) continue
+    const productId = Number(row.product)
+    if (!productId) continue
+    const change = Number(row.quantityChange) || 0
+    if (!(change < 0)) continue
+    fgRestore.set(productId, (fgRestore.get(productId) || 0) - change)
+  }
+
+  // best_selling was incremented for every flat sale product — including
+  // single make_to_order lines, which never touch FG stock and so have
+  // no FG 'sale' row. Their increment is recovered from the immutable
+  // non-bundle order lines (a non-bundle line's product/quantity is
+  // exact), so their best_selling is decremented too. Bundle-owned
+  // make_to_order components have no immutable product-level quantity
+  // anywhere (their order_item line is the bundle's first component
+  // only) — same pre-existing attribution limit, out of F-REV1 scope.
+  const bsDecrement = new Map(fgRestore)
+  const nonBundleLines = await OrderItem.findAll({
+    where: { order: id, bundleId: null },
+    transaction: t
+  })
+  for (const line of nonBundleLines) {
+    const productId = Number(line.product)
+    if (!productId) continue
+    if (fgRestore.has(productId)) continue
+    const qty = roundQty(line.quantity) || 0
+    if (!(qty > 0)) continue
+    bsDecrement.set(productId, (bsDecrement.get(productId) || 0) + qty)
+  }
+
+  const productIds = [
+    ...new Set([...fgRestore.keys(), ...bsDecrement.keys()])
+  ].sort((a, b) => a - b)
+  const products = productIds.length
+    ? await Product.findAll({
+        where: { id: productIds },
+        transaction: t,
+        lock: t.LOCK.UPDATE
+      })
+    : []
+  const productById = new Map(products.map((p) => [p.id, p]))
+
+  for (const [productId, restoreQty] of fgRestore) {
+    const product = productById.get(productId)
+    if (!product) continue
+    const oldStock = Number(product.stock) || 0
+    const newStock = roundQty(oldStock + restoreQty)
+    await product.update(
+      { stock: db.sequelize.literal(`stock + ${restoreQty}`) },
+      { transaction: t }
+    )
+
+    // Same seed-at-baseline convention as the sale path above: a
+    // missing shadow row starts from the just-locked global stock so
+    // the restore lands the per-store stock on the same value.
+    await db.sequelize.query(
+      `INSERT INTO product_store_stock (product, store, stock, "createdAt", "updatedAt")
+       VALUES ($1, $2, $3, NOW(), NOW())
+       ON CONFLICT (product, store) DO NOTHING`,
+      { bind: [productId, effectiveStore, oldStock], transaction: t }
+    )
+    await db.product_store_stock.update(
+      { stock: db.sequelize.literal(`stock + ${restoreQty}`) },
+      { where: { product: productId, store: effectiveStore }, transaction: t }
+    )
+
+    await db.stock_history.create(
+      {
+        product: productId,
+        store: effectiveStore,
+        referenceType: 'sale_reversal',
+        referenceId: order.id,
+        quantityBefore: oldStock,
+        quantityChange: restoreQty,
+        quantityAfter: newStock,
+        unit: product.unit || 'pcs',
+        notes: `Pembatalan: ${order.orderNumber}`,
+        createdBy: changedBy
+      },
+      { transaction: t }
+    )
+  }
+
+  // best_selling: undo exactly what the sale incremented for the same
+  // (productId, store) rows (the table's unique key), floored at zero.
+  for (const [productId, decQty] of bsDecrement) {
+    const product = productById.get(productId)
+    if (!product) continue
+    const findBs = await db.best_selling.findOne({
+      where: { productId, store: effectiveStore },
+      transaction: t
+    })
+    if (findBs) {
+      await db.best_selling.update(
+        {
+          totalSelling: Math.max(
+            0,
+            Number(findBs.totalSelling) - decQty
+          )
+        },
+        {
+          where: { productId, store: effectiveStore },
+          transaction: t
+        }
+      )
+    }
+  }
+
+  // F7: ingredient reversal — reverses the EXACT immutable deduction
+  // snapshot recorded in stock_history at sale time, never re-reads
+  // bom_header/bom_line (the production-order cancellation precedent
+  // this deliberately avoids repeating: re-exploding the *current*
+  // BOM would restore the wrong quantity if the recipe changed after
+  // the sale). Grouped by (product, ingredient) exactly as it was
+  // originally recorded, so a future partial-return feature retains
+  // the same attribution this reversal already relies on.
+  const saleIngredientHistory = await db.stock_history.findAll({
+    where: {
+      referenceType: 'sale',
+      referenceId: order.id,
+      ingredient: { [Op.ne]: null }
+    },
+    transaction: t
+  })
+  if (saleIngredientHistory.length) {
+    const byProductIngredient = new Map()
+    for (const row of saleIngredientHistory) {
+      const key = `${row.product}:${row.ingredient}`
+      const existing = byProductIngredient.get(key)
+      if (existing) {
+        existing.qty += Number(row.quantityChange)
+      } else {
+        byProductIngredient.set(key, {
+          productId: row.product,
+          ingredientId: row.ingredient,
+          ingredientName: row.ingredientName,
+          qty: Number(row.quantityChange)
+        })
+      }
+    }
+    await adjustIngredientStockBatch({
+      items: Array.from(byProductIngredient.values()).map((r) => ({
+        ...r,
+        qty: -r.qty // original rows are negative (deduction); reversal restores the exact inverse
+      })),
+      store: effectiveStore,
+      referenceType: 'sale_reversal',
+      referenceId: order.id,
+      notes: `Pembatalan: ${order.orderNumber}`,
+      createdBy: changedBy,
+      transaction: t
+    })
+  }
+}
+exports.reverseSaleStockForOrder = reverseSaleStockForOrder
 
 exports.updateOrderStatus = async (req, res) => {
   const { id, status, changedBy, changedByName, notes, reason } = req.body
@@ -3261,181 +3445,8 @@ exports.updateOrderStatus = async (req, res) => {
       deductStockForPaidOrder(id, effectiveStore, order.orderNumber, changedBy, t)
 
     // Restore stock when an order is cancelled/voided.
-    const reverseOrderStock = async (t) => {
-      // F-REV1: reversal is driven by the immutable stock_history 'sale'
-      // snapshot written when the order was paid — NOT by re-reading the
-      // bundle config and NOT by the order_item rows (a bundle's order_item
-      // carries only its first component's product). A bundle sale deducts
-      // FG stock for EVERY component (see the flatItems expansion in
-      // deductStockForPaidOrder / deductStockForOrder), so the reversal
-      // restores exactly the products and quantities the 'sale' rows
-      // recorded — even if the bundle configuration has since changed.
-      const saleHistory = await db.stock_history.findAll({
-        where: { referenceType: 'sale', referenceId: id },
-        transaction: t
-      })
-
-      // Finished-good restore: every product the sale dipped goes back by
-      // the exact recorded quantity. Ingredient rows (ingredient set) are
-      // the BOM consumption trail, handled separately below — a
-      // make_to_order product has no FG 'sale' row, so it never receives a
-      // FG restore here.
-      const fgRestore = new Map()
-      for (const row of saleHistory) {
-        if (row.ingredient != null) continue
-        const productId = Number(row.product)
-        if (!productId) continue
-        const change = Number(row.quantityChange) || 0
-        if (!(change < 0)) continue
-        fgRestore.set(productId, (fgRestore.get(productId) || 0) - change)
-      }
-
-      // best_selling was incremented for every flat sale product — including
-      // single make_to_order lines, which never touch FG stock and so have
-      // no FG 'sale' row. Their increment is recovered from the immutable
-      // non-bundle order lines (a non-bundle line's product/quantity is
-      // exact), so their best_selling is decremented too. Bundle-owned
-      // make_to_order components have no immutable product-level quantity
-      // anywhere (their order_item line is the bundle's first component
-      // only) — same pre-existing attribution limit, out of F-REV1 scope.
-      const bsDecrement = new Map(fgRestore)
-      const nonBundleLines = await OrderItem.findAll({
-        where: { order: id, bundleId: null },
-        transaction: t
-      })
-      for (const line of nonBundleLines) {
-        const productId = Number(line.product)
-        if (!productId) continue
-        if (fgRestore.has(productId)) continue
-        const qty = roundQty(line.quantity) || 0
-        if (!(qty > 0)) continue
-        bsDecrement.set(productId, (bsDecrement.get(productId) || 0) + qty)
-      }
-
-      const productIds = [
-        ...new Set([...fgRestore.keys(), ...bsDecrement.keys()])
-      ].sort((a, b) => a - b)
-      const products = productIds.length
-        ? await Product.findAll({
-            where: { id: productIds },
-            transaction: t,
-            lock: t.LOCK.UPDATE
-          })
-        : []
-      const productById = new Map(products.map((p) => [p.id, p]))
-
-      for (const [productId, restoreQty] of fgRestore) {
-        const product = productById.get(productId)
-        if (!product) continue
-        const oldStock = Number(product.stock) || 0
-        const newStock = roundQty(oldStock + restoreQty)
-        await product.update(
-          { stock: db.sequelize.literal(`stock + ${restoreQty}`) },
-          { transaction: t }
-        )
-
-        // Same seed-at-baseline convention as the sale path above: a
-        // missing shadow row starts from the just-locked global stock so
-        // the restore lands the per-store stock on the same value.
-        await db.sequelize.query(
-          `INSERT INTO product_store_stock (product, store, stock, "createdAt", "updatedAt")
-           VALUES ($1, $2, $3, NOW(), NOW())
-           ON CONFLICT (product, store) DO NOTHING`,
-          { bind: [productId, effectiveStore, oldStock], transaction: t }
-        )
-        await db.product_store_stock.update(
-          { stock: db.sequelize.literal(`stock + ${restoreQty}`) },
-          { where: { product: productId, store: effectiveStore }, transaction: t }
-        )
-
-        await db.stock_history.create(
-          {
-            product: productId,
-            store: effectiveStore,
-            referenceType: 'sale_reversal',
-            referenceId: order.id,
-            quantityBefore: oldStock,
-            quantityChange: restoreQty,
-            quantityAfter: newStock,
-            unit: product.unit || 'pcs',
-            notes: `Pembatalan: ${order.orderNumber}`,
-            createdBy: changedBy
-          },
-          { transaction: t }
-        )
-      }
-
-      // best_selling: undo exactly what the sale incremented for the same
-      // (productId, store) rows (the table's unique key), floored at zero.
-      for (const [productId, decQty] of bsDecrement) {
-        const product = productById.get(productId)
-        if (!product) continue
-        const findBs = await db.best_selling.findOne({
-          where: { productId, store: effectiveStore },
-          transaction: t
-        })
-        if (findBs) {
-          await db.best_selling.update(
-            {
-              totalSelling: Math.max(
-                0,
-                Number(findBs.totalSelling) - decQty
-              )
-            },
-            {
-              where: { productId, store: effectiveStore },
-              transaction: t
-            }
-          )
-        }
-      }
-
-      // F7: ingredient reversal — reverses the EXACT immutable deduction
-      // snapshot recorded in stock_history at sale time, never re-reads
-      // bom_header/bom_line (the production-order cancellation precedent
-      // this deliberately avoids repeating: re-exploding the *current*
-      // BOM would restore the wrong quantity if the recipe changed after
-      // the sale). Grouped by (product, ingredient) exactly as it was
-      // originally recorded, so a future partial-return feature retains
-      // the same attribution this reversal already relies on.
-      const saleIngredientHistory = await db.stock_history.findAll({
-        where: {
-          referenceType: 'sale',
-          referenceId: order.id,
-          ingredient: { [Op.ne]: null }
-        },
-        transaction: t
-      })
-      if (saleIngredientHistory.length) {
-        const byProductIngredient = new Map()
-        for (const row of saleIngredientHistory) {
-          const key = `${row.product}:${row.ingredient}`
-          const existing = byProductIngredient.get(key)
-          if (existing) {
-            existing.qty += Number(row.quantityChange)
-          } else {
-            byProductIngredient.set(key, {
-              productId: row.product,
-              ingredientId: row.ingredient,
-              ingredientName: row.ingredientName,
-              qty: Number(row.quantityChange)
-            })
-          }
-        }
-        await adjustIngredientStockBatch({
-          items: Array.from(byProductIngredient.values()).map((r) => ({
-            ...r,
-            qty: -r.qty // original rows are negative (deduction); reversal restores the exact inverse
-          })),
-          store: effectiveStore,
-          referenceType: 'sale_reversal',
-          referenceId: order.id,
-          notes: `Pembatalan: ${order.orderNumber}`,
-          createdBy: changedBy,
-          transaction: t
-        })
-      }
-    }
+    const reverseOrderStock = (t) =>
+      reverseSaleStockForOrder({ id, effectiveStore, order, changedBy }, t)
 
     // Perform the whole status transition atomically.
     let orderJournalJob, cogsJournalJob, reversalJob

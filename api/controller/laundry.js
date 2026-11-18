@@ -13,6 +13,7 @@ const { computeOrderFinancials, FINANCIAL_STATES } = require('../service/orderFi
 const { withDeadlockRetry } = require('../../utils/deadlockRetry')
 const orderController = require('./order')
 const { evaluateLaundryPromos } = require('../service/laundryPromo')
+const { enqueueAccountingJob, attemptJob, recordImmediateAttempt } = require('../service/accountingOutboxService')
 
 const LaundryTurnaround = db.laundry_turnaround
 const LaundryOrder = db.laundry_order
@@ -288,7 +289,9 @@ exports.createOrder = async (req, res) => {
     const dueAt = isSelf ? receivedAt : dueAtFrom(receivedAt, turnaround?.durationHours || 72, outlet?.openingHours, outlet?.timezone)
     const customer = body.customerId ? await Member.findByPk(body.customerId) : null
 
+    let accountingJobs = null
     const order = await withDeadlockRetry(() => db.sequelize.transaction(async (t) => {
+      accountingJobs = null
       const created = await Order.create({
         orderNumber: generateOrderNumber(),
         store: scope.store,
@@ -391,8 +394,29 @@ exports.createOrder = async (req, res) => {
         created.paymentMethodName = paymentMethodName
         await created.save({ transaction: t })
       }
+      // Paid at intake (full payment, self-service): the sale is recognized
+      // now, exactly like a POS checkout — stock (retail add-ons, recipe
+      // ingredients) and the sale + COGS journals in this transaction. A DP
+      // order is recognized when /order/:id/payments completes it.
+      if (created.status === 'paid') {
+        await orderController.deductStockForPaidOrder(created.id, scope.store, created.orderNumber, req.user?.id, t)
+        accountingJobs = await orderController.enqueueOrderAccountingJobs(created, scope.store, created.orderNumber, {
+          subTotal: created.subTotal,
+          discountAmount: created.discountAmount,
+          taxAmount: created.taxAmount,
+          serviceChargeAmount: created.serviceChargeAmount,
+          totalPrice: created.totalPrice
+        }, created.paymentMethod || null, req.user?.id, t)
+      }
       return created
     }))
+    // Committed. The immediate journal attempt never turns the sale into a
+    // failure response; an unposted journal stays pending for the drain.
+    if (accountingJobs) {
+      await orderController.attemptOrderAccountingEntries(accountingJobs).catch((err) =>
+        console.error('[laundry] immediate journal attempt failed:', err?.message || err)
+      )
+    }
     const data = await getFullLaundryOrder(order.id, scope.store)
     return res.status(201).json({ success: true, data })
   } catch (e) {
@@ -595,9 +619,14 @@ exports.cancelOrder = async (req, res) => {
     const scope = resolveCounterStore(req)
     if (!scope.store) return res.status(scope.status).json(scope.body)
     const { reason, refundAmount = 0, refundMethod, referenceNumber, approverPin, idempotencyKey } = req.body
+    let reversalJob = null
     const result = await withDeadlockRetry(() => db.sequelize.transaction(async (t) => {
+      reversalJob = null
       const order = await Order.findOne({ where: { id: req.params.id, store: scope.store }, transaction: t, lock: t.LOCK.UPDATE })
       if (!order) refuse(404, 'NOT_FOUND', 'Order not found')
+      // A paid order is a recognized sale (stock + journals posted when it
+      // became paid); cancelling it undoes both, like a POS void.
+      const wasRecognizedSale = order.status === 'paid'
       const laundry = await LaundryOrder.findOne({ where: { orderId: order.id, store: scope.store }, transaction: t, lock: t.LOCK.UPDATE })
       if (!laundry) refuse(404, 'NOT_FOUND', 'Order not found')
       if (laundry.processStatus === 'CANCELLED') {
@@ -664,6 +693,26 @@ exports.cancelOrder = async (req, res) => {
         modifiedBy: req.user?.id
       }, { transaction: t })
       await writeHistory(laundry.id, from, 'CANCELLED', req.user?.id, reason, t)
+      if (wasRecognizedSale) {
+        await orderController.reverseSaleStockForOrder(
+          { id: order.id, effectiveStore: scope.store, order, changedBy: req.user?.id || null },
+          t
+        )
+        reversalJob = await enqueueAccountingJob({
+          jobType: 'reverse_order_journals',
+          store: scope.store,
+          referenceType: 'order',
+          referenceId: order.id,
+          payload: {
+            store: scope.store,
+            orderId: order.id,
+            orderNumber: order.orderNumber,
+            date: new Date().toISOString(),
+            createdBy: req.user?.id || null
+          },
+          transaction: t
+        })
+      }
       // The sale ends here too: order.status is what F&B order lists, sales
       // reports and the financial ledger read. Left as 'paid', a cancelled +
       // refunded laundry order still counted as a sale and its paymentStatus
@@ -679,6 +728,14 @@ exports.cancelOrder = async (req, res) => {
       }, { transaction: t })
       return order
     }))
+    if (reversalJob) {
+      try {
+        const r = await attemptJob(reversalJob)
+        await recordImmediateAttempt(reversalJob, r)
+      } catch (err) {
+        console.error('[laundry] immediate journal reversal attempt failed:', err?.message || err)
+      }
+    }
     const data = await getFullLaundryOrder(result.id, scope.store)
     return res.json({ success: true, data })
   } catch (e) {

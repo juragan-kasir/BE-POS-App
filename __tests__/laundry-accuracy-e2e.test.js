@@ -123,6 +123,10 @@ const key = (p) => `lacc-${p}-${RUN}-${++seq}`
 const createOrder = (auth, store, body) =>
   request(app).post('/laundry/order').set(auth).send({ store: store.id, idempotencyKey: key('o'), pieceCount: 5, ...body })
 const quote = (auth, store, body) => request(app).post('/laundry/quote').set(auth).send({ store: store.id, ...body })
+// Accounting outbox rows of one order: [jobType, status] in creation order.
+const jobsOf = async (orderId) =>
+  (await db.accounting_outbox.findAll({ where: { referenceType: 'order', referenceId: orderId }, order: [['id', 'ASC']] }))
+    .map((j) => [j.jobType, j.status])
 const txSum = (order) => (order.transactions || []).reduce((s, t) => s + Number(t.amount), 0)
 const orderTx = (id) => db.transaction.findAll({ where: { order: id }, order: [['id', 'ASC']] })
 
@@ -298,6 +302,10 @@ describe('T1 — ramai, banyak promo', () => {
     const list = await request(app).get(`/laundry/order?store=${ctx.s1.id}`).set(ctx.a1)
     soft('3.6 tx in detail/list', 'GET detail & list carry payments', [(detail.body.data?.transactions || []).map((t) => Number(t.amount)), (list.body.data || []).find((o) => o.id === id)?.transactions?.map((t) => Number(t.amount))], [[20000, 45000], [20000, 45000]])
     soft('3.6', 'after QRIS 45000: paymentStatus / methods / amounts', [pay.status, pay.body.data?.paymentStatus, tx.map((t) => [t.typePayment, Number(t.amount)])], [200, 'paid', [['CASH', 20000], ['QRIS', 45000]]])
+    // BE audit 2026-11-18: the collection that completes the sale recognizes it
+    // (sale + COGS journals); before the fix the paid check ran after the
+    // update and no journal was ever enqueued.
+    soft('3.6 journals', 'pelunasan posts sale + COGS journals', await jobsOf(id), [['order_journal', 'posted'], ['order_cogs_journal', 'posted']])
     const over = await request(app).post(`/order/${id}/payments`).set(ctx.a1)
       .send({ store: ctx.s1.id, paymentMethod: 'CASH', amount: 1000, cashAmount: 1000, idempotencyKey: key('pay') })
     soft('3.6 overpay', 'pay on fully paid order rejected', over.status >= 400, true)
@@ -371,6 +379,13 @@ describe('T2 — kredit, laporan harian', () => {
     const d = await createOrder(ctx.a2, ctx.s2, { items: [{ product: ctx.bc2.id, quantity: 2 }], turnaroundId: ctx.reg2.id, paymentAmount: 50000, paymentMethod: 'CASH', cashAmount: 50000, changeAmount: 0 })
     await request(app).post(`/laundry/order/${d.body.data.id}/cancel`).set(ctx.a2).send({ store: ctx.s2.id, reason: 'batal', refundAmount: 50000, refundMethod: 'CASH', idempotencyKey: key('c') })
     soft('T2 setup', 'orders created', [a.status, b.status, c.status, d.status], [201, 201, 201, 201])
+    // Paid at intake → recognized now; a DP order is not yet a sale; a paid
+    // sale that is cancelled gets its journals reversed (BE audit 2026-11-18).
+    soft('T2 journals self', 'self-service paid at intake posts sale + COGS', await jobsOf(c.body.data.id), [['order_journal', 'posted'], ['order_cogs_journal', 'posted']])
+    soft('T2 journals DP', 'DP order posts nothing yet', await jobsOf(b.body.data.id), [])
+    soft('T2 journals cancel', 'paid then cancelled: posted then reversed', await jobsOf(d.body.data.id), [['order_journal', 'posted'], ['order_cogs_journal', 'posted'], ['reverse_order_journals', 'posted']])
+    const dReversal = await db.journal_entry.findOne({ where: { sourceType: 'order_reversal', referenceId: d.body.data.id } })
+    soft('T2 journals cancel', 'reversal journal entry exists', dReversal != null, true)
 
     const aTotal = Number(a.body.data.totalPrice)
     soft('T2 a', '4.7 kg billed 5.0 kg → 35000', aTotal, 35000)
