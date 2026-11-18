@@ -217,13 +217,16 @@ describe('setProductStock', () => {
       nameProduct: 'SM_OPNAME_RACE', category: category.id, price: 1000, stock: 50
     })
 
-    // "Counted 45 units" — decided based on a read taken before this
-    // commits, while a concurrent sale of 5 units is also in flight.
+    // "Counted 44 units" — decided based on a read taken before this
+    // commits, while a concurrent sale of 5 units is also in flight. (44,
+    // not 45: with 45 the sale-first ordering leaves a zero delta, so the
+    // count writes no history row and the assertions below became
+    // order-dependent — the suite failed intermittently in full runs.)
     await Promise.all([
       db.sequelize.transaction((t) =>
         setProductStock({
           productId: product.id,
-          newQty: 45,
+          newQty: 44,
           referenceType: 'adjustment',
           transaction: t
         })
@@ -241,11 +244,11 @@ describe('setProductStock', () => {
     const after = await db.product.findByPk(product.id)
     // Whichever ran second sees the other's committed change under its
     // lock and applies its own delta on top of it — the two operations
-    // together represent "counted 45, then a 5-unit sale happened" (40)
-    // or "sale of 5 from 50 leaves 45, then the count says 45" (45),
-    // depending on ordering — but NEVER back to a stale 45 or 50 that
-    // ignores one side entirely, and never negative.
-    expect([40, 45]).toContain(Number(after.stock));
+    // together represent "counted 44, then a 5-unit sale happened" (39)
+    // or "sale of 5 from 50 leaves 45, then the count says 44" (44),
+    // depending on ordering — but NEVER a stale value that ignores one
+    // side entirely, and never negative.
+    expect([39, 44]).toContain(Number(after.stock));
     expect(Number(after.stock)).toBeGreaterThanOrEqual(0)
 
     const history = await db.stock_history.findAll({
@@ -258,5 +261,48 @@ describe('setProductStock', () => {
     // its own lock, not a stale pre-transaction snapshot.
     expect(Number(history[1].quantityBefore)).toBe(Number(history[0].quantityAfter))
     expect(Number(history[1].quantityAfter)).toBe(Number(after.stock))
+  })
+})
+
+describe('setProductStock across multiple outlets', () => {
+  test('counts one outlet against its own stock and moves the aggregate by that delta', async () => {
+    const storeB = await db.location.create({ name: 'STOCKMUT_STORE_B', status: 'active' })
+    const product = await db.product.create({
+      nameProduct: 'SM_MULTI_OUTLET', category: category.id, price: 1000, stock: 20
+    })
+    await db.product_store_stock.bulkCreate([
+      { product: product.id, store: location.id, stock: 10 },
+      { product: product.id, store: storeB.id, stock: 10 }
+    ])
+
+    // Counted 5.5 at outlet A. Regression: the old implementation compared
+    // 5.5 against the aggregate (20) and applied a -14.5 delta to outlet A,
+    // flooring it to 0 while leaving outlet B untouched.
+    await db.sequelize.transaction((t) =>
+      setProductStock({
+        productId: product.id,
+        store: location.id,
+        newQty: 5.5,
+        referenceType: 'opname',
+        transaction: t
+      })
+    )
+
+    const outletA = await db.product_store_stock.findOne({
+      where: { product: product.id, store: location.id }
+    })
+    const outletB = await db.product_store_stock.findOne({
+      where: { product: product.id, store: storeB.id }
+    })
+    const aggregate = await db.product.findByPk(product.id)
+
+    expect(Number(outletA.stock)).toBeCloseTo(5.5, 4)
+    expect(Number(outletB.stock)).toBe(10)
+    expect(Number(aggregate.stock)).toBeCloseTo(15.5, 4)
+
+    await db.stock_history.destroy({ where: { product: product.id }, force: true })
+    await db.product_store_stock.destroy({ where: { product: product.id }, force: true })
+    await db.product.destroy({ where: { id: product.id }, force: true })
+    await db.location.destroy({ where: { id: storeB.id }, force: true })
   })
 })

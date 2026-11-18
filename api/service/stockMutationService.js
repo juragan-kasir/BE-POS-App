@@ -135,6 +135,14 @@ async function adjustProductStock({
  * atomic decrement landing between the physical count and this commit is
  * added on top of the count instead of being silently overwritten by it.
  *
+ * When `store` is provided, the absolute count applies to THAT outlet.
+ * `product.stock` is the aggregate across outlets, so the aggregate must
+ * move by (counted − this outlet's current stock), never be overwritten
+ * with the counted value. Computing the delta against the aggregate was
+ * the multi-outlet stock-opname bug: counting one outlet down by 4 could
+ * subtract the entire aggregate (e.g. 9.5 − (19.5 − 5.5) = −4.5 → floored
+ * to 0) and zero the outlet while the other outlet kept its stock.
+ *
  * @param {object} params - same as adjustProductStock, minus deltaQty, plus:
  * @param {number} params.newQty - the absolute target stock value
  */
@@ -157,7 +165,19 @@ async function setProductStock({
   })
   if (!product) return null
 
-  const quantityBefore = Number(product.stock) || 0
+  let quantityBefore = Number(product.stock) || 0
+  if (store) {
+    // Count against the outlet's own shadow row. If the pair has never
+    // been stocked, adjustProductStock seeds that row with the aggregate
+    // baseline, so the aggregate itself is the correct pre-count value.
+    const storeRow = await db.product_store_stock.findOne({
+      where: { product: productId, store },
+      transaction,
+      lock: transaction.LOCK.UPDATE
+    })
+    if (storeRow) quantityBefore = Number(storeRow.stock) || 0
+  }
+
   // Phase 34: no Math.trunc — a stock-opname physical count for a
   // fractional-unit product (kg, gram, liter, ...) is a real decimal, and
   // product.stock is DECIMAL(10,4); matches the ingredient-side sibling
