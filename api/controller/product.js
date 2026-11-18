@@ -127,6 +127,53 @@ const hasCategoryStoreTable = async () => {
   return _categoryStoreExists
 }
 
+// W3-1: the tenant a set of outlets belongs to. null for no outlets or
+// tenant-less outlets. Cross-tenant sets were already refused by
+// assertProductStoresAssignable; refused here too (defense in depth).
+const resolveStoresTenant = async (storeIds, transaction) => {
+  const ids = (storeIds || []).map(Number).filter((n) => Number.isInteger(n) && n > 0)
+  if (ids.length === 0) return null
+  const result = await db.product_store.assertTenantConsistentAssignment({
+    product: null,
+    storeIds: ids,
+    options: { transaction }
+  })
+  if (!result.ok) {
+    const e = new Error(result.message)
+    e.statusCode = 400
+    e.code = result.code
+    throw e
+  }
+  return result.tenantId ?? null
+}
+
+// Import SKU lookups for a scoped caller: the tenants of its outlets (plus the
+// tenant-less rows when one of its outlets has no tenant). {} = global caller.
+const importSkuTenantWhere = async (scopeIds) => {
+  if (scopeIds === null) return {}
+  const outlets = await db.location.findAll({
+    where: { id: scopeIds.map(Number) },
+    attributes: ['tenantId'],
+    paranoid: false
+  })
+  const tenantIds = [...new Set(outlets.map((l) => l.tenantId).filter((v) => v != null))]
+  const anyTenantless = outlets.some((l) => l.tenantId == null)
+  const clauses = []
+  if (tenantIds.length > 0) clauses.push({ tenantId: tenantIds })
+  if (anyTenantless || tenantIds.length === 0) clauses.push({ tenantId: null })
+  return { [Op.or]: clauses }
+}
+
+// A product that gains outlets later (tenantId still NULL) takes their tenant.
+const adoptStoresTenant = async (productId, storeIds, transaction) => {
+  const tenantId = await resolveStoresTenant(storeIds, transaction)
+  if (tenantId == null) return
+  await Product.update(
+    { tenantId },
+    { where: { id: productId, tenantId: null }, transaction, hooks: false }
+  )
+}
+
 const syncProductStores = async (productId, storeIds, transaction) => {
   if (!(await hasProductStoreTable())) return
   const existing = await db.product_store.findAll({
@@ -939,7 +986,9 @@ exports.postAddProduct = async (req, res) => {
         })
       : null
 
+    const productTenantId = await resolveStoresTenant(parsedStores)
     const postData = await Product.create({
+      tenantId: productTenantId,
       nameProduct: nameProduct || null,
       category: normalizedCategory,
       description,
@@ -1393,6 +1442,7 @@ exports.editProductByLocationAndId = async (req, res) => {
       // Sync junction table
       if (stores !== undefined) {
         await syncProductStores(id, parsedStores, t)
+        await adoptStoresTenant(id, parsedStores, t)
       }
 
       if (validatedLinks) await saveInventoryLinks(Number(id), validatedLinks, t)
@@ -1898,11 +1948,15 @@ exports.importProduct = async (req, res) => {
 
     // Phase 1: Validate all products before touching DB
     const validationErrors = []
-    // Fetch existing SKUs (including soft-deleted) for uniqueness check
+    // Fetch existing SKUs (including soft-deleted) for uniqueness check.
+    // W3-1: SKUs are unique per tenant — a scoped caller only collides with
+    // its own tenant's SKUs (another tenant's SKU is neither a conflict nor
+    // something it may learn exists). A global caller keeps the full view.
+    const skuTenantWhere = await importSkuTenantWhere(scopeIds)
     const existingSkus = await Product.findAll({
       attributes: ['id', 'sku', 'deletedAt'],
       paranoid: false,
-      where: { sku: { [Op.ne]: null } }
+      where: { sku: { [Op.ne]: null }, ...skuTenantWhere }
     })
     const skuMap = new Map(
       existingSkus.map((p) => [p.sku, { id: p.id, deleted: !!p.deletedAt }])
@@ -2065,7 +2119,7 @@ exports.importProduct = async (req, res) => {
           // Fallback: find by SKU if No didn't match (handles old templates)
           if (!existingProduct && product.sku) {
             const bySku = await Product.findOne({
-              where: { sku: product.sku },
+              where: { sku: product.sku, ...skuTenantWhere },
               paranoid: false,
               transaction: t
             })
@@ -2105,6 +2159,7 @@ exports.importProduct = async (req, res) => {
             // Sync junction table
             if (rowStores.length > 0) {
               await syncProductStores(existingProduct.id, rowStores, t)
+              await adoptStoresTenant(existingProduct.id, rowStores, t)
             }
 
             results.updated.push({
@@ -2115,6 +2170,7 @@ exports.importProduct = async (req, res) => {
             const newProduct = await Product.create(
               {
                 ...productData,
+                tenantId: await resolveStoresTenant(rowStores, t),
                 image: imageUrl || null,
                 createdBy: req.user?.id || null
               },

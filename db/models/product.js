@@ -13,9 +13,17 @@ module.exports = (sequelize, DataTypes) => {
         allowNull: false,
         type: DataTypes.STRING
       },
+      // Unique per tenant (uq_product_tenant_sku), or globally among
+      // tenant-less rows (uq_product_tenantless_sku) — migration 20261119000001.
       sku: {
-        type: DataTypes.STRING,
-        unique: true
+        type: DataTypes.STRING
+      },
+      // Owning tenant, derived from the product's outlets (product_store);
+      // NULL for products without outlets or on tenant-less outlets.
+      tenantId: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        references: { model: 'tenant', key: 'id' }
       },
       image: {
         type: DataTypes.STRING(2048)
