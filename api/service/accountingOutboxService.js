@@ -151,7 +151,13 @@ async function recordImmediateAttempt(outboxRow, result) {
 // additionally made harmless by the journal DB constraint + idempotent replay
 // in createJournalEntry. Meant to be called from a scheduler tick
 // (accountingOutboxScheduler.js) or a manual ops script.
-async function drainAccountingOutbox({ limit = 50 } = {}) {
+//
+// `untouchedSince` (optional) restricts the claim to rows not updated since
+// that instant. drainAccountingOutboxUntilEmpty passes its own start time, so
+// a row that just failed in this run (its attempt bumped `updatedAt`) is never
+// re-claimed by the next batch of the same run — otherwise one transient
+// outage would burn all MAX_ATTEMPTS retries within seconds.
+async function drainAccountingOutbox({ limit = 50, untouchedSince = null } = {}) {
   let processed = 0
   let posted = 0
   let failed = 0
@@ -160,11 +166,12 @@ async function drainAccountingOutbox({ limit = 50 } = {}) {
     const [claimed] = await db.sequelize.query(
       `SELECT id FROM accounting_outbox
        WHERE status = 'pending' AND attempts < :maxAttempts
+         ${untouchedSince ? 'AND "updatedAt" < :untouchedSince' : ''}
        ORDER BY "createdAt" ASC
        LIMIT :limit
        FOR UPDATE SKIP LOCKED`,
       {
-        replacements: { maxAttempts: MAX_ATTEMPTS, limit },
+        replacements: { maxAttempts: MAX_ATTEMPTS, limit, untouchedSince },
         transaction: claimTx
       }
     )
@@ -187,6 +194,36 @@ async function drainAccountingOutbox({ limit = 50 } = {}) {
   })
 
   return { processed, posted, failed }
+}
+
+// S-01 (BE audit 2026-11-18): one drain call used to process at most 50
+// retryable rows, and on serverless the only callers are a daily cron and a
+// 5-minute external scheduler — so a burst of failed immediate attempts could
+// wait days. This keeps claiming batches until the backlog is empty or the
+// time budget (below the 25-30 s request limits of the cron callers) runs
+// out. Each row is attempted at most once per run (see untouchedSince).
+async function drainAccountingOutboxUntilEmpty({
+  batchSize = 100,
+  timeBudgetMs = 20000,
+  now = Date.now
+} = {}) {
+  // Real wall clock for the claim guard (compared with DB updatedAt); the
+  // injectable `now` only drives the time budget.
+  const untouchedSince = new Date()
+  const deadline = now() + timeBudgetMs
+  const total = { processed: 0, posted: 0, failed: 0, batches: 0, exhausted: false }
+  do {
+    const result = await drainAccountingOutbox({ limit: batchSize, untouchedSince })
+    total.batches += 1
+    total.processed += result.processed
+    total.posted += result.posted
+    total.failed += result.failed
+    if (result.processed < batchSize) {
+      total.exhausted = true
+      break
+    }
+  } while (now() < deadline)
+  return total
 }
 
 // DR-10 (journals: "failures observable and recoverable"): an operational
@@ -230,5 +267,6 @@ module.exports = {
   markPosted,
   markAttemptFailed,
   recordImmediateAttempt,
-  drainAccountingOutbox
+  drainAccountingOutbox,
+  drainAccountingOutboxUntilEmpty
 }

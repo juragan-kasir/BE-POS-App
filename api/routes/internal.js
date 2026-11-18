@@ -7,7 +7,7 @@ const { expireStaleQrOrders, qrPendingExpiryMinutes } = require('../service/qrOr
 const backupController = require('../controller/backup')
 const { ACTOR_TYPES } = require('../../utils/auditLog')
 const {
-  drainAccountingOutbox,
+  drainAccountingOutboxUntilEmpty,
   getAccountingOutboxHealth
 } = require('../service/accountingOutboxService')
 const expenseScheduler = require('../service/expenseScheduler')
@@ -57,7 +57,7 @@ router.get('/accounting-outbox/drain', requireCronSecret, async (req, res) => {
     if (!gotLease) {
       return res.status(200).json({ skipped: true, reason: 'LEASE_HELD' })
     }
-    const result = await drainAccountingOutbox({ limit: 50 })
+    const result = await drainAccountingOutboxUntilEmpty()
     const health = await getAccountingOutboxHealth()
     if (result.processed > 0 || health.failed > 0) {
       console.log(
