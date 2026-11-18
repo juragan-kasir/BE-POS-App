@@ -642,6 +642,35 @@ module.exports = async () => {
     EXCEPTION WHEN OTHERS THEN NULL; END $$;`)
   } catch {}
 
+  // Guarded (add-if-missing) migrations that postdate scripts/dev-schema.sql
+  // and carry schema the tests rely on. CI builds the source DB from that
+  // snapshot, so a fresh test DB lacked them: no location.businessType /
+  // laundry_* tables (every suite creating a location failed) and no
+  // canonical-tender CHECK. Their own up() runs against the test DB — one
+  // source of truth, a no-op where the schema already exists.
+  const GUARDED_TEST_DB_MIGRATIONS = [
+    '20261013000005-p1-canonical-payment-check', // transaction_typepayment_canonical
+    '20261114000001-shared-laundry-domain' // batch B16
+  ]
+  try {
+    const { Sequelize } = require('sequelize')
+    const sequelize = new Sequelize(TEST_DB, DB_USER, DB_PASS, {
+      host: DB_HOST,
+      port: Number(DB_PORT),
+      dialect: 'postgres',
+      logging: false
+    })
+    try {
+      for (const name of GUARDED_TEST_DB_MIGRATIONS) {
+        await require(`../db/migrations/${name}`).up(sequelize.getQueryInterface(), Sequelize)
+      }
+    } finally {
+      await sequelize.close()
+    }
+  } catch (error) {
+    throw new Error(`[setup-test-db] failed to apply guarded migrations to the test DB: ${error.message}`)
+  }
+
   // 3c. Phase 33 R-4: verify the full schema contract from PostgreSQL
   // catalogs BEFORE tests run. Any gap fails loudly here instead of being
   // silently repaired by afterConnect later. This is the R-4 guarantee.
