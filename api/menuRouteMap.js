@@ -112,6 +112,7 @@ const ALLOWLISTED_ROUTE_FILES = Object.freeze({
   'order.js': 'Counter/QR orders; payment.collect / order.cancel / order.void capabilities; public QR create is rate-limited.',
   'splitBill.js': 'Split bills; split.manage / payment.collect capabilities.',
   'parkedCart.js': 'Cashier parked carts; store-scoped, any authenticated cashier.',
+  'laundry.js': 'Laundry counter flows (orders, turnaround, report); every route is validateStoreAccess store-scoped and by-id lookups filter on the caller store. Role gating moves to canonical permissions in the W7 sweep.',
   'receipt.js': 'Read-only receipt for a store-scoped order.',
   'queue.js': 'Floor queue; requireRole(super_admin, admin, kasir) — cashier menus carry no /queue-list.',
   'waiter-request.js': 'Diner waiter call (public, rate-limited) + floor status by requireRole(super_admin, admin, kasir).',

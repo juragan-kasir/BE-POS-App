@@ -76,6 +76,9 @@ const PREFIX_MODEL = {
   '/accounting/accounts/': 'account',
   '/accounting/journals/': 'journal_entry',
   '/location/': 'location',
+  // Laundry (2026-11-14): order ids are POS order ids; turnaround is its own row.
+  '/laundry/order/': 'order',
+  '/laundry/turnaround/': 'laundry_turnaround',
   '/assistant/stores/': 'location'
 }
 const PARAM_MODEL = {
