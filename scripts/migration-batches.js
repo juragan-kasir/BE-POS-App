@@ -331,6 +331,19 @@ const E2_BATCHES = Object.freeze({
     // store (transaction: from its order). The models read tenantId, so B22
     // must be recorded before this code deploys.
     openGates: []
+  }),
+  B23: deepFreeze({
+    id: 'B23',
+    title: 'W3-5 stock/supplier/accounting/roles/settings tenantId (11 tables)',
+    expectedCount: 1,
+    migrations: ['20261119000005-master-ledger-tenant-id.js'],
+    // FIXING-PLAN W3-5 (BE audit S-04): nullable tenantId (FK tenant,
+    // RESTRICT) + index on stock_history, supplier, ingredient,
+    // ingredient_category, account, journal_entry, role, position,
+    // department, type_payment, tax_config; backfilled from store (supplier:
+    // single-tenant outlet set). The models read tenantId, so B23 must be
+    // recorded before this code deploys.
+    openGates: []
   })
 })
 
@@ -356,7 +369,8 @@ const BATCH_ORDER = Object.freeze([
   'B19',
   'B20',
   'B21',
-  'B22'
+  'B22',
+  'B23'
 ])
 
 // D-08 B1 resume contracts. A resume finishes a batch whose earlier members
