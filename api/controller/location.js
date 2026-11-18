@@ -67,6 +67,13 @@ const hashOwnerPinIfPresent = async (rawSettings, existingSettings) => {
 // only. req.user.store, the JWT store claim, cookies, query params and the
 // request body are never ownership evidence: the body `tenantId` is at most a
 // target-tenant candidate, validated against the resolved context below.
+// Responses that spread raw dataValues bypass the model getter; route them
+// through the public laundry view so the owner-PIN hash never leaves the API.
+const publicLocationValues = (values) =>
+  values && values.laundrySettings !== undefined
+    ? { ...values, laundrySettings: publicLaundrySettings(values.laundrySettings) }
+    : values
+
 const resolveStoreLifecycleContext = (req) =>
   resolveAuthorizationContext(db, { userId: req.user?.id })
 
@@ -576,7 +583,7 @@ exports.addNewLocation = async (req, res) => {
         id: newLocation.id,
         locationId: newLocationId,
         storeId,
-        ...newLocation.dataValues,
+        ...publicLocationValues(newLocation.dataValues),
         ...(req.firstOutletOwner ? { ownerBound } : {})
       }
     })
@@ -701,7 +708,7 @@ exports.editLocationById = async (req, res) => {
       updatedData.businessType = rest.businessType || 'fnb'
     }
     if (rest.laundrySettings !== undefined) {
-      updatedData.laundrySettings = await hashOwnerPinIfPresent(rest.laundrySettings, dataExist.laundrySettings)
+      updatedData.laundrySettings = await hashOwnerPinIfPresent(rest.laundrySettings, dataExist.laundrySettings) /* dataExist = raw dataValues: keeps the stored hash */
     }
 
     // A store that already has a tenant keeps it: assertOperationalStoreTenant
@@ -752,7 +759,7 @@ exports.editLocationById = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: 'Successfully updated location.',
-      data: updatedRows[0]?.dataValues || null
+      data: updatedRows[0] ? publicLocationValues(updatedRows[0].dataValues) : null
     })
   } catch (error) {
     console.error('Error:', error)
@@ -1030,7 +1037,7 @@ const buildLocationDetailData = async (location, { includeConfiguration = false 
     mainBranch: location.mainBranch,
     dailyTarget: location.dailyTarget,
     businessType: location.businessType || 'fnb',
-    laundrySettings: publicLaundrySettings(location.laundrySettings) || null,
+    laundrySettings: location.laundrySettings || null,
     createdAt: location.createdAt,
     updatedAt: location.updatedAt,
     createdBy: location.createdBy,
