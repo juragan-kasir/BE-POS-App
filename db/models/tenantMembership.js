@@ -77,6 +77,14 @@ module.exports = (sequelize, DataTypes) => {
           unique: true,
           name: 'uq_tenant_membership_user_tenant',
           fields: ['userId', 'tenantId']
+        },
+        // Owner hierarchy invariant (migration 20261118000001, batch B18):
+        // at most one ACTIVE canonical owner per tenant.
+        {
+          unique: true,
+          name: 'uq_tenant_membership_active_owner',
+          fields: ['tenantId'],
+          where: { role: 'owner', status: 'ACTIVE', deletedAt: null }
         }
       ]
     }
