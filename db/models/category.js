@@ -22,6 +22,15 @@ module.exports = (sequelize, DataTypes) => {
       image: {
         type: DataTypes.STRING(2048)
       },
+      // Owning tenant, adopted from the category's outlets when the first
+      // category_store row is written (category_store hooks); NULL for a
+      // category without outlets or on tenant-less outlets. Migration
+      // 20261119000002.
+      tenantId: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        references: { model: 'tenant', key: 'id' }
+      },
       parentId: {
         type: DataTypes.INTEGER,
         allowNull: true,

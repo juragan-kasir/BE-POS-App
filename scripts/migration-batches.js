@@ -295,6 +295,19 @@ const E2_BATCHES = Object.freeze({
     // uq_product_tenant_sku + uq_product_tenantless_sku. The product model
     // reads tenantId, so B19 must be recorded before this code deploys.
     openGates: []
+  }),
+  B20: deepFreeze({
+    id: 'B20',
+    title: 'W3-2 catalog: category + product_bundle tenantId, bundle SKU unique per tenant',
+    expectedCount: 1,
+    migrations: ['20261119000002-category-bundle-tenant-id.js'],
+    // FIXING-PLAN W3-2 (BE audit S-04/S-05): nullable category.tenantId and
+    // product_bundle.tenantId (FK tenant, RESTRICT) + indexes, backfilled only
+    // where every outlet of a row belongs to exactly one tenant;
+    // product_bundle_sku_key + duplicate product_bundle_sku become
+    // uq_product_bundle_tenant_sku + uq_product_bundle_tenantless_sku. Both
+    // models read tenantId, so B20 must be recorded before this code deploys.
+    openGates: []
   })
 })
 
@@ -317,7 +330,8 @@ const BATCH_ORDER = Object.freeze([
   'B16',
   'B17',
   'B18',
-  'B19'
+  'B19',
+  'B20'
 ])
 
 // D-08 B1 resume contracts. A resume finishes a batch whose earlier members
