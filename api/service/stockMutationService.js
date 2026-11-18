@@ -587,6 +587,12 @@ async function resolveBomIngredientRequirements(flatItems, store, productById, t
       transaction: t
     })
     if (!bomHeader || !bomHeader.lines || bomHeader.lines.length === 0) {
+      // A laundry service is not an inventory item: without a recipe it
+      // consumes nothing (its cost lives in serviceConfig.costComponents).
+      // With an active recipe (e.g. detergent per kg) it consumes like any
+      // made-to-order product. BE audit 2026-11-18: laundry sales are now
+      // recognized through the same stock path as POS checkouts.
+      if (product.tipeProduk === 'laundry_service') continue
       const e = new Error(
         `Produk "${product.nameProduct}" menggunakan mode inventaris "${mode}" tetapi tidak memiliki BOM aktif`
       )

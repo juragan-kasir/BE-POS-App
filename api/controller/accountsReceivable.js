@@ -7,7 +7,6 @@ const { assertIntegerRupiah } = require('../../utils/moneyGuard')
 const accountsReceivableController = {
   async list(req, res) {
     try {
-      const userRole = req.user?.roleType
       const {
         page = 1,
         limit = 10,
@@ -380,7 +379,6 @@ const accountsReceivableController = {
 
   async agingReport(req, res) {
     try {
-      const userRole = req.user?.roleType
 
       const where = { status: { [Op.ne]: 'PAID' } }
       Object.assign(where, await tenantStoreWhere(req))

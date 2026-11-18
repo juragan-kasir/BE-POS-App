@@ -535,7 +535,6 @@ const applyStock = async (items, receipt, transaction, userId) => {
 const goodsReceiptController = {
   async getAll(req, res) {
     try {
-      const store = resolveStoreId(req)
       const userRole = req.user?.roleType
       const {
         page = 1,
@@ -624,8 +623,6 @@ const goodsReceiptController = {
   async getById(req, res) {
     try {
       const { id } = req.params
-      const store = resolveStoreId(req)
-      const userRole = req.user?.roleType
 
       const where = { id }
       Object.assign(where, await tenantStoreWhere(req))
@@ -686,8 +683,6 @@ const goodsReceiptController = {
   async getByPO(req, res) {
     try {
       const { poId } = req.params
-      const store = resolveStoreId(req)
-      const userRole = req.user?.roleType
 
       const where = { purchaseOrderId: poId }
       Object.assign(where, await tenantStoreWhere(req))
@@ -1278,7 +1273,6 @@ const goodsReceiptController = {
 
   async exportExcel(req, res) {
     try {
-      const store = resolveStoreId(req)
       const userRole = req.user?.roleType
       const { status, startDate, endDate, store: queryStore } = req.query
 
@@ -1323,7 +1317,6 @@ const goodsReceiptController = {
     try {
       const { id } = req.params
       const store = resolveStoreId(req)
-      const userRole = req.user?.roleType
       const {
         notes,
         receivedDate,
@@ -1906,7 +1899,6 @@ const goodsReceiptController = {
     try {
       const { id } = req.params
       const store = resolveStoreId(req)
-      const userRole = req.user?.roleType
 
       const where = { id }
       Object.assign(where, await tenantStoreWhere(req))
@@ -2041,7 +2033,6 @@ const goodsReceiptController = {
       const { id } = req.params
       const { status } = req.body
       const store = resolveStoreId(req)
-      const userRole = req.user?.roleType
 
       if (!['completed', 'cancelled'].includes(status)) {
         return res.status(400).json({

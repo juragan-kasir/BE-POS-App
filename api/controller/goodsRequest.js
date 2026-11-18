@@ -190,8 +190,6 @@ const goodsRequestController = {
   async getById(req, res) {
     try {
       const { id } = req.params
-      const store = resolveStoreId(req)
-      const userRole = req.user?.roleType
 
       const where = { id }
       Object.assign(where, await tenantStoreWhere(req))
@@ -339,8 +337,6 @@ const goodsRequestController = {
   async update(req, res) {
     try {
       const { id } = req.params
-      const store = resolveStoreId(req)
-      const userRole = req.user?.roleType
       const { items, requestedBy, notes, requestDate, neededDate } = req.body
 
       const where = { id }
@@ -439,8 +435,6 @@ const goodsRequestController = {
   async delete(req, res) {
     try {
       const { id } = req.params
-      const store = resolveStoreId(req)
-      const userRole = req.user?.roleType
 
       const where = { id }
       Object.assign(where, await tenantStoreWhere(req))
@@ -488,7 +482,6 @@ const goodsRequestController = {
       const { id } = req.params
       const { status } = req.body
       const store = resolveStoreId(req)
-      const userRole = req.user?.roleType
       const approvedBy = req.user?.id || null
 
       const validStatuses = ['approved', 'rejected', 'cancelled']

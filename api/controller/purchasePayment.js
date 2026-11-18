@@ -55,8 +55,6 @@ const purchasePaymentController = {
   async getByPO(req, res) {
     try {
       const { poId } = req.params
-      const store = req.storeId || req.cookies.store
-      const userRole = req.user?.roleType
 
       const where = { purchaseOrder: poId }
       Object.assign(where, await tenantStoreWhere(req))
@@ -81,8 +79,6 @@ const purchasePaymentController = {
   async getBySupplier(req, res) {
     try {
       const { supplierId } = req.params
-      const store = req.storeId || req.cookies.store
-      const userRole = req.user?.roleType
 
       const poiWhere = { supplier: Number(supplierId) }
       const supplierPOIds = await db.purchase_order_item.findAll({
@@ -439,8 +435,6 @@ const purchasePaymentController = {
 
   async apDashboard(req, res) {
     try {
-      const store = req.storeId || req.cookies.store
-      const userRole = req.user?.roleType
 
       const poWhere = { status: { [Op.notIn]: ['cancelled', 'draft'] } }
       Object.assign(poWhere, await tenantStoreWhere(req))
