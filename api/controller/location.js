@@ -441,7 +441,12 @@ exports.addNewLocation = async (req, res) => {
     (isActive !== undefined ? (isActive ? 'active' : 'inactive') : 'draft')
 
   try {
-    const lifecycleContext = await resolveStoreLifecycleContext(req)
+    // A canonical outlet creator (AUTHZ_OWNER_V2) was admitted on the
+    // session's context: reuse it so a multi-tenant owner creates the outlet
+    // in its ACTIVE tenant (a fresh resolve has no session tenant).
+    const lifecycleContext = req.canonicalOutletCreator && req.authContext
+      ? req.authContext
+      : await resolveStoreLifecycleContext(req)
     const lifecycle = assertOperationalStoreTenant(lifecycleContext, {
       currentStatus: null,
       requestedStatus: resolvedStatus,
@@ -471,6 +476,36 @@ exports.addNewLocation = async (req, res) => {
         code: 'FOREIGN_TENANT',
         field: 'tenantId',
         message: 'outlet must belong to your own tenant'
+      })
+    }
+    // A canonical owner creates outlets only in its active tenant.
+    if (
+      req.canonicalOutletCreator &&
+      lifecycleContext.isPlatformAdmin !== true &&
+      Number(lifecycle.tenantId) !== Number(lifecycleContext.activeTenantId)
+    ) {
+      return res.status(422).json({
+        success: false,
+        code: 'FOREIGN_TENANT',
+        field: 'tenantId',
+        message: 'outlet must belong to your own tenant'
+      })
+    }
+
+    // Owner hierarchy: an outlet inherits its tenant's businessType (spec D2).
+    // An explicit, different value is refused instead of silently mixing
+    // verticals inside one tenant; a tenant without one keeps the old default.
+    let tenantBusinessType = null
+    if (lifecycle.tenantId != null) {
+      const owningTenant = await db.tenant.findByPk(lifecycle.tenantId, { attributes: ['id', 'businessType'] })
+      tenantBusinessType = owningTenant?.businessType || null
+    }
+    if (tenantBusinessType && businessType && businessType !== tenantBusinessType) {
+      return res.status(422).json({
+        success: false,
+        code: 'TENANT_BUSINESS_TYPE_MISMATCH',
+        field: 'businessType',
+        message: `businessType must match the tenant (${tenantBusinessType})`
       })
     }
 
@@ -543,7 +578,7 @@ exports.addNewLocation = async (req, res) => {
       openingHours: normalizeOpeningHours(openingHours) || [],
       socialMedia: socialMedia || [],
       timezone: timezone || undefined,
-      businessType: businessType || 'fnb',
+      businessType: tenantBusinessType || businessType || 'fnb',
       laundrySettings: await hashOwnerPinIfPresent(laundrySettings, null),
       createdBy: req.user?.id || null
     })

@@ -8,7 +8,7 @@ const locationController = require('../controller/location')
 const authorization = require('../../utils/authorization')
 const { requireRole, requireCanonicalPermission } = require('../../utils/authorization')
 const { validateStoreAccess } = require('../../utils/storeValidation')
-const { requireStoreCreator } = require('../../utils/firstOutletOwner')
+const { requireOutletCreator } = require('../../utils/outletCreation')
 const {
   authorizationContextMiddleware
 } = require('../../utils/authorizationContextMiddleware')
@@ -80,7 +80,7 @@ router.get(
 router.post(
   '/add-new-location',
   authorization,
-  requireStoreCreator,
+  requireOutletCreator,
   upload,
   validate(createLocationSchema),
   locationController.addNewLocation

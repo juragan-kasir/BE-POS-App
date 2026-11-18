@@ -54,6 +54,7 @@ const authRoutes = require('./routes/auth')
 const authorizationContextRoutes = require('./routes/authorizationContext')
 const membershipRoutes = require('./routes/membership')
 const tenantRoutes = require('./routes/tenant')
+const onboardingRoutes = require('./routes/onboarding')
 const assignmentRoutes = require('./routes/assignment')
 const effectiveScopeRoutes = require('./routes/effectiveScope')
 const categoryRoutes = require('./routes/category')
@@ -241,6 +242,8 @@ const routes = [
   { path: '/memberships', route: membershipRoutes },
   // Platform tenant administration (tenant.manage).
   { path: '/tenants', route: tenantRoutes },
+  // Owner self-serve onboarding (AUTHZ_OWNER_V2; 404 while the flag is off).
+  { path: '/onboarding', route: onboardingRoutes },
   { path: '/assignments', route: assignmentRoutes },
   { path: '/effective-scope', route: effectiveScopeRoutes },
   { path: '/product', route: productRoutes },

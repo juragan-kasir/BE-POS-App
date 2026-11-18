@@ -896,7 +896,9 @@ exports.createLocationSchema = z.object({
   dailyTarget: strToNum().optional().default(0),
   image: z.string().max(FIELD_MAX.URL, tooLong(FIELD_MAX.URL)).optional().nullable(),
   // Shared-domain marker + laundry-only outlet settings.
-  businessType: z.enum(['fnb', 'retail', 'laundry']).optional().default('fnb'),
+  // salon: owner hierarchy vertical (spec 2026-11-16). No default here: the
+  // controller inherits the tenant's businessType, else falls back to fnb.
+  businessType: z.enum(['fnb', 'retail', 'laundry', 'salon']).optional(),
   laundrySettings: jsonField().optional().nullable()
 })
 
@@ -2411,6 +2413,16 @@ exports.applyPromoSchema = z.object({
     )
     .optional(),
   subtotal: z.number().int().min(0).optional()
+})
+
+// ===================== Onboarding =====================
+// Owner self-serve onboarding (POST /onboarding/tenants). The controller
+// normalizes code/name/businessType again (tenantIdentity) — this only bounds
+// the payload shape.
+exports.onboardingTenantSchema = z.object({
+  code: z.string().min(1).max(50),
+  name: z.string().min(1).max(150),
+  businessType: z.enum(['fnb', 'retail', 'laundry', 'salon']).optional().default('fnb')
 })
 
 // ===================== Query param helpers =====================

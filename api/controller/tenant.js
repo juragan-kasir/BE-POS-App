@@ -185,7 +185,11 @@ exports.create = async (req, res) => {
       // Codes are never reused: a retired (soft-deleted) tenant still owns it.
       const taken = await db.tenant.findOne({ where: { code }, paranoid: false, transaction: t })
       if (taken) return null
-      const row = await db.tenant.create({ code, name, status: 'active' }, { transaction: t })
+      // Owner hierarchy: a client owner creating a tenant is its accountable
+      // owner (tenant.ownerId). A platform actor creates tenants for clients,
+      // so it never becomes the owner of what it creates.
+      const ownerId = req.tenantAdministration?.all === true ? null : req.user.id
+      const row = await db.tenant.create({ code, name, status: 'active', ownerId }, { transaction: t })
       await audit(req, { action: 'create', row, before: null, after: snapshot(row), transaction: t })
       // A client's own super admin owns what it creates: without the
       // membership the new tenant would be invisible to it.

@@ -6,12 +6,18 @@
 // DEACTIVATED / RETIRED. Only ACTIVE memberships authorize anything —
 // deactivation preserves the role and subordinate store assignments (they go
 // ineffective, they are not deleted), and rewrites no historical records.
+// owner/admin/kasir: owner hierarchy vocabulary (spec 2026-11-16). Storable
+// so onboarding can create an owner membership; they only become EFFECTIVE in
+// the resolver with AUTHZ_OWNER_V2 on (utils/authContext.js).
 const TARGET_ROLES = Object.freeze([
   'platform_admin',
   'tenant_admin',
   'store_admin',
   'cashier',
-  'staff'
+  'staff',
+  'owner',
+  'admin',
+  'kasir'
 ])
 
 const MEMBERSHIP_STATUS = Object.freeze(['ACTIVE', 'DEACTIVATED', 'RETIRED'])
