@@ -1,5 +1,6 @@
 'use strict'
 const { lastFourDigits } = require('../../utils/cardNumber')
+const { attachParentTenant } = require('../../utils/storeTenant')
 module.exports = (sequelize, DataTypes) => {
   const transaction = sequelize.define(
     'transaction',
@@ -13,6 +14,13 @@ module.exports = (sequelize, DataTypes) => {
       order: {
         allowNull: false,
         type: DataTypes.INTEGER
+      },
+      // Owning tenant = the tenant of its order (utils/storeTenant
+      // attachParentTenant). Migration 20261119000004.
+      tenantId: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        references: { model: 'tenant', key: 'id' }
       },
       typePayment: {
         allowNull: false,
@@ -110,5 +118,5 @@ module.exports = (sequelize, DataTypes) => {
     })
   }
 
-  return transaction
+  return attachParentTenant(transaction, { parent: 'order', foreignKey: 'order' })
 }
