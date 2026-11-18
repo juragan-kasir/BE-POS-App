@@ -11,8 +11,11 @@
 //   nothing here.
 //
 // Decided from the server-resolved authorization context only.
+const { canonicalRoleOf, isOwnerV2Enabled } = require('./ownerRoles')
+
 const tenantAdministrationScope = (ctx, user) => {
   if (!ctx || ctx.eligible !== true) return null
+  if (isOwnerV2Enabled()) return canonicalTenantAdministrationScope(ctx, user)
   if (Array.isArray(ctx.permissions) && ctx.permissions.includes('tenant.manage')) {
     return { all: true, tenantIds: [] }
   }
@@ -20,6 +23,26 @@ const tenantAdministrationScope = (ctx, user) => {
   const effective = new Set((ctx.effectiveTenantIds || []).map(Number))
   const tenantIds = (ctx.memberships || [])
     .filter((m) => m.role === 'tenant_admin' && m.status === 'ACTIVE' && effective.has(Number(m.tenantId)))
+    .map((m) => Number(m.tenantId))
+  return tenantIds.length > 0 ? { all: false, tenantIds } : null
+}
+
+// AUTHZ_OWNER_V2: decided by the platform grant and canonical ownership only —
+// never by user.roleType and never by a tenant permission (BE audit P0-1).
+// Platform: every tenant. A V2 `owner` membership: only the effective tenants
+// it owns. The legacy `tenant_admin` alias keeps its legacy rule until the
+// backfill converts it (decision K1): only a store-bound super_admin (a
+// client's own super admin, e.g. bakso_admin) administers its tenants.
+// Everyone else: nothing.
+const administersAsOwner = (membership, user) =>
+  membership.role === 'owner' ||
+  (canonicalRoleOf(membership.role) === 'owner' && user?.roleType === 'super_admin')
+
+const canonicalTenantAdministrationScope = (ctx, user) => {
+  if (ctx.isPlatformAdmin === true) return { all: true, tenantIds: [] }
+  const effective = new Set((ctx.effectiveTenantIds || []).map(Number))
+  const tenantIds = (ctx.memberships || [])
+    .filter((m) => m.status === 'ACTIVE' && administersAsOwner(m, user) && effective.has(Number(m.tenantId)))
     .map((m) => Number(m.tenantId))
   return tenantIds.length > 0 ? { all: false, tenantIds } : null
 }

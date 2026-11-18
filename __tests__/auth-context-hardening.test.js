@@ -415,8 +415,11 @@ describe('Unknown membership role never becomes effective', () => {
     odd = await mkUser('unknown_membership_role', 'admin')
     // bulkCreate skips model validation by default — the resolver must not
     // rely on the model's isIn validator to keep foreign vocabulary out.
+    // 'manager' is outside the vocabulary in every mode. ('owner' used to be
+    // the example; it is canonical vocabulary under AUTHZ_OWNER_V2, and its
+    // flag-OFF inertness is pinned in owner-v2-flag-off.test.js.)
     await db.tenantMembership.bulkCreate([
-      { userId: odd.id, tenantId: tenantA.id, role: 'owner', status: 'ACTIVE' }
+      { userId: odd.id, tenantId: tenantA.id, role: 'manager', status: 'ACTIVE' }
     ])
   })
 

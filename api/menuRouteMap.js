@@ -105,6 +105,7 @@ const ALLOWLISTED_ROUTE_FILES = Object.freeze({
   'effectiveScope.js': 'Read-only effective scope of the caller.',
   'membership.js': 'Tenant memberships; every mutation is re-authorized from the canonical context in the T-03A service.',
   'tenant.js': 'Tenant administration; requireTenantAdministration (platform or own tenant_admin).',
+  'onboarding.js': 'Owner self-serve onboarding (AUTHZ_OWNER_V2, else 404); requireTenantOnboarding admits only a new account without business trace or an existing canonical owner, rate-limited.',
   'assistant.js': 'Service secret (ASSISTANT_SERVICE_SECRET) or canonical store.manage for the owner link.',
   'auditLog.js': 'Read-only; canonical audit.read scope (requireAuditRead).',
   // Cashier / floor flows: money actions use DR-23 capabilities; the cashier

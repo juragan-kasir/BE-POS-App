@@ -1,5 +1,7 @@
 'use strict'
 
+const { V2_ONLY_ROLES, canonicalRoleOf, isOwnerV2Enabled } = require('./ownerRoles')
+
 // AUTH-1 (DR-01/DR-02/DR-12): canonical server-side authorization layer.
 //
 // Single coherent model — do NOT scatter `if (role === ...)` checks through
@@ -54,7 +56,7 @@ const legacyRoleTypeToTarget = (roleType) =>
 // other role, and cross-tenant reach applies only where the capability is
 // platform-authorized (tenant.manage, backup.manage) or where visibility is
 // explicitly platform-wide (audit.read with a tenant scope).
-const PERMISSIONS = Object.freeze([
+const LEGACY_PERMISSIONS = Object.freeze([
   'audit.read',
   'user.manage',
   'role.manage',
@@ -63,13 +65,104 @@ const PERMISSIONS = Object.freeze([
   'backup.manage'
 ])
 
+// Owner hierarchy (AUTHZ_OWNER_V2) vocabulary. Known to can() always, but only
+// the V2 baselines below ever hold them, and those apply only with the flag
+// ON — with the flag OFF every context carries exactly the legacy baselines.
+const V2_PERMISSIONS = Object.freeze([
+  'tenant.read',
+  'tenant.create',
+  'tenant.delete',
+  'tenant.transfer',
+  'outlet.create',
+  'outlet.read',
+  'outlet.manage',
+  'member.read',
+  'member.manage',
+  'pos.sell',
+  'order.process',
+  'shift.operate',
+  'shift.manage',
+  'catalog.read',
+  'catalog.manage',
+  'inventory.read',
+  'inventory.manage',
+  'purchase.manage',
+  'report.read',
+  'report.allOutlets',
+  'finance.read',
+  'finance.manage'
+])
+
+const PERMISSIONS = Object.freeze([...LEGACY_PERMISSIONS, ...V2_PERMISSIONS])
+
 const ROLE_BASELINE_PERMISSIONS = Object.freeze({
-  platform_admin: [...PERMISSIONS],
+  platform_admin: [...LEGACY_PERMISSIONS],
   tenant_admin: ['audit.read', 'user.manage', 'role.manage', 'store.manage'],
   store_admin: ['audit.read'],
   cashier: [],
   staff: []
 })
+
+// Spec 2026-11-16 "Baseline role (tenant)". tenant.manage is deliberately NOT
+// an owner permission: it is the platform-wide tenant administration
+// capability (BE audit P0-1 — an owner holding it administered every tenant).
+const V2_ROLE_BASELINE_PERMISSIONS = Object.freeze({
+  // Vendor: platform operations only — no pos.sell/finance/tenant.transfer in
+  // any tenant without an explicit business membership.
+  platform_admin: Object.freeze([
+    ...LEGACY_PERMISSIONS,
+    'tenant.read',
+    'tenant.create',
+    'tenant.delete',
+    'outlet.create',
+    'outlet.read',
+    'outlet.manage',
+    'member.read',
+    'member.manage'
+  ]),
+  owner: Object.freeze([
+    'audit.read', 'user.manage', 'role.manage', 'store.manage',
+    'tenant.read', 'tenant.create', 'tenant.delete', 'tenant.transfer',
+    'outlet.create', 'outlet.read', 'outlet.manage',
+    'member.read', 'member.manage',
+    'pos.sell', 'order.process', 'shift.operate', 'shift.manage',
+    'catalog.read', 'catalog.manage', 'inventory.read', 'inventory.manage', 'purchase.manage',
+    'report.read', 'report.allOutlets', 'finance.read', 'finance.manage'
+  ]),
+  admin: Object.freeze([
+    'audit.read', 'user.manage', 'role.manage', 'store.manage',
+    'tenant.read', 'outlet.read', 'outlet.manage',
+    'member.read', 'member.manage',
+    'pos.sell', 'order.process', 'shift.operate', 'shift.manage',
+    'catalog.read', 'catalog.manage', 'inventory.read', 'inventory.manage', 'purchase.manage',
+    'report.read', 'finance.read', 'finance.manage'
+  ]),
+  kasir: Object.freeze(['pos.sell', 'order.process', 'shift.operate', 'catalog.read'])
+})
+
+// V2 admin: tenant-wide for people/catalog/role, store-confined for outlet
+// operations, reports, money and audit (spec "Catatan scope").
+const ADMIN_STORE_SCOPED_PERMISSIONS = Object.freeze([
+  'audit.read',
+  'store.manage',
+  'outlet.read',
+  'outlet.manage',
+  'pos.sell',
+  'order.process',
+  'shift.operate',
+  'shift.manage',
+  'report.read',
+  'finance.read',
+  'finance.manage'
+])
+
+// A role confined to its assigned stores for this permission.
+const isStoreConfined = (role, permission) => {
+  if (STORE_CONFINED_ROLES.includes(role)) return true
+  if (!isOwnerV2Enabled()) return false
+  if (role === 'kasir') return true
+  return role === 'admin' && (permission == null || ADMIN_STORE_SCOPED_PERMISSIONS.includes(permission))
+}
 
 // AUTH-1 P2: account eligibility is enablement only — `disabledAt` and
 // `deletedAt` both NULL. Presence `status` (written by login/logout) is not
@@ -130,6 +223,7 @@ const resolveAuthorizationContext = async (
     effectiveTenantIds: [],
     activeTenantId: null,
     activeRole: null,
+    canonicalRole: null,
     permissions: [],
     assignedStoreIds: [],
     tenantStoreIds: [],
@@ -201,10 +295,11 @@ const resolveAuthorizationContext = async (
   const authenticatedMs = authenticatedAt == null ? null : new Date(authenticatedAt).getTime()
   const freshForSession = (m) =>
     authenticatedMs == null || m.reactivatedAt == null || new Date(m.reactivatedAt).getTime() < authenticatedMs
+  const v2 = isOwnerV2Enabled()
   const effective = memberships.filter(
     (m) =>
       m.status === 'ACTIVE' &&
-      TARGET_ROLES.includes(m.role) &&
+      (TARGET_ROLES.includes(m.role) || (v2 && V2_ONLY_ROLES.includes(m.role))) &&
       m.tenant != null &&
       m.tenant.deletedAt == null &&
       m.tenant.status === 'active' &&
@@ -215,6 +310,15 @@ const resolveAuthorizationContext = async (
 
   if (effective.some((m) => m.role === 'platform_admin') || legacyIsPlatform) {
     ctx.isPlatformAdmin = true
+  }
+  // V2: account-level vendor grant (platform_admin table), no tenant needed.
+  if (v2 && !ctx.isPlatformAdmin && db.platformAdmin) {
+    const grant = await db.platformAdmin.findOne({
+      where: { userId: ctx.accountId, status: 'ACTIVE' },
+      attributes: ['id'],
+      transaction
+    })
+    if (grant) ctx.isPlatformAdmin = true
   }
 
   // Active tenant: requested must be effective; unrequested defaults only
@@ -241,14 +345,15 @@ const resolveAuthorizationContext = async (
   const activeMembership = effective.find((m) => m.tenantId === ctx.activeTenantId)
   if (activeMembership) {
     ctx.activeRole = activeMembership.role
-    ctx.permissions = [...(ROLE_BASELINE_PERMISSIONS[activeMembership.role] || [])]
+    ctx.permissions = [...baselineFor(activeMembership.role)]
   } else if (ctx.isPlatformAdmin) {
     // Platform context without a tenant membership: explicit baseline, and
     // flagged as legacy-derived when it comes from the old roleType string.
     ctx.activeRole = 'platform_admin'
-    ctx.permissions = [...ROLE_BASELINE_PERMISSIONS.platform_admin]
+    ctx.permissions = [...baselineFor('platform_admin')]
     ctx.viaLegacyClaims = legacyIsPlatform && !effective.some((m) => m.role === 'platform_admin')
   }
+  ctx.canonicalRole = canonicalRoleOf(ctx.activeRole)
 
   // Tenant store roster for scope checks (active tenant only).
   if (ctx.activeTenantId != null) {
@@ -295,7 +400,7 @@ const resolveAuthorizationContext = async (
     }
     if (
       inTenant &&
-      STORE_CONFINED_ROLES.includes(ctx.activeRole) &&
+      isStoreConfined(ctx.activeRole, null) &&
       !ctx.assignedStoreIds.includes(requestedStore)
     ) {
       ctx.reason = 'unassigned-store'
@@ -312,10 +417,19 @@ const resolveAuthorizationContext = async (
 const finalizePlatformFallback = (ctx, legacyIsPlatform) => {
   if (ctx.isPlatformAdmin) {
     ctx.activeRole = 'platform_admin'
-    ctx.permissions = [...ROLE_BASELINE_PERMISSIONS.platform_admin]
+    ctx.canonicalRole = 'platform_admin'
+    ctx.permissions = [...baselineFor('platform_admin')]
     ctx.viaLegacyClaims = legacyIsPlatform
   }
   return ctx
+}
+
+// Baseline for a persisted role. V2 baselines apply only with the flag ON and
+// only to the platform grant and the V2-only roles; legacy aliases keep their
+// legacy baseline either way (decision K1).
+const baselineFor = (role) => {
+  if (isOwnerV2Enabled() && V2_ROLE_BASELINE_PERMISSIONS[role]) return V2_ROLE_BASELINE_PERMISSIONS[role]
+  return ROLE_BASELINE_PERMISSIONS[role] || []
 }
 
 // Pure synchronous decision on a resolved context. Scope is matched against
@@ -350,7 +464,7 @@ const can = (ctx, permission, scope = {}) => {
 
   // Store-confined roles must name an assigned store for resource decisions —
   // a tenant-wide grant can never flow from a store_admin context.
-  if (STORE_CONFINED_ROLES.includes(ctx.activeRole)) {
+  if (isStoreConfined(ctx.activeRole, permission)) {
     if (storeId == null) return false
     if (!ctx.assignedStoreIds.includes(storeId)) return false
   }
@@ -389,7 +503,7 @@ const auditScopeFor = (ctx) => {
     return { tenantId: null, storeIds: null }
   }
   if (ctx.activeTenantId == null) return null
-  if (STORE_CONFINED_ROLES.includes(ctx.activeRole)) {
+  if (isStoreConfined(ctx.activeRole, 'audit.read')) {
     const storeIds = ctx.assignedStoreIds.filter((id) => ctx.tenantStoreIds.includes(id))
     if (storeIds.length === 0) return null
     return { tenantId: ctx.activeTenantId, storeIds }
@@ -402,7 +516,9 @@ module.exports = {
   MEMBERSHIP_STATUS,
   LEGACY_ROLE_MAP,
   PERMISSIONS,
+  LEGACY_PERMISSIONS,
   ROLE_BASELINE_PERMISSIONS,
+  V2_ROLE_BASELINE_PERMISSIONS,
   legacyRoleTypeToTarget,
   resolveAuthorizationContext,
   can,

@@ -44,7 +44,7 @@ const viewerOf = (ctx) => {
   if (ctx.activeTenantId != null && can(ctx, 'user.manage', { tenantId: ctx.activeTenantId })) {
     return { kind: 'tenant', tenantId: Number(ctx.activeTenantId) }
   }
-  if (ctx.activeTenantId != null && ctx.activeRole === 'store_admin') {
+  if (ctx.activeTenantId != null && (ctx.activeRole === 'store_admin' || ctx.activeRole === 'admin')) {
     const tenantStores = (ctx.tenantStoreIds || []).map(Number)
     const storeIds = (ctx.assignedStoreIds || []).map(Number).filter((id) => tenantStores.includes(id))
     return { kind: 'store', tenantId: Number(ctx.activeTenantId), storeIds }

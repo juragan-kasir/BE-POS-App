@@ -1,5 +1,7 @@
 'use strict'
 
+const { onboardingRequiredFor } = require('../service/tenantOnboarding')
+
 // TASK 3 — authorization context endpoints.
 //
 //   GET    /auth/context         — current session + resolved canonical context
@@ -44,6 +46,11 @@ exports.getContext = async (req, res) => {
         activeTenantId: ctx.activeTenantId,
         activeStoreId: ctx.activeStoreId,
         activeRole: ctx.activeRole,
+        // Owner hierarchy (AUTHZ_OWNER_V2): normalized role, and whether this
+        // account should see "create your first business" (always false
+        // with the flag off, for platform actors and for existing staff).
+        canonicalRole: ctx.canonicalRole ?? null,
+        onboardingRequired: await onboardingRequiredFor(db, ctx, req.user),
         permissions: ctx.permissions,
         assignedStoreIds: ctx.assignedStoreIds,
         isPlatformAdmin: ctx.isPlatformAdmin,

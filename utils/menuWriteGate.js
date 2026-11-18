@@ -4,6 +4,7 @@ const db = require('../db/models')
 const authorization = require('./authorization')
 const { resolveEffectiveMenuAccess, canMenuAction } = require('./effectiveMenuAccess')
 const { MENU_WRITE_GATED_ROUTES } = require('../api/menuRouteMap')
+const { isOwnerV2Enabled } = require('./ownerRoles')
 
 // DR-24 C-02 wave 2: the Role Management checkboxes become a server-side
 // boundary for back-office WRITES, with the client's exact rule
@@ -76,7 +77,7 @@ const menuWriteGate = (file) => {
           }))
         if (
           ctx?.eligible === true &&
-          ctx.activeRole === 'tenant_admin' &&
+          (ctx.activeRole === 'tenant_admin' || (isOwnerV2Enabled() && ctx.activeRole === 'owner')) &&
           ctx.activeTenantId != null
         ) {
           req.authContext = ctx
