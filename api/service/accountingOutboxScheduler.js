@@ -1,7 +1,7 @@
 'use strict'
 const db = require('../../db/models')
 const { tryAcquireSchedulerLock } = require('../../utils/schedulerLock')
-const { drainAccountingOutbox } = require('./accountingOutboxService')
+const { drainAccountingOutboxUntilEmpty } = require('./accountingOutboxService')
 
 let timer = null
 let running = false
@@ -21,7 +21,7 @@ const startAccountingOutboxScheduler = (intervalMs = 30000) => {
         Math.max(intervalMs * 1.5, 45000)
       )
       if (!gotLock) return
-      const result = await drainAccountingOutbox({ limit: 50 })
+      const result = await drainAccountingOutboxUntilEmpty()
       if (result.processed > 0) {
         console.log(
           `Accounting outbox: processed ${result.processed} (posted ${result.posted}, failed ${result.failed})`
