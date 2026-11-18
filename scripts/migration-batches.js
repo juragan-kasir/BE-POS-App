@@ -308,6 +308,18 @@ const E2_BATCHES = Object.freeze({
     // uq_product_bundle_tenant_sku + uq_product_bundle_tenantless_sku. Both
     // models read tenantId, so B20 must be recorded before this code deploys.
     openGates: []
+  }),
+  B21: deepFreeze({
+    id: 'B21',
+    title: 'W3-3 promo/member: discount + member + member_tier tenantId, discount code unique per tenant',
+    expectedCount: 1,
+    migrations: ['20261119000003-promo-member-tenant-id.js'],
+    // FIXING-PLAN W3-3 (BE audit S-04/S-05): nullable tenantId (FK tenant,
+    // RESTRICT) + index on discount, member and member_tier, backfilled from
+    // location.tenantId of the row's store; discount_code_key (global) becomes
+    // uq_discount_tenant_code + uq_discount_tenantless_code. The models read
+    // tenantId, so B21 must be recorded before this code deploys.
+    openGates: []
   })
 })
 
@@ -331,7 +343,8 @@ const BATCH_ORDER = Object.freeze([
   'B17',
   'B18',
   'B19',
-  'B20'
+  'B20',
+  'B21'
 ])
 
 // D-08 B1 resume contracts. A resume finishes a batch whose earlier members

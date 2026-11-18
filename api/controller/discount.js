@@ -7,6 +7,27 @@ const { createAudit } = require('../../utils/auditLog')
 const { enrichAuditFields } = require('../../utils/auditFields')
 const { scalarStoreScope, listStoreIds, storeIdsCondition } = require('../../utils/tenantScope')
 const { authorizedWriteStore } = require('../../utils/storeValidation')
+const { tenantForStore, storeIdOf } = require('../../utils/storeTenant')
+
+// W3-3: discount codes are unique per tenant (uq_discount_tenant_code). A code
+// already used inside the caller's tenant is a 409 the caller can act on
+// instead of a unique-violation 500; another tenant's code is never a
+// conflict (and is never revealed). Soft-deleted rows still hold their code.
+const codeTakenInTenant = async (code, store, excludeId) => {
+  if (!code) return false
+  const tenantId = await tenantForStore(db.sequelize, store)
+  const where = { code, tenantId: tenantId ?? null }
+  if (excludeId) where.id = { [Op.ne]: excludeId }
+  return !!(await Discount.findOne({ where, attributes: ['id'], paranoid: false }))
+}
+
+const codeTakenResponse = (res) =>
+  res.status(409).json({
+    success: false,
+    code: 'CODE_TAKEN',
+    field: 'code',
+    message: 'Kode promo sudah dipakai'
+  })
 
 const attachStoreData = async (rows) => {
   if (!rows?.length) return rows
@@ -532,6 +553,8 @@ exports.postNewDiscount = async (req, res) => {
     })
 
     if (!findOneDiscount) {
+      if (await codeTakenInTenant(code, store)) return codeTakenResponse(res)
+
       const requestedStatus =
         status !== undefined
           ? status === true || status === 'active'
@@ -588,9 +611,10 @@ exports.postNewDiscount = async (req, res) => {
 
 exports.lookupByCode = async (req, res) => {
   const { code } = req.params
-  // Public endpoint (no session): the customer names the outlet.
-  const store = req.query.store ||
-      (req.user?.roleType !== 'super_admin' ? req.user?.store : null)
+  // Public endpoint (no session): the customer names the outlet. W3-3: codes
+  // are unique per tenant, so a lookup without an outlet would match any
+  // tenant's promo — the outlet is required.
+  const store = storeIdOf(req.query.store)
 
   try {
     if (!code) {
@@ -598,12 +622,17 @@ exports.lookupByCode = async (req, res) => {
         .status(400)
         .json({ success: false, message: 'Code is required' })
     }
+    if (store == null) {
+      return res
+        .status(400)
+        .json({ success: false, field: 'store', message: 'store is required' })
+    }
 
     const discount = await Discount.findOne({
       where: {
         code: code.trim().toUpperCase(),
         status: 'active',
-        ...(store ? { store } : {})
+        store
       }
     })
 
@@ -688,6 +717,12 @@ exports.editDiscountById = async (req, res) => {
             : body.status
         : 'active'
 
+    if (body.code) {
+      const codeStore =
+        store ?? (await Discount.findOne({ where: scalarStoreScope(req, { id: req.params.id }), attributes: ['store'] }))?.store
+      if (await codeTakenInTenant(body.code, codeStore, req.params.id)) return codeTakenResponse(res)
+    }
+
     const finalStatus =
       bodyStatus === 'active' && safeStartDate && new Date(safeStartDate) > new Date()
         ? 'upcoming'
@@ -706,7 +741,9 @@ exports.editDiscountById = async (req, res) => {
         {
           name: body.name,
           type: body.type,
-          value: parseInt(body.value),
+          // A partial edit without `value` keeps the stored value (undefined
+          // is omitted by update) instead of writing NaN → 500.
+          value: body.value !== undefined ? parseInt(body.value) : undefined,
           minimumOrder: body.minimumOrder,
           maximumDiscount: body.maximumDiscount,
           startDate: safeStartDate,

@@ -675,7 +675,8 @@ module.exports = async () => {
     '20261114000001-shared-laundry-domain', // batch B16
     '20261118000001-unique-active-owner-per-tenant', // batch B18
     '20261119000001-product-tenant-id', // batch B19
-    '20261119000002-category-bundle-tenant-id' // batch B20
+    '20261119000002-category-bundle-tenant-id', // batch B20
+    '20261119000003-promo-member-tenant-id' // batch B21
   ]
   try {
     const { Sequelize } = require('sequelize')
