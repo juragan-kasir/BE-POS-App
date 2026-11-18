@@ -672,7 +672,8 @@ module.exports = async () => {
   // source of truth, a no-op where the schema already exists.
   const GUARDED_TEST_DB_MIGRATIONS = [
     '20261013000005-p1-canonical-payment-check', // transaction_typepayment_canonical
-    '20261114000001-shared-laundry-domain' // batch B16
+    '20261114000001-shared-laundry-domain', // batch B16
+    '20261118000001-unique-active-owner-per-tenant' // batch B18
   ]
   try {
     const { Sequelize } = require('sequelize')

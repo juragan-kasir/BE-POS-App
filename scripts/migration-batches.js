@@ -271,6 +271,18 @@ const E2_BATCHES = Object.freeze({
     // replay-safe; existing rows are never rewritten. The tenant model reads
     // the new columns, so B17 must be recorded before this code deploys.
     openGates: []
+  }),
+  B18: deepFreeze({
+    id: 'B18',
+    title: 'Owner hierarchy invariant: one ACTIVE owner per tenant',
+    expectedCount: 1,
+    migrations: ['20261118000001-unique-active-owner-per-tenant.js'],
+    // FIXING-PLAN W2-c (BE audit P1-6): partial unique index on
+    // tenant_membership("tenantId") WHERE role = 'owner' AND status = 'ACTIVE'
+    // AND deletedAt IS NULL. Refuses (no DDL) when a tenant already has more
+    // than one ACTIVE owner; legacy tenant_admin rows are not constrained.
+    // No code reads it; run it before or after the deploy.
+    openGates: []
   })
 })
 
@@ -291,7 +303,8 @@ const BATCH_ORDER = Object.freeze([
   'B14',
   'B15',
   'B16',
-  'B17'
+  'B17',
+  'B18'
 ])
 
 // D-08 B1 resume contracts. A resume finishes a batch whose earlier members
