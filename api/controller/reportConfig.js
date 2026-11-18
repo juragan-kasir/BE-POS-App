@@ -105,7 +105,9 @@ const upsertConfig = async (req, res) => {
       row.modifiedBy = req.user?.id || null
       await row.save()
     }
-    createAudit(req, created ? 'create' : 'update', 'report_config', row.id, `Report settings: ${key}`, before, merged)
+    // Awaited: fire-and-forget lost the race against the response (flaky in
+    // CI) and can be dropped entirely when a serverless instance freezes.
+    await createAudit(req, created ? 'create' : 'update', 'report_config', row.id, `Report settings: ${key}`, before, merged)
     return res.json({ success: true, data: { key, config: merged } })
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message })
