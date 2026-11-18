@@ -245,6 +245,19 @@ const E2_BATCHES = Object.freeze({
     // The BE code writes the new labels, so B15 must be recorded before it
     // deploys.
     openGates: []
+  }),
+  B16: deepFreeze({
+    id: 'B16',
+    title: 'Shared laundry domain (laundry order, turnaround, outlet businessType)',
+    expectedCount: 1,
+    migrations: ['20261114000001-shared-laundry-domain.js'],
+    // Laundry vertical (product owner, 2026-11-14). Guarded add-if-missing
+    // DDL: location.businessType (default 'fnb') + laundrySettings,
+    // laundry_order / laundry_status_history / laundry_turnaround, and the
+    // order_item service snapshot. Merged without a batch and recorded on
+    // production by an unbatched run on 2026-11-15 (SequelizeMeta 255);
+    // this batch only makes the inventory explicit for the D-08 tooling.
+    openGates: []
   })
 })
 
@@ -263,7 +276,8 @@ const BATCH_ORDER = Object.freeze([
   'B12',
   'B13',
   'B14',
-  'B15'
+  'B15',
+  'B16'
 ])
 
 // D-08 B1 resume contracts. A resume finishes a batch whose earlier members
