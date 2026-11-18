@@ -15,7 +15,13 @@ const {
   updateSupplierSchema
 } = require('../validation/schemas')
 
-const uploadExcel = multer({ storage: multer.memoryStorage() })
+const uploadExcel = multer({
+  storage: multer.memoryStorage(),
+  // In-memory buffer: without a size cap one large upload can exhaust the
+  // process memory (BE audit 2026-11-18, S-14). Same 5 MB cap as the other
+  // Excel/image uploaders.
+  limits: { fileSize: 5 * 1024 * 1024 }
+})
 
 // ── GET static routes (MUST be before /:id) ──────────────────────────
 router.get('/', authorization, validateStoreAccess, supplierController.getAll)
