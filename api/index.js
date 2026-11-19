@@ -39,6 +39,7 @@ const {
   valueTooLongFromError,
   bodyFor
 } = require('../utils/valueTooLong')
+const { storeTenantResponder, StoreTenantRequiredError, storeTenantBody } = require('../utils/storeTenant')
 const { isPrivateAddress } = require('../utils/privateNetwork')
 const { validate: validateBody } = require('./middleware/validate')
 const { printThermalSchema } = require('./validation/schemas')
@@ -211,6 +212,8 @@ app.use((req, res, next) => {
   userContext.run({ userId: undefined }, () => next())
 })
 app.use(valueTooLongResponder)
+// W3-z / Z2: a write refused for a tenant-less outlet answers 422, not 500.
+app.use(storeTenantResponder)
 
 // ponytail: structured request log JSON — sumber p95/p99 & error rate,
 // tanpa body/PII; skip OPTIONS (preflight noise)
@@ -571,6 +574,7 @@ app.get('/', (_, res) => {
 app.use((err, req, res, _next) => {
   const tooLong = valueTooLongFromError(err)
   if (tooLong) return res.status(400).json(bodyFor(tooLong))
+  if (err instanceof StoreTenantRequiredError) return res.status(422).json(storeTenantBody(err))
   // multer upload caps (BE audit 2026-11-18, S-14): a refused oversize file
   // is a client error, not a 500.
   if (err && err.name === 'MulterError') {
