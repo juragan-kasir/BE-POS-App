@@ -4,6 +4,8 @@ process.env.VERCEL = 'true'
 const request = require('supertest')
 const app = require('../api/index')
 const db = require('../db/models')
+const { getStoreClock } = require('../utils/businessDate')
+const { resolveStoreTimezone } = require('../utils/storeTimezone')
 
 // FG-PRICE-02 / FG-PROMO-01: the diner's summary (POST /order/customer-quote)
 // comes from the same pricing as the QR order, so an automatic campaign shows
@@ -115,7 +117,9 @@ test('the quote refuses what the order would refuse and writes nothing', async (
 })
 
 test('a campaign restricted to today is listed for diners (daysOfWeek is 0–6)', async () => {
-  const today = new Date().getDay()
+  // The server reads the outlet's wall clock (Asia/Jakarta), not the runner's
+  // UTC clock: between 17:00 and 24:00 UTC the two are on different days.
+  const today = getStoreClock(await resolveStoreTimezone(location.id)).day
   const dayCampaign = await db.promo_campaign.create({
     name: `${tag} Hari ini`,
     type: 'automatic',

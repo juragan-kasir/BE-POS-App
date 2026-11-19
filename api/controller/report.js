@@ -5,7 +5,13 @@ const reportDefs = require('../service/reportDefs')
 const { bucketCashFlowTenders } = require('../service/canonicalPayment')
 const { completedSaleSql } = require('../../utils/completedSaleSql')
 const { completedOrderWhere, refundTotals, dayKey } = require('../service/salesFigures')
-const { getStoreTodayBounds, getStoreDayBounds, DEFAULT_TIMEZONE } = require('../../utils/businessDate')
+const {
+  getStoreTodayBounds,
+  getStoreDayBounds,
+  getStoreLocalDate,
+  shiftDateString,
+  DEFAULT_TIMEZONE
+} = require('../../utils/businessDate')
 const { getReportStores, storeWhere } = require('../service/reportDefs/getReportStore')
 const Order = db.order
 
@@ -201,18 +207,19 @@ exports.getSalesSummary = async (req, res) => {
       }))
     }))
 
+    // One row per store-local day from start to end. The bounds are instants
+    // (store midnight = 17:00 UTC the day before for Asia/Jakarta), so the
+    // day keys must come from the store calendar, not from the server's
+    // clock: walking the instants in UTC used to add an empty day before the
+    // range and drop the range's last day (usually today) from the chart.
     const padChartData = (data, start, end) => {
       if (!data.length) return data
-      const s = new Date(start)
-      const e = new Date(end)
       const map = {}
-      for (const d of data) map[d.date] = d
+      for (const d of data) map[dayKey(d.date)] = d
       const result = []
-      const cur = new Date(s)
-      while (cur <= e) {
-        const key = `${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}-${String(cur.getDate()).padStart(2, '0')}`
+      const lastDay = getStoreLocalDate(storeTimezone, new Date(end))
+      for (let key = getStoreLocalDate(storeTimezone, new Date(start)); key <= lastDay; key = shiftDateString(key, 1)) {
         result.push(map[key] || { date: key, sales: 0, orders: 0 })
-        cur.setDate(cur.getDate() + 1)
       }
       return result
     }

@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { getStoreLocalDate, DEFAULT_TIMEZONE } = require('../utils/businessDate')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -211,6 +212,21 @@ describe('report figures count partially refunded sales and subtract refunds', (
     expect(d.totalOrders).toBe(2)
     expect(d.stores.find((r) => r.id === store.id).sales).toBe(144300)
     expect(d.salesChart.reduce((t, r) => t + Number(r.sales || 0), 0)).toBe(144300)
+  })
+
+  test('sales summary chart covers exactly the store-local days asked for, today included', async () => {
+    // Store midnight is 17:00 UTC the day before; the chart used to walk the
+    // range in the server's UTC clock, adding the day before and dropping
+    // the last day (today), so a "today" chart came back empty.
+    const localToday = getStoreLocalDate(DEFAULT_TIMEZONE)
+    const res = await request(app)
+      .get('/report/sales-summary')
+      .set('Authorization', `Bearer ${superToken}`)
+      .query({ store: store.id, startDate: localToday, endDate: localToday })
+    expect(res.status).toBe(200)
+    const chart = res.body.data.salesChart
+    expect(chart.map((r) => String(r.date).slice(0, 10))).toEqual([localToday])
+    expect(chart.reduce((t, r) => t + Number(r.sales || 0), 0)).toBe(144300)
   })
 
   test('daily report: every column is filled', async () => {
