@@ -16,9 +16,19 @@ module.exports = (sequelize, DataTypes) => {
         allowNull: false,
         type: DataTypes.STRING
       },
+      // Unique per tenant (uq_product_bundle_tenant_sku), or globally among
+      // tenant-less rows (uq_product_bundle_tenantless_sku) — migration
+      // 20261119000002.
       sku: {
-        type: DataTypes.STRING,
-        unique: true
+        type: DataTypes.STRING
+      },
+      // Owning tenant, derived from the outlets in `store` (see
+      // resolveStoresTenant); NULL for bundles without outlets or on
+      // tenant-less outlets.
+      tenantId: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        references: { model: 'tenant', key: 'id' }
       },
       description: {
         type: DataTypes.TEXT
@@ -85,6 +95,61 @@ module.exports = (sequelize, DataTypes) => {
       as: 'items'
     })
   }
+
+  // W3-2: `store` is JSONB — an array of outlet ids, or a single id (number or
+  // numeric string). Returns the positive integer ids it names.
+  const storeIdsOf = (store) => {
+    const raw = Array.isArray(store) ? store : store == null || store === '' ? [] : [store]
+    return [...new Set(raw.map(Number).filter((n) => Number.isSafeInteger(n) && n > 0))]
+  }
+
+  // W3-2: the tenant a bundle's outlets belong to — persisted location.tenantId,
+  // never a caller-supplied value. { ok, tenantId, code, message }; tenantId is
+  // null for no outlets or tenant-less outlets. An unknown outlet, a mix of
+  // tenant-less and owned outlets, or outlets of two tenants is refused.
+  const resolveStoresTenant = async (store, { transaction } = {}) => {
+    const ids = storeIdsOf(store)
+    if (ids.length === 0) return { ok: true, tenantId: null, code: null, message: null }
+    const outlets = await sequelize.models.location.findAll({
+      where: { id: ids },
+      attributes: ['id', 'tenantId'],
+      paranoid: false,
+      transaction
+    })
+    if (outlets.length !== ids.length) {
+      return { ok: false, tenantId: null, code: 'BUNDLE_STORE_UNKNOWN', message: 'Toko bundle tidak ditemukan' }
+    }
+    const tenants = [...new Set(outlets.map((l) => l.tenantId ?? null))]
+    if (tenants.length > 1) {
+      return {
+        ok: false,
+        tenantId: null,
+        code: 'BUNDLE_STORE_CROSS_TENANT',
+        message: 'Bundle tidak boleh mencakup toko dari tenant yang berbeda'
+      }
+    }
+    return { ok: true, tenantId: tenants[0], code: null, message: null }
+  }
+
+  // Defense in depth: every write that sets `store` re-derives tenantId, so a
+  // path that skips the controller check can neither store a cross-tenant
+  // bundle nor keep a stale tenant.
+  const deriveTenant = async (instance, options) => {
+    if (!instance.isNewRecord && !instance.changed('store')) return
+    const result = await resolveStoresTenant(instance.store, options)
+    if (!result.ok) {
+      const error = new Error(result.message)
+      error.code = result.code
+      error.statusCode = 400
+      throw error
+    }
+    instance.tenantId = result.tenantId
+  }
+  ProductBundle.addHook('beforeCreate', deriveTenant)
+  ProductBundle.addHook('beforeUpdate', deriveTenant)
+
+  ProductBundle.storeIdsOf = storeIdsOf
+  ProductBundle.resolveStoresTenant = resolveStoresTenant
 
   return ProductBundle
 }

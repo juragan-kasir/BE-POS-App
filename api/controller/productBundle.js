@@ -91,6 +91,30 @@ const countBundleUsage = async (bundleId) => {
   }
 }
 
+// W3-2: every item product must exist and belong to the bundle's tenant. A
+// product of another tenant is reported exactly like a missing one, so a
+// caller never learns another tenant's product ids or prices. Tenant-less
+// products (no outlets yet) stay usable, as before.
+const loadBundleProducts = async (items, tenantId) => {
+  const byId = new Map()
+  for (const item of items) {
+    const productId = Number(item.product)
+    if (byId.has(productId)) continue
+    const product = Number.isSafeInteger(productId) && productId > 0
+      ? await db.product.findByPk(productId)
+      : null
+    const foreign = product && product.tenantId != null && product.tenantId !== tenantId
+    if (!product || foreign) {
+      return { error: `Produk ID ${item.product} tidak ditemukan`, products: null }
+    }
+    byId.set(productId, product)
+  }
+  return { error: null, products: byId }
+}
+
+const storeTenantError = (res, result) =>
+  res.status(400).json({ code: result.code, field: 'store', message: result.message })
+
 const bundleController = {
   async getAll(req, res) {
     try {
@@ -333,14 +357,23 @@ const bundleController = {
 
       const sku = generateBundleSku()
 
+      // MEDIUM fix: removed req.cookies.store. For super_admin, an explicit
+      // body.store is preserved (intentional multi-store bundle creation).
+      // For non-super-admin, req.storeId is the JWT-pinned authoritative store;
+      // body.store is ignored because validateStoreAccess already enforced it.
+      const effectiveStore =
+        store !== undefined ? store : (req.storeId ?? req.user?.store ?? null)
+
+      // W3-2: the bundle's tenant comes from its outlets; its products must
+      // belong to that tenant.
+      const storeTenant = await db.product_bundle.resolveStoresTenant(effectiveStore)
+      if (!storeTenant.ok) return storeTenantError(res, storeTenant)
+      const loaded = await loadBundleProducts(items, storeTenant.tenantId)
+      if (loaded.error) return res.status(400).json({ message: loaded.error })
+
       let originalPrice = 0
       for (const item of items) {
-        const product = await db.product.findByPk(item.product)
-        if (!product) {
-          return res
-            .status(400)
-            .json({ message: `Produk ID ${item.product} tidak ditemukan` })
-        }
+        const product = loaded.products.get(Number(item.product))
         const itemPrice = item.unitPrice || product.price
         originalPrice += itemPrice * (item.quantity || 1)
       }
@@ -350,13 +383,6 @@ const bundleController = {
         originalPrice > 0
           ? ((discountAmount / originalPrice) * 100).toFixed(2)
           : 0
-
-      // MEDIUM fix: removed req.cookies.store. For super_admin, an explicit
-      // body.store is preserved (intentional multi-store bundle creation).
-      // For non-super-admin, req.storeId is the JWT-pinned authoritative store;
-      // body.store is ignored because validateStoreAccess already enforced it.
-      const effectiveStore =
-        store !== undefined ? store : (req.storeId ?? req.user?.store ?? null)
 
       let imageUrl = image || null
       if (req.file) {
@@ -386,7 +412,7 @@ const bundleController = {
       })
 
       for (const item of items) {
-        const product = await db.product.findByPk(item.product)
+        const product = loaded.products.get(Number(item.product))
         const itemPrice = item.unitPrice || product.price
         await db.product_bundle_item.create({
           bundleId: bundle.id,
@@ -428,7 +454,8 @@ const bundleController = {
         .json({ message: 'Bundle berhasil dibuat', data: result })
     } catch (error) {
       console.error('Bundle create error:', error)
-      return res.status(500).json({ message: error.message })
+      // A model guard (e.g. BUNDLE_STORE_CROSS_TENANT) carries its own 400.
+      return res.status(error.statusCode || 500).json({ code: error.code, message: error.message })
     }
   },
 
@@ -466,17 +493,33 @@ const bundleController = {
         store
       } = body
 
+      // W3-2: a new outlet set must stay inside the bundle's tenant, and the
+      // items must belong to it. Both are checked before anything is written
+      // (the old loop deleted the items first and could stop half-way).
+      let bundleTenantId = bundle.tenantId ?? null
+      if (store !== undefined) {
+        const storeTenant = await db.product_bundle.resolveStoresTenant(store)
+        if (!storeTenant.ok) return storeTenantError(res, storeTenant)
+        if (bundle.tenantId != null && storeTenant.tenantId !== bundle.tenantId) {
+          return storeTenantError(res, {
+            code: 'BUNDLE_STORE_CROSS_TENANT',
+            message: 'Bundle tidak boleh dipindah ke toko tenant lain'
+          })
+        }
+        bundleTenantId = storeTenant.tenantId
+      }
+      let loaded = null
+      if (items && items.length > 0) {
+        loaded = await loadBundleProducts(items, bundleTenantId)
+        if (loaded.error) return res.status(400).json({ message: loaded.error })
+      }
+
       let originalPrice = 0
       if (items && items.length > 0) {
         await db.product_bundle_item.destroy({ where: { bundleId: bundle.id } })
 
         for (const item of items) {
-          const product = await db.product.findByPk(item.product)
-          if (!product) {
-            return res
-              .status(400)
-              .json({ message: `Produk ID ${item.product} tidak ditemukan` })
-          }
+          const product = loaded.products.get(Number(item.product))
           const itemPrice = item.unitPrice || product.price
           originalPrice += itemPrice * (item.quantity || 1)
 
@@ -566,7 +609,8 @@ const bundleController = {
         .json({ message: 'Bundle berhasil diupdate', data: result })
     } catch (error) {
       console.error('Bundle update error:', error)
-      return res.status(500).json({ message: error.message })
+      // A model guard (e.g. BUNDLE_STORE_CROSS_TENANT) carries its own 400.
+      return res.status(error.statusCode || 500).json({ code: error.code, message: error.message })
     }
   },
 

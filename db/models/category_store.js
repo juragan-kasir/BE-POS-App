@@ -54,7 +54,7 @@ module.exports = (sequelize, DataTypes) => {
   // location.tenantId values decide it — never a caller-supplied store id.
   // all-tenantless sets stay writable (pre-cutover staging); mixed
   // tenantless+owned and cross-tenant sets are rejected BEFORE any row is
-  // written. Category itself stays tenant-free: no category.tenantId.
+  // written. W3-2: category.tenantId is adopted from these rows (adoptTenant).
   const reject = (code, message) => ({ ok: false, code, message, tenantId: null })
 
   const assertTenantConsistentAssignment = async ({
@@ -167,6 +167,32 @@ module.exports = (sequelize, DataTypes) => {
   category_store.addHook('beforeCreate', guardSingle)
   category_store.addHook('beforeUpdate', guardSingle)
   category_store.addHook('beforeBulkCreate', guardBulk)
+
+  // W3-2: a category takes the tenant of its outlets the first time it is
+  // assigned to one. The guard above already keeps every assignment inside
+  // one tenant (soft-deleted rows included), so the tenant never changes
+  // once set; tenant-less outlets leave it NULL.
+  const adoptTenant = async (categoryIds, options = {}) => {
+    const ids = [...new Set(categoryIds.map(Number).filter((n) => Number.isSafeInteger(n) && n > 0))]
+    if (ids.length === 0) return
+    await sequelize.query(
+      `UPDATE category c
+          SET "tenantId" = l."tenantId"
+         FROM category_store cs
+         JOIN location l ON l.id = cs.store
+        WHERE cs.category = c.id
+          AND cs."deletedAt" IS NULL
+          AND c.id IN (:ids)
+          AND c."tenantId" IS NULL
+          AND l."tenantId" IS NOT NULL`,
+      { replacements: { ids }, transaction: options.transaction }
+    )
+  }
+  category_store.addHook('afterCreate', (instance, options) => adoptTenant([instance.category], options))
+  category_store.addHook('afterUpdate', (instance, options) => adoptTenant([instance.category], options))
+  category_store.addHook('afterBulkCreate', (instances, options) =>
+    adoptTenant(instances.map((i) => i.category), options)
+  )
 
   category_store.assertTenantConsistentAssignment = assertTenantConsistentAssignment
 
