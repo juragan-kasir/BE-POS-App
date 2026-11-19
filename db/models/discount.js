@@ -1,6 +1,8 @@
 'use strict'
+const { attachStoreTenant } = require('../../utils/storeTenant')
+
 module.exports = (sequelize, DataTypes) => {
-  return sequelize.define(
+  const model = sequelize.define(
     'discount',
     {
       id: {
@@ -11,6 +13,13 @@ module.exports = (sequelize, DataTypes) => {
       },
       store: {
         type: DataTypes.INTEGER
+      },
+      // Owning tenant = the tenant of `store` (utils/storeTenant, re-derived
+      // on every write that sets the outlet). Migration 20261119000003.
+      tenantId: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        references: { model: 'tenant', key: 'id' }
       },
       name: {
         allowNull: false,
@@ -49,9 +58,10 @@ module.exports = (sequelize, DataTypes) => {
       modifiedBy: {
         type: DataTypes.INTEGER
       },
+      // Unique per tenant (uq_discount_tenant_code), or globally among
+      // tenant-less rows (uq_discount_tenantless_code) — migration 20261119000003.
       code: {
         type: DataTypes.STRING(50),
-        unique: true,
         allowNull: true
       },
       conditions: {
@@ -66,4 +76,5 @@ module.exports = (sequelize, DataTypes) => {
       tableName: 'discount'
     }
   )
+  return attachStoreTenant(model)
 }
