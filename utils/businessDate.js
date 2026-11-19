@@ -296,6 +296,7 @@ module.exports = {
   getStoreDayBounds,
   getStoreTodayBounds,
   getStoreClock,
+  shiftDateString,
   toStoreRangeBound,
   getStorePeriodBounds,
   getStoreFilterRange
