@@ -4,15 +4,7 @@ const { enrichAuditFields } = require('../../utils/auditFields')
 const { emitToStore } = require('../service/socket')
 const { tenantArrayStoreWhere } = require('../../utils/tenantScope')
 
-const generateQueueNumber = () => {
-  const date = new Date()
-  const hours = String(date.getHours()).padStart(2, '0')
-  const minutes = String(date.getMinutes()).padStart(2, '0')
-  const random = Math.floor(Math.random() * 1000)
-    .toString()
-    .padStart(3, '0')
-  return `Q${hours}${minutes}-${random}`
-}
+const { nextQueueNumber } = require('../../utils/documentNumber')
 
 const queueController = {
   async getQueueList(req, res) {
@@ -147,21 +139,31 @@ const queueController = {
         assignedTo
       } = req.body
 
-      const queueNumber = generateQueueNumber()
-
-      const queue = await db.queue.create({
-        store,
-        queueNumber,
-        customerName,
-        customerPhone,
-        partySize: partySize || 1,
-        priority: priority || 'normal',
-        estimatedWaitMinutes,
-        notes,
-        assignedTo,
-        status: 'waiting',
-        checkedInAt: new Date(),
-        createdBy: req.user?.id
+      // W3-6b: number from the outlet's daily counter, in the same
+      // transaction as the row (a failed insert does not burn a number).
+      // `store` is kept as a one-element JSONB array: the shape the list,
+      // detail and update queries match with @>.
+      const queue = await db.sequelize.transaction(async (transaction) => {
+        const { queueNumber, storeId, businessDate } = await nextQueueNumber(store, { transaction })
+        return db.queue.create(
+          {
+            store: storeId ? [storeId] : store,
+            storeId: storeId || null,
+            businessDate,
+            queueNumber,
+            customerName,
+            customerPhone,
+            partySize: partySize || 1,
+            priority: priority || 'normal',
+            estimatedWaitMinutes,
+            notes,
+            assignedTo,
+            status: 'waiting',
+            checkedInAt: new Date(),
+            createdBy: req.user?.id
+          },
+          { transaction }
+        )
       })
 
       await enrichAuditFields(db, [queue])

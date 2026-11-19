@@ -355,6 +355,18 @@ const E2_BATCHES = Object.freeze({
     // delivery / trip / PO write upserts it, so B24 must be recorded before
     // this code deploys.
     openGates: []
+  }),
+  B25: deepFreeze({
+    id: 'B25',
+    title: 'W3-6b queue numbers: per outlet per business day (storeId, businessDate)',
+    expectedCount: 1,
+    migrations: ['20261119000007-queue-daily-number.js'],
+    // FIXING-PLAN W3-6b (BE audit S-06, K8): queue."storeId" +
+    // queue."businessDate" (backfilled from store / checkedInAt on the
+    // outlet calendar); queue_queue_number (global UNIQUE) becomes
+    // uq_queue_store_day_number. The queue model reads both columns, so B25
+    // must be recorded before this code deploys.
+    openGates: []
   })
 })
 
@@ -382,7 +394,8 @@ const BATCH_ORDER = Object.freeze([
   'B21',
   'B22',
   'B23',
-  'B24'
+  'B24',
+  'B25'
 ])
 
 // D-08 B1 resume contracts. A resume finishes a batch whose earlier members
