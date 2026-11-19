@@ -1,5 +1,6 @@
 const crypto = require('crypto')
 const db = require('../../db/models')
+const { nextDocumentNumber } = require('../../utils/documentNumber')
 const Order = db.order
 const OrderItem = db.order_item
 const OrderStatus = db.order_status
@@ -200,12 +201,6 @@ const getOrderAttributes = async () => {
   return { exclude }
 }
 
-const generateOrderNumber = () => {
-  const date = new Date()
-  const timestamp = date.getTime().toString().slice(-8)
-  const random = Math.random().toString(36).substring(2, 6).toUpperCase()
-  return `ORD${timestamp}${random}`
-}
 
 // F-04: the idempotent-replay recovery must only engage when the unique
 // constraint that fired is one of the ORDER-header uniqueness indexes a
@@ -1587,7 +1582,8 @@ exports.createOrder = async (req, res) => {
       if (existing) return replayCounterOrder(res, existing.id, req.body, authorizedStore)
     }
 
-    const orderNumber = generateOrderNumber()
+    // W3-6: per-outlet daily counter (utils/documentNumber).
+    const orderNumber = await nextDocumentNumber('order', authorizedStore)
 
     const tableCheck = await checkTableAvailable(tableId, authorizedStore)
     if (!tableCheck.ok) {
@@ -4809,10 +4805,7 @@ exports.createCustomerOrder = async (req, res) => {
       if (existingOrder) return replayCustomerOrder(res, existingOrder.id, req.body)
     }
 
-    const orderNumber =
-      'CUST-' +
-      Date.now().toString().slice(-8) +
-      Math.random().toString(36).slice(2, 6).toUpperCase()
+    const orderNumber = await nextDocumentNumber('customer_order', store)
 
     // BA gap 019 (DR-09): a stale unpaid QR order no longer holds the table.
     const currentTable = await releaseTableFromStaleQrOrder(table, store)
@@ -6017,7 +6010,7 @@ exports.createOpenBill = async (req, res) => {
     const taxRate = await getActiveTaxRate(store)
     const serviceChargeRate = await getServiceChargeRate(store)
     const totals = calculateOrderTotals(items, 0, 'none', taxRate, serviceChargeRate)
-    const orderNumber = generateOrderNumber()
+    const orderNumber = await nextDocumentNumber('order', store)
 
     const order = await withDeadlockRetry(() =>
       db.sequelize.transaction(async (t) => {
@@ -6230,6 +6223,5 @@ exports.resolveCounterStore = resolveCounterStore
 exports.loadAndPriceOrderItems = loadAndPriceOrderItems
 exports.createOrderItems = createOrderItems
 exports.sessionCashier = sessionCashier
-exports.generateOrderNumber = generateOrderNumber
 exports.recordOrderPayment = recordOrderPayment
 exports.fetchFullOrder = fetchFullOrder

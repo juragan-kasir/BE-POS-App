@@ -1,4 +1,5 @@
 const db = require('../../db/models')
+const { nextDocumentNumber } = require('../../utils/documentNumber')
 const { Op } = require('sequelize')
 const { enrichAuditFields } = require('../../utils/auditFields')
 const { createAudit } = require('../../utils/auditLog')
@@ -484,21 +485,10 @@ const stockHistoryController = {
         }
       }
 
-      const generateOrderNumber = (prefix) => {
-        const date = new Date()
-        const year = date.getFullYear()
-        const month = String(date.getMonth() + 1).padStart(2, '0')
-        const day = String(date.getDate()).padStart(2, '0')
-        const random = Math.floor(Math.random() * 10000)
-          .toString()
-          .padStart(4, '0')
-        return `${prefix}-${year}${month}${day}-${random}`
-      }
-
       const createdPOs = []
 
       for (const [supplierId, group] of Object.entries(groupedBySupplier)) {
-        const orderNumber = generateOrderNumber('PO')
+        const orderNumber = await nextDocumentNumber('purchase_order', group.store || store)
         const items = group.items.map((ing) => ({
           ingredient: ing.id,
           ingredientName: ing.name,
@@ -570,7 +560,7 @@ const stockHistoryController = {
       }
 
       if (noSupplier.length > 0) {
-        const orderNumber = generateOrderNumber('PO')
+        const orderNumber = await nextDocumentNumber('purchase_order', noSupplier[0]?.store || store)
         const items = noSupplier.map((ing) => ({
           ingredient: ing.id,
           ingredientName: ing.name,

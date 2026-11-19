@@ -1,4 +1,5 @@
 const db = require('../../db/models')
+const { nextDocumentNumber } = require('../../utils/documentNumber')
 const {
   assertNoOwnStockWrites,
   InventoryLinkError,
@@ -581,16 +582,11 @@ const posController = {
           db.sequelize.transaction(async (t) => {
           const transfer = await db.stock_transfer.create(
             {
-              // transferNumber has a bare (non-store-scoped) global unique
-              // constraint. A millisecond timestamp ALONE has zero
-              // collision resistance under real concurrency — two transfer
-              // requests landing in the same millisecond (plausible with
-              // multiple staff/branches submitting at once) previously hit
-              // a hard unique-constraint 500, not a deadlock (so the
-              // withDeadlockRetry wrapper around this transaction wouldn't
-              // catch or retry it). The random suffix matches the pattern
-              // already proven safe for order.orderNumber.
-              transferNumber: `TRF-${Date.now()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`,
+              // transferNumber has a bare global unique constraint. W3-6: a
+              // per-outlet daily counter (utils/documentNumber) inside this
+              // transaction — unique by construction, and a rolled-back
+              // transfer does not burn a number.
+              transferNumber: await nextDocumentNumber('stock_transfer', fromStore, { transaction: t }),
               fromStore,
               toStore,
               notes,
@@ -1755,7 +1751,7 @@ const posController = {
                 order: id,
                 store: order.store,
                 reason: reason.trim(),
-                returnNumber: `SR-${Date.now()}-${Math.random().toString(36).substr(2, 4).toUpperCase()}`,
+                returnNumber: await nextDocumentNumber('sales_return', order.store, { transaction: t }),
                 status: 'pending',
                 refundAmount: totalRefund,
                 refundMethod: refundMethod || order.paymentMethod || 'cash',

@@ -344,6 +344,17 @@ const E2_BATCHES = Object.freeze({
     // single-tenant outlet set). The models read tenantId, so B23 must be
     // recorded before this code deploys.
     openGates: []
+  }),
+  B24: deepFreeze({
+    id: 'B24',
+    title: 'W3-6 document numbers: document_counter (per outlet, type, business day)',
+    expectedCount: 1,
+    migrations: ['20261119000006-document-counter.js'],
+    // FIXING-PLAN W3-6 (BE audit S-06, K8): additive table backing
+    // utils/documentNumber. Every order / return / transfer / request /
+    // delivery / trip / PO write upserts it, so B24 must be recorded before
+    // this code deploys.
+    openGates: []
   })
 })
 
@@ -370,7 +381,8 @@ const BATCH_ORDER = Object.freeze([
   'B20',
   'B21',
   'B22',
-  'B23'
+  'B23',
+  'B24'
 ])
 
 // D-08 B1 resume contracts. A resume finishes a batch whose earlier members

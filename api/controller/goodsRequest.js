@@ -1,30 +1,9 @@
 const db = require('../../db/models')
+const { nextDocumentNumber } = require('../../utils/documentNumber')
 const { Op } = require('sequelize')
 const { createAudit } = require('../../utils/auditLog')
 const { enrichAuditFields } = require('../../utils/auditFields')
 const { resolveStoreId, tenantStoreWhere } = require('../../utils/tenantScope')
-
-const generateRequestNumber = () => {
-  const date = new Date()
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  const random = Math.floor(Math.random() * 10000)
-    .toString()
-    .padStart(4, '0')
-  return `PB-${year}${month}${day}-${random}`
-}
-
-const generateOrderNumber = (prefix) => {
-  const date = new Date()
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  const random = Math.floor(Math.random() * 10000)
-    .toString()
-    .padStart(4, '0')
-  return `${prefix}-${year}${month}${day}-${random}`
-}
 
 const goodsRequestController = {
   async getAll(req, res) {
@@ -269,7 +248,7 @@ const goodsRequestController = {
         })
       }
 
-      const requestNumber = generateRequestNumber()
+      const requestNumber = await nextDocumentNumber('goods_request', store)
 
       const transaction = await db.sequelize.transaction()
 
@@ -581,7 +560,7 @@ const goodsRequestController = {
             return 0
           }
 
-          const orderNumber = generateOrderNumber('PO')
+          const orderNumber = await nextDocumentNumber('purchase_order', request.store || store, { transaction })
           const orderItems = items.map((item) => {
             const price = resolvePrice(item)
             const quantity = Number(item.qty || 0)
