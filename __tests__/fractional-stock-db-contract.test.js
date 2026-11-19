@@ -1,6 +1,7 @@
 process.env.NODE_ENV = 'test'
 process.env.VERCEL = 'true'
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 describe('TDD DB DECIMAL contract - fractional stock', () => {
   let cat
@@ -21,7 +22,7 @@ describe('TDD DB DECIMAL contract - fractional stock', () => {
     await db.product.destroy({ where: { id: p.id }, force: true })
   })
   test('ingredient.stock stores 1.5', async () => {
-    const loc = await db.location.create({ name: 'FRAC_DB_LOC', status: 'active' })
+    const loc = await db.location.create(await withTestTenant({ name: 'FRAC_DB_LOC', status: 'active' }))
     const ing = await db.ingredient.create({ store: loc.id, name: 'FRAC_DB_ING', stock: 0, unit: 'kg' })
     await ing.update({ stock: 1.5 })
     const fresh = await db.ingredient.findByPk(ing.id)

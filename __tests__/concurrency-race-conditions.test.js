@@ -6,6 +6,7 @@ const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -18,7 +19,7 @@ describe('Concurrent checkout — overselling (order.js createOrder)', () => {
   let location, category, product, token
 
   beforeAll(async () => {
-    location = await db.location.create({ name: 'RACE_STORE', status: 'active' })
+    location = await db.location.create(await withTestTenant({ name: 'RACE_STORE', status: 'active' }))
     // W3-3 (DR-17): PPN is explicit setup, never a fallback.
     await db.taxConfig.create({
       name: `RACE_PPN_${location.id}`,
@@ -163,7 +164,7 @@ describe('Concurrent status update — double stock deduction (order.js updateOr
   let location, category, product, order, token
 
   beforeAll(async () => {
-    location = await db.location.create({ name: 'RACE_STATUS_STORE', status: 'active' })
+    location = await db.location.create(await withTestTenant({ name: 'RACE_STATUS_STORE', status: 'active' }))
     // W3-3 (DR-17): PPN is explicit setup, never a fallback.
     await db.taxConfig.create({
       name: `RACE_PPN_${location.id}`,
@@ -262,7 +263,7 @@ describe('Concurrent PO receiving — lost update on product.stock (purchaseOrde
   let location, category, product, poA, poB, poItemA, poItemB, token
 
   beforeAll(async () => {
-    location = await db.location.create({ name: 'RACE_PO_STORE', status: 'active' })
+    location = await db.location.create(await withTestTenant({ name: 'RACE_PO_STORE', status: 'active' }))
     // W3-3 (DR-17): PPN is explicit setup, never a fallback.
     await db.taxConfig.create({
       name: `RACE_PPN_${location.id}`,
@@ -345,7 +346,7 @@ describe('Concurrent duplicate submit — idempotency key (order.js createOrder)
   let location, category, product, token
 
   beforeAll(async () => {
-    location = await db.location.create({ name: 'RACE_IDEMPOTENCY_STORE', status: 'active' })
+    location = await db.location.create(await withTestTenant({ name: 'RACE_IDEMPOTENCY_STORE', status: 'active' }))
     // W3-3 (DR-17): PPN is explicit setup, never a fallback.
     await db.taxConfig.create({
       name: `RACE_PPN_${location.id}`,
@@ -468,7 +469,7 @@ describe('Concurrent order creation — daily customer number uniqueness (order.
   let location, category, product, token
 
   beforeAll(async () => {
-    location = await db.location.create({ name: 'RACE_CUSTNUM_STORE', status: 'active' })
+    location = await db.location.create(await withTestTenant({ name: 'RACE_CUSTNUM_STORE', status: 'active' }))
     // W3-3 (DR-17): PPN is explicit setup, never a fallback.
     await db.taxConfig.create({
       name: `RACE_PPN_${location.id}`,

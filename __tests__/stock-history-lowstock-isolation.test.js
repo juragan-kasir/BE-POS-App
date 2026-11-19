@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -35,8 +36,8 @@ let adminAToken = null
 const nextTag = () => `LS_ISO_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
 
 beforeAll(async () => {
-  storeA = await db.location.create({ name: 'LS_ISO_STORE_A', status: 'active' })
-  storeB = await db.location.create({ name: 'LS_ISO_STORE_B', status: 'active' })
+  storeA = await db.location.create(await withTestTenant({ name: 'LS_ISO_STORE_A', status: 'active' }))
+  storeB = await db.location.create(await withTestTenant({ name: 'LS_ISO_STORE_B', status: 'active' }))
   category = await db.category.create({ name: 'LS_ISO_CATEGORY' })
 
   productStoreA = await db.product.create({

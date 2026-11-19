@@ -6,6 +6,7 @@ const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -62,8 +63,8 @@ async function txnRows(orderId) {
 }
 
 beforeAll(async () => {
-  store = await db.location.create({ name: `DR04_STORE_${Date.now()}`, status: 'active' })
-  storeNoRegister = await db.location.create({ name: `DR04_NOREG_${Date.now()}`, status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: `DR04_STORE_${Date.now()}`, status: 'active' }))
+  storeNoRegister = await db.location.create(await withTestTenant({ name: `DR04_NOREG_${Date.now()}`, status: 'active' }))
   category = await db.category.create({ name: `DR04_CAT_${Date.now()}` })
   product = await db.product.create({
     nameProduct: `DR04_PRODUCT_${Date.now()}`,

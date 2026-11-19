@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 const { getStoreLocalDate, DEFAULT_TIMEZONE } = require('../utils/businessDate')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
@@ -67,7 +68,7 @@ const makeItem = async (order, product, quantity, price, hppSnapshot) => {
 }
 
 beforeAll(async () => {
-  store = await db.location.create({ name: `RFN_STORE_${stamp}`, status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: `RFN_STORE_${stamp}`, status: 'active' }))
   category = await db.category.create({ name: `RFN_CATEGORY_${stamp}` })
   const product = await db.product.create({ nameProduct: `RFN_P_${stamp}`, category: category.id, price: 10000 })
   ids.products.push(product.id)

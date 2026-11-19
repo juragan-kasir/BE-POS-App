@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 const { hybridProducts } = require('../api/service/inventoryLinkService')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
@@ -47,7 +48,7 @@ const addRecipe = async (product) => {
 }
 
 beforeAll(async () => {
-  store = await db.location.create({ name: unique('HYB_STORE'), status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: unique('HYB_STORE'), status: 'active' }))
   category = await db.category.create({ name: unique('HYB_CAT') })
   admin = await db.user.create({
     userName: unique('hyb_admin'),

@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const SUFFIX = `${Date.now()}-${Math.floor(Math.random() * 100000)}`
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
@@ -59,7 +60,7 @@ const makeSwap = (requesterId, targetId, requesterShiftId, targetShiftId) =>
   })
 
 beforeAll(async () => {
-  store = await db.location.create({ name: unique('STORE'), status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: unique('STORE'), status: 'active' }))
   admin = await makeUser('admin', 'admin', store.id)
   staffA = await makeUser('staff_a', 'user', store.id)
   staffB = await makeUser('staff_b', 'user', store.id)

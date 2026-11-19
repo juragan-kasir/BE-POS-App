@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 const {
   buyXGetYCondition,
   spendThreshold,
@@ -39,6 +40,7 @@ const withCampaign = async (rule, rewardValue, run) => {
     type: 'automatic',
     status: 'active',
     store: [store.id],
+    tenantId: store.tenantId,
     startDate: new Date(Date.now() - 3600000),
     endDate: new Date(Date.now() + 86400000),
     currentUsage: 0,
@@ -61,7 +63,7 @@ const withCampaign = async (rule, rewardValue, run) => {
 }
 
 beforeAll(async () => {
-  store = await db.location.create({ name: unique('PRC_STORE'), status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: unique('PRC_STORE'), status: 'active' }))
   category = await db.category.create({ name: unique('PRC_CAT') })
   product = await db.product.create({
     nameProduct: unique('PRC_PRODUCT'),

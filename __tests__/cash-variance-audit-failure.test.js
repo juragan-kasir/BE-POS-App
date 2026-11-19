@@ -14,6 +14,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 const P = 'FP01_D_'
@@ -25,7 +26,7 @@ let adminToken = null
 let superAdminToken = null
 
 beforeAll(async () => {
-  store = await db.location.create({ name: `${P}STORE`, status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: `${P}STORE`, status: 'active' }))
   adminUser = await db.user.create({
     userName: `${P}ADMIN`.toLowerCase(),
     email: `${P}admin@test.com`.toLowerCase(),

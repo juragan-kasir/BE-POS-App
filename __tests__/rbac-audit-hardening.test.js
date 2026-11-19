@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 const { actionFor } = require('../utils/menuWriteGate')
 
 // Role Management checkboxes guard back-office writes on the server with the
@@ -43,7 +44,7 @@ const as = (token, method, path) =>
 const menuDenied = (res) => res.status === 403 && res.body?.code === 'MENU_ACTION_DENIED'
 
 beforeAll(async () => {
-  location = await db.location.create({ name: unique('RAH_STORE'), status: 'active' })
+  location = await db.location.create(await withTestTenant({ name: unique('RAH_STORE'), status: 'active' }))
 })
 
 afterAll(async () => {

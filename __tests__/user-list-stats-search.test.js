@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -39,7 +40,7 @@ const makeUser = async (key, attrs) => {
 }
 
 beforeAll(async () => {
-  store = await db.location.create({ name: unique('STORE'), status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: unique('STORE'), status: 'active' }))
   // A store-bound super_admin sees its own store's non-super_admin users:
   // a fixed audience for exact counts.
   const viewer = await makeUser('viewer', { roleType: 'super_admin', userType: 'admin' })

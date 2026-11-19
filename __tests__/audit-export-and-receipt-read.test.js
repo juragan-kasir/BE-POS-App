@@ -2,6 +2,7 @@ process.env.NODE_ENV = 'test'
 process.env.VERCEL = 'true'
 
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 const reportExport = require('../api/controller/reportExport')
 const receiptController = require('../api/controller/receipt')
 const orderController = require('../api/controller/order')
@@ -37,11 +38,11 @@ const makeRes = () => {
 }
 
 beforeAll(async () => {
-  location = await db.location.create({
+  location = await db.location.create(await withTestTenant({
     name: 'AUDIT_RECEIPT_STORE',
     status: 'active',
     timezone: 'Asia/Jakarta'
-  })
+  }))
   category = await db.category.create({ name: 'AUDIT_RECEIPT_CATEGORY' })
   product = await db.product.create({
     nameProduct: 'AUDIT_RECEIPT_PRODUCT',

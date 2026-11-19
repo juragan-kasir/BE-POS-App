@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -148,8 +149,8 @@ let driver1 = null
 let driver2 = null
 
 beforeAll(async () => {
-  store1 = await db.location.create({ name: 'IDOR_STORE_1', status: 'active' })
-  store2 = await db.location.create({ name: 'IDOR_STORE_2', status: 'active' })
+  store1 = await db.location.create(await withTestTenant({ name: 'IDOR_STORE_1', status: 'active' }))
+  store2 = await db.location.create(await withTestTenant({ name: 'IDOR_STORE_2', status: 'active' }))
 
 
   // P1-4: central per-request gate denies unknown caller identities, so the
@@ -243,6 +244,7 @@ beforeAll(async () => {
   const endDate = new Date(Date.now() + 30 * 86400000)
   campaign1 = await db.promo_campaign.create({
     store: store1.id,
+    tenantId: store1.tenantId,
     name: 'IDOR_CAMPAIGN_1',
     type: 'manual',
     startDate,
@@ -250,6 +252,7 @@ beforeAll(async () => {
   })
   campaign2 = await db.promo_campaign.create({
     store: store2.id,
+    tenantId: store2.tenantId,
     name: 'IDOR_CAMPAIGN_2',
     type: 'manual',
     startDate,

@@ -7,6 +7,7 @@ process.env.VERCEL = 'true'
 // isolated test database (jest globalSetup). Fixtures use the AUTH_T_ prefix
 // and are removed in afterAll. Never touches real data.
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 const {
   TARGET_ROLES,
   MEMBERSHIP_STATUS,
@@ -587,10 +588,10 @@ describe('AUTH-2 product_store tenant consistency', () => {
   })
 
   test('a migration-state store cannot be mixed with an owned store', async () => {
-    const migrationStore = await db.location.create({
+    const migrationStore = await db.location.create(await withTestTenant({
       name: `${P}STORE_MIGRATION`,
       status: 'draft'
-    })
+    }))
     try {
       await db.product_store.create({ product: prodTwo.id, store: storeA1.id })
       await expect(
@@ -609,8 +610,8 @@ describe('AUTH-2 product_store tenant consistency', () => {
   })
 
   test('the pre-cutover all-migration-state assignment stays writable', async () => {
-    const a = await db.location.create({ name: `${P}STORE_MS_A`, status: 'draft' })
-    const b = await db.location.create({ name: `${P}STORE_MS_B`, status: 'draft' })
+    const a = await db.location.create(await withTestTenant({ name: `${P}STORE_MS_A`, status: 'draft' }))
+    const b = await db.location.create(await withTestTenant({ name: `${P}STORE_MS_B`, status: 'draft' }))
     try {
       await db.product_store.bulkCreate([
         { product: prodTwo.id, store: a.id },

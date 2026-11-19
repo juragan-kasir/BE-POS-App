@@ -13,6 +13,7 @@ const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 const TAG = `BOMH_${Date.now()}`
@@ -63,8 +64,8 @@ const bomOf = (productId) =>
 const stockOf = async (ingredient) => Number((await db.ingredient.findByPk(ingredient.id)).stock)
 
 beforeAll(async () => {
-  storeA = await db.location.create({ name: tag('STORE_A'), status: 'active' })
-  storeB = await db.location.create({ name: tag('STORE_B'), status: 'active' })
+  storeA = await db.location.create(await withTestTenant({ name: tag('STORE_A'), status: 'active' }))
+  storeB = await db.location.create(await withTestTenant({ name: tag('STORE_B'), status: 'active' }))
   created.stores.push(storeA.id, storeB.id)
   category = await db.category.create({ name: tag('CAT') })
   created.categories.push(category.id)

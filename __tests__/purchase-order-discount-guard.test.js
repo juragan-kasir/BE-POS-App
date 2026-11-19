@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -21,7 +22,7 @@ let adminUser = null
 const tag = () => `PO_DISC_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
 
 beforeAll(async () => {
-  store = await db.location.create({ name: tag(), status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: tag(), status: 'active' }))
   category = await db.category.create({ name: tag() })
   ingredient = await db.ingredient.create({
     store: store.id,

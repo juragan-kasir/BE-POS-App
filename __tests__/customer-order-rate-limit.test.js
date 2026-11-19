@@ -11,6 +11,7 @@ const request = require('supertest')
 const crypto = require('crypto')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 // FND-002 (security) — regression coverage for the dedicated rate limiter on
 // the anonymous endpoint POST /order/customer-create (see api/routes/order.js:
@@ -89,8 +90,8 @@ const fillBucket = async (storeId, ip, { noKey = false } = {}) => {
 }
 
 beforeAll(async () => {
-  store1 = await db.location.create({ name: 'FND002_STORE_1', status: 'active' })
-  store2 = await db.location.create({ name: 'FND002_STORE_2', status: 'active' })
+  store1 = await db.location.create(await withTestTenant({ name: 'FND002_STORE_1', status: 'active' }))
+  store2 = await db.location.create(await withTestTenant({ name: 'FND002_STORE_2', status: 'active' }))
   category = await db.category.create({ name: 'FND002_CATEGORY' })
   product = await db.product.create({
     nameProduct: 'FND002_PRODUCT',

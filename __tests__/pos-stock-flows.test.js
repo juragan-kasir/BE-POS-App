@@ -19,8 +19,8 @@ let adminAToken = null
 let superAdminToken = null
 
 beforeAll(async () => {
-  storeA = await db.location.create({ name: 'POS_FLOW_STORE_A', status: 'active' })
-  storeB = await db.location.create({ name: 'POS_FLOW_STORE_B', status: 'active' })
+  storeA = await db.location.create({ tenantId: null, name: 'POS_FLOW_STORE_A', status: 'active' })
+  storeB = await db.location.create({ tenantId: null, name: 'POS_FLOW_STORE_B', status: 'active' })
   category = await db.category.create({ name: 'POS_FLOW_CATEGORY' })
 
   productAdjust = await db.product.create({

@@ -6,6 +6,7 @@ const jwt = require('jsonwebtoken')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 const PREFIX = `p13_${Date.now()}_${Math.floor(Math.random() * 1e6)}`
@@ -48,7 +49,7 @@ const sessionCountFor = (userId) =>
     : Promise.resolve(0)
 
 beforeAll(async () => {
-  storeA = await db.location.create({ name: unique('STORE_A'), status: 'active' })
+  storeA = await db.location.create(await withTestTenant({ name: unique('STORE_A'), status: 'active' }))
   adminA = await makeUser('adminA', { roleType: 'admin', userType: 'admin' })
 })
 

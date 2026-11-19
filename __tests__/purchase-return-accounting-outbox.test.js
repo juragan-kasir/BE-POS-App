@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 const { attemptJob, drainAccountingOutbox, enqueueAccountingJob } = require('../api/service/accountingOutboxService')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
@@ -44,7 +45,7 @@ const receivedPO = async (qty, price) => {
 }
 
 beforeAll(async () => {
-  location = await db.location.create({ name: 'PR_OUTBOX_STORE', status: 'active' })
+  location = await db.location.create(await withTestTenant({ name: 'PR_OUTBOX_STORE', status: 'active' }))
   category = await db.category.create({ name: 'PR_OUTBOX_CATEGORY' })
   product = await db.product.create({
     nameProduct: 'PR_OUTBOX_PRODUCT',
@@ -269,7 +270,7 @@ describe('Purchase return journal posting — durable outbox parity with Order/S
   })
 
   test('store isolation: a store A purchase return only creates outbox/journal rows scoped to store A', async () => {
-    const storeB = await db.location.create({ name: 'PR_OUTBOX_STORE_B', status: 'active' })
+    const storeB = await db.location.create(await withTestTenant({ name: 'PR_OUTBOX_STORE_B', status: 'active' }))
     const categoryB = await db.category.create({ name: 'PR_OUTBOX_CATEGORY_B' })
     const productB = await db.product.create({
       nameProduct: 'PR_OUTBOX_PRODUCT_B',

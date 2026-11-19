@@ -21,6 +21,7 @@ process.env.VERCEL = 'true'
 const request = require('supertest')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 let store = null
 let category = null
@@ -42,7 +43,7 @@ const buildUniqueError = (constraint) => {
 }
 
 beforeAll(async () => {
-  store = await db.location.create({ name: 'F04_COLLISION_STORE', status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: 'F04_COLLISION_STORE', status: 'active' }))
   category = await db.category.create({ name: 'F04_COLLISION_CATEGORY' })
   product = await db.product.create({
     nameProduct: 'F04_COLLISION_PRODUCT',

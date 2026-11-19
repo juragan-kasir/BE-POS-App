@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -32,8 +33,8 @@ describe('MEDIUM: Unassigned Account Fail-Closed & Secondary Cookie Sweep', () =
 
   beforeAll(async () => {
     const suffix = Date.now()
-    storeA = await db.location.create({ name: `MED_STORE_A_${suffix}`, status: 'active' })
-    storeB = await db.location.create({ name: `MED_STORE_B_${suffix}`, status: 'active' })
+    storeA = await db.location.create(await withTestTenant({ name: `MED_STORE_A_${suffix}`, status: 'active' }))
+    storeB = await db.location.create(await withTestTenant({ name: `MED_STORE_B_${suffix}`, status: 'active' }))
 
     category = await db.category.create({ name: `MED_CAT_${suffix}`, status: 'active' })
     productA = await db.product.create({

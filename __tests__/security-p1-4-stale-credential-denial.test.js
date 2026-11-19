@@ -6,6 +6,7 @@ const jwt = require('jsonwebtoken')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 const DENIED = 'Akses Ditolak - Anda tidak memiliki izin'
@@ -28,7 +29,7 @@ const snapshotAuth = async (id) => {
 }
 
 beforeAll(async () => {
-  storeA = await db.location.create({ name: unique('STORE_A'), status: 'active' })
+  storeA = await db.location.create(await withTestTenant({ name: unique('STORE_A'), status: 'active' }))
   const mk = async (key, attrs) => {
     const name = unique(key)
     const row = await db.user.create({

@@ -2,6 +2,7 @@ process.env.NODE_ENV = 'test'
 process.env.VERCEL = 'true'
 
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 const {
   consolidateGlobalSuperAdmins
 } = require('../api/service/globalSuperAdminService')
@@ -13,10 +14,10 @@ const keepName = `super_admin_${SUFFIX}`
 const otherNames = [`sa_other_a_${SUFFIX}`, `sa_other_b_${SUFFIX}`]
 
 beforeAll(async () => {
-  store = await db.location.create({
+  store = await db.location.create(await withTestTenant({
     name: `GLOBAL_SA_STORE_${SUFFIX}`,
     status: 'active'
-  })
+  }))
 })
 
 afterAll(async () => {

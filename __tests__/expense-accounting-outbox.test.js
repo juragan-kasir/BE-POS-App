@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 const { attemptJob, drainAccountingOutbox, enqueueAccountingJob } = require('../api/service/accountingOutboxService')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
@@ -53,7 +54,7 @@ const outboxFor = (expenseId) =>
   db.accounting_outbox.findAll({ where: { referenceType: 'expense', referenceId: expenseId } })
 
 beforeAll(async () => {
-  location = await db.location.create({ name: 'EXP_OUTBOX_STORE', status: 'active' })
+  location = await db.location.create(await withTestTenant({ name: 'EXP_OUTBOX_STORE', status: 'active' }))
   category = await db.expense_category.create({
     store: location.id,
     name: 'EXP_OUTBOX_CATEGORY',
@@ -549,7 +550,7 @@ describe('Expense journal posting — durable outbox parity via state reconcilia
   })
 
   test('store isolation: a store A expense only creates outbox/journal rows scoped to store A', async () => {
-    const storeB = await db.location.create({ name: 'EXP_OUTBOX_STORE_B', status: 'active' })
+    const storeB = await db.location.create(await withTestTenant({ name: 'EXP_OUTBOX_STORE_B', status: 'active' }))
     const categoryB = await db.expense_category.create({
       store: storeB.id,
       name: 'EXP_OUTBOX_CATEGORY_B',

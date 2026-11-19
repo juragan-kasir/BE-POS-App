@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -14,7 +15,7 @@ let cashAccountId = null
 let revenueAccountId = null
 
 beforeAll(async () => {
-  location = await db.location.create({ name: 'ACC_FLOW_STORE', status: 'active' })
+  location = await db.location.create(await withTestTenant({ name: 'ACC_FLOW_STORE', status: 'active' }))
   // P1-4: central gate denies unknown caller identities; these rows
   // satisfy the identity invariant. Assertions below are unchanged.
   await db.user.create({

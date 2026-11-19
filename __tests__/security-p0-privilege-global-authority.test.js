@@ -14,6 +14,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 const BACKUP_DIR = process.env.BACKUP_DIR
@@ -56,8 +57,8 @@ const snapshotUser = async (id) => {
 }
 
 beforeAll(async () => {
-  storeA = await db.location.create({ name: unique('STORE_A'), status: 'active' })
-  storeB = await db.location.create({ name: unique('STORE_B'), status: 'active' })
+  storeA = await db.location.create(await withTestTenant({ name: unique('STORE_A'), status: 'active' }))
+  storeB = await db.location.create(await withTestTenant({ name: unique('STORE_B'), status: 'active' }))
   roleSuper = await db.role.create({ name: unique('ROLE_SUPER'), roleType: 'super_admin', store: null })
   roleUser = await db.role.create({ name: unique('ROLE_USER'), roleType: 'user', store: storeA.id })
   roleAdmin = await db.role.create({ name: unique('ROLE_ADMIN'), roleType: 'admin', store: storeA.id })

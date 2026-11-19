@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -79,7 +80,7 @@ const rejectReturn = (returnId) =>
 const poStatus = async (poId) => (await db.purchase_order.findByPk(poId)).status
 
 beforeAll(async () => {
-  location = await db.location.create({ name: 'PO_FULFILL_STORE', status: 'active' })
+  location = await db.location.create(await withTestTenant({ name: 'PO_FULFILL_STORE', status: 'active' }))
   category = await db.category.create({ name: 'PO_FULFILL_CATEGORY' })
   product = await db.product.create({
     nameProduct: 'PO_FULFILL_PRODUCT',
@@ -220,7 +221,7 @@ describe('F22-B10-02 — Purchase Order fulfillment status is return-aware', () 
   })
 
   test('Scenario 7: store isolation — a return in Store A never affects Store B fulfillment', async () => {
-    const storeB = await db.location.create({ name: 'PO_FULFILL_STORE_B', status: 'active' })
+    const storeB = await db.location.create(await withTestTenant({ name: 'PO_FULFILL_STORE_B', status: 'active' }))
     const productStoreB = await db.product.create({
       nameProduct: 'PO_FULFILL_PRODUCT_STOREB',
       category: category.id,

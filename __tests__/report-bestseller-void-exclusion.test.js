@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -23,7 +24,7 @@ let productVoided = null
 let token = null
 
 beforeAll(async () => {
-  store = await db.location.create({ name: `BSVF_STORE_${SUFFIX}`, status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: `BSVF_STORE_${SUFFIX}`, status: 'active' }))
   category = await db.category.create({ name: `BSVF_CAT_${SUFFIX}` })
   productValid = await db.product.create({
     nameProduct: `BSVF_VALID_${SUFFIX}`,

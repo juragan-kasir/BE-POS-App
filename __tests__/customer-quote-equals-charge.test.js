@@ -4,6 +4,7 @@ process.env.VERCEL = 'true'
 const request = require('supertest')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 const { getStoreClock } = require('../utils/businessDate')
 const { resolveStoreTimezone } = require('../utils/storeTimezone')
 
@@ -19,7 +20,7 @@ let table
 let campaign
 
 beforeAll(async () => {
-  location = await db.location.create({ name: `${tag}_STORE`, status: 'active' })
+  location = await db.location.create(await withTestTenant({ name: `${tag}_STORE`, status: 'active' }))
   category = await db.category.create({ name: `${tag}_CAT` })
   product = await db.product.create({
     nameProduct: `${tag}_PRODUCT`,
@@ -35,6 +36,7 @@ beforeAll(async () => {
     type: 'automatic',
     status: 'active',
     store: [location.id],
+    tenantId: location.tenantId,
     startDate: new Date(Date.now() - 3600000),
     endDate: new Date(Date.now() + 86400000),
     currentUsage: 0,
@@ -125,6 +127,7 @@ test('a campaign restricted to today is listed for diners (daysOfWeek is 0–6)'
     type: 'automatic',
     status: 'active',
     store: [location.id],
+    tenantId: location.tenantId,
     startDate: new Date(Date.now() - 3600000),
     endDate: new Date(Date.now() + 86400000),
     daysOfWeek: [today],

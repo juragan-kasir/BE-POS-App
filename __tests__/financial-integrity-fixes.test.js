@@ -6,6 +6,7 @@ const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 const { adjustMemberPoints } = require('../api/service/loyaltyService')
 const { incrementPromoUsage } = require('../api/service/promoUsageService')
 const {
@@ -30,7 +31,7 @@ let cashierToken = null
 let cashierUserId = null
 
 beforeAll(async () => {
-  store = await db.location.create({ name: 'FIN_INTEGRITY_STORE', status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: 'FIN_INTEGRITY_STORE', status: 'active' }))
   category = await db.category.create({ name: 'FIN_INTEGRITY_CATEGORY' })
   product = await db.product.create({
     nameProduct: 'FIN_INTEGRITY_PRODUCT',

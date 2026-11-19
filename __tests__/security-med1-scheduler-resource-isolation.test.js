@@ -2,6 +2,7 @@ process.env.NODE_ENV = 'test'
 process.env.VERCEL = 'true'
 
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 const { Op } = require('sequelize')
 const { generateDueRecurringExpenses } = require('../api/service/expenseScheduler')
 const { expirePendingSwaps } = require('../api/service/shiftSwapScheduler')
@@ -10,8 +11,8 @@ let storeA, storeB
 
 describe('MED-1 scheduler resource isolation (bounded, fair batches)', () => {
   beforeAll(async () => {
-    storeA = await db.location.create({ name: 'MED1_STORE_A', status: 'active' })
-    storeB = await db.location.create({ name: 'MED1_STORE_B', status: 'active' })
+    storeA = await db.location.create(await withTestTenant({ name: 'MED1_STORE_A', status: 'active' }))
+    storeB = await db.location.create(await withTestTenant({ name: 'MED1_STORE_B', status: 'active' }))
   })
 
   afterAll(async () => {

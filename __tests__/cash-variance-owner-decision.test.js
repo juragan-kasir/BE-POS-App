@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 const SUFFIX = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
@@ -20,10 +21,10 @@ const decideVariance = (id, decision) =>
     .send({ decision })
 
 beforeAll(async () => {
-  store = await db.location.create({
+  store = await db.location.create(await withTestTenant({
     name: `ADR01_VARIANCE_STORE_${SUFFIX}`,
     status: 'active'
-  })
+  }))
   admin = await db.user.create({
     userName: `admin_adr01_${SUFFIX}`,
     email: `admin_adr01_${SUFFIX}@test.com`,

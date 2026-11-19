@@ -12,6 +12,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 const { nextQueueNumber } = require('../utils/documentNumber')
 const { getStoreLocalDate } = require('../utils/businessDate')
 const migration = require('../db/migrations/20261119000007-queue-daily-number')
@@ -33,8 +34,8 @@ const addToQueue = (who, store, name = 'Tamu') =>
   request(app).post('/queue').set('Authorization', `Bearer ${who.token}`).send({ store: store.id, customerName: name, partySize: 2 })
 
 beforeAll(async () => {
-  f.a = await db.location.create({ name: uniq('A'), status: 'active', timezone: 'Asia/Jakarta' })
-  f.b = await db.location.create({ name: uniq('B'), status: 'active', timezone: 'Asia/Jakarta' })
+  f.a = await db.location.create(await withTestTenant({ name: uniq('A'), status: 'active', timezone: 'Asia/Jakarta' }))
+  f.b = await db.location.create(await withTestTenant({ name: uniq('B'), status: 'active', timezone: 'Asia/Jakarta' }))
   f.ka = await makeCashier(f.a)
   f.kb = await makeCashier(f.b)
 })
@@ -101,7 +102,7 @@ test('40 concurrent counter transactions (pool max 20) all succeed: the timezone
   // Before: resolveStoreTimezone ran outside the transaction and needed a
   // second pool connection; 20 open transactions waiting for it starved the
   // pool (2/40 ok, the rest SequelizeConnectionAcquireTimeoutError at 30 s).
-  const loc = await db.location.create({ name: uniq('POOL'), status: 'active', timezone: 'Asia/Jakarta' })
+  const loc = await db.location.create(await withTestTenant({ name: uniq('POOL'), status: 'active', timezone: 'Asia/Jakarta' }))
   try {
     const started = Date.now()
     const results = await Promise.all(

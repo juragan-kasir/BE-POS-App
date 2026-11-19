@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken, createAuthenticatedTestSession } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 const { getStoreLocalDate } = require('../utils/businessDate')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
@@ -39,16 +40,16 @@ let adminJayapuraToken = null
 const nextTag = () => `AP_TZ_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
 
 beforeAll(async () => {
-  storeJakarta = await db.location.create({
+  storeJakarta = await db.location.create(await withTestTenant({
     name: 'AP_TZ_STORE_JAKARTA',
     status: 'active',
     timezone: 'Asia/Jakarta'
-  })
-  storeJayapura = await db.location.create({
+  }))
+  storeJayapura = await db.location.create(await withTestTenant({
     name: 'AP_TZ_STORE_JAYAPURA',
     status: 'active',
     timezone: 'Asia/Jayapura'
-  })
+  }))
   category = await db.category.create({ name: 'AP_TZ_CATEGORY' })
 
   ingredientJakarta = await db.ingredient.create({
@@ -243,7 +244,7 @@ describe('Location timezone — IANA validation and safe default', () => {
     // storeJakarta was created WITH an explicit timezone; this proves the
     // column/model default itself, independent of that explicit value,
     // by creating a second row with no timezone key at all.
-    const legacyStyle = await db.location.create({ name: nextTag(), status: 'active' })
+    const legacyStyle = await db.location.create(await withTestTenant({ name: nextTag(), status: 'active' }))
     const legacyFresh = await db.location.findByPk(legacyStyle.id)
     expect(legacyFresh.timezone).toBe('Asia/Jakarta')
     expect(fresh.timezone).toBe('Asia/Jakarta')

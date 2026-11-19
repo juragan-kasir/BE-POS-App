@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -46,7 +47,7 @@ async function movementCount(register, key) {
 }
 
 beforeAll(async () => {
-  store = await db.location.create({ name: `CMIDEM_STORE_${Date.now()}`, status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: `CMIDEM_STORE_${Date.now()}`, status: 'active' }))
   const adminUser = await db.user.create({
     userName: `admin_cmidem_${Date.now()}`,
     email: `admin_cmidem_${Date.now()}@test.com`,

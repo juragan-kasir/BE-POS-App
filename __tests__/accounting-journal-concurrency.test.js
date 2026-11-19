@@ -2,6 +2,7 @@ process.env.NODE_ENV = 'test'
 process.env.VERCEL = 'true'
 
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 const { Op } = require('sequelize')
 const accountingService = require('../api/service/accountingService')
 const accountingOutboxService = require('../api/service/accountingOutboxService')
@@ -27,7 +28,7 @@ function orderPayload(store, orderId, overrides = {}) {
 
 describe('F-02 journal posting — double-post, duplicate entryNumber, outbox integrity', () => {
   beforeAll(async () => {
-    location = await db.location.create({ name: 'JV_RACE_STORE', status: 'active' })
+    location = await db.location.create(await withTestTenant({ name: 'JV_RACE_STORE', status: 'active' }))
     refSeq = 800000
     // Warm up default accounts (fixed impl also seeds the per-store counter here).
     await accountingService.postOrderJournal(orderPayload(location.id, refSeq++))

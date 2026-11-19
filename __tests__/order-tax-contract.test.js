@@ -6,6 +6,7 @@ const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -16,7 +17,7 @@ let cashierToken = null
 let tableA = null
 
 beforeAll(async () => {
-  location = await db.location.create({ name: 'TAX_CT_STORE', status: 'active' })
+  location = await db.location.create(await withTestTenant({ name: 'TAX_CT_STORE', status: 'active' }))
   category = await db.category.create({ name: 'TAX_CT_CATEGORY' })
   productA = await db.product.create({
     nameProduct: 'TAX_CT_PRODUCT_A',

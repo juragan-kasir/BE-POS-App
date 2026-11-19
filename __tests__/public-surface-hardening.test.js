@@ -4,6 +4,7 @@ process.env.VERCEL = 'true'
 const request = require('supertest')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 let store = null
 let category = null
@@ -11,10 +12,10 @@ let product = null
 let discount = null
 
 beforeAll(async () => {
-  store = await db.location.create({
+  store = await db.location.create(await withTestTenant({
     name: 'PUBLIC_SURFACE_STORE',
     status: 'active'
-  })
+  }))
   category = await db.category.create({ name: 'PUBLIC_SURFACE_CATEGORY' })
   product = await db.product.create({
     nameProduct: 'PUBLIC_SURFACE_PRODUCT',

@@ -2,13 +2,14 @@ process.env.NODE_ENV = 'test'
 process.env.VERCEL = 'true'
 
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 let location = null
 let category = null
 let product = null
 
 beforeAll(async () => {
-  location = await db.location.create({ name: 'CHECK_CONSTRAINT_STORE', status: 'active' })
+  location = await db.location.create(await withTestTenant({ name: 'CHECK_CONSTRAINT_STORE', status: 'active' }))
   category = await db.category.create({ name: 'CHECK_CONSTRAINT_CATEGORY' })
   product = await db.product.create({
     nameProduct: 'CHECK_CONSTRAINT_PRODUCT',

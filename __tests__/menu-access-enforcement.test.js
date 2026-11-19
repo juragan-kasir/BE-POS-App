@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 // DR-24 C-02 / DR-12 §35.4: the role accessMenu is a server-side permission
 // list too, not only a client rendering hint. `requireMenuAction` mirrors the
@@ -54,7 +55,7 @@ const createTable = (token, name) =>
     .send({ store: location.id, name })
 
 beforeAll(async () => {
-  location = await db.location.create({ name: unique('C02_STORE'), status: 'active' })
+  location = await db.location.create(await withTestTenant({ name: unique('C02_STORE'), status: 'active' }))
 })
 
 afterAll(async () => {

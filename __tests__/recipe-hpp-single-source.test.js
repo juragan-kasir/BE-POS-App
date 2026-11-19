@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 const { recipeCosting, recipeYield } = require('../api/service/itemCostService')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
@@ -101,8 +102,8 @@ const sell = (items) =>
     })
 
 beforeAll(async () => {
-  store = await db.location.create({ name: unique('HPP1_STORE'), status: 'active' })
-  otherStore = await db.location.create({ name: unique('HPP1_OTHER'), status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: unique('HPP1_STORE'), status: 'active' }))
+  otherStore = await db.location.create(await withTestTenant({ name: unique('HPP1_OTHER'), status: 'active' }))
   category = await db.category.create({ name: unique('HPP1_CAT') })
   await db.taxConfig.create({ store: store.id, name: unique('HPP1_PPN'), rate: 0, type: 'ppn', status: 'active' })
   admin = await db.user.create({

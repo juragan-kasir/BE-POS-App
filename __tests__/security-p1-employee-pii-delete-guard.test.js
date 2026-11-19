@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -22,7 +23,7 @@ let peerBoundSuperToken = null
 let globalSuperToken = null
 
 beforeAll(async () => {
-  store1 = await db.location.create({ name: 'PII_STORE_1', status: 'active' })
+  store1 = await db.location.create(await withTestTenant({ name: 'PII_STORE_1', status: 'active' }))
 
   admin = await db.user.create({
     id: 99401,

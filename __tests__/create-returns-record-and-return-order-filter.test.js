@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 // The FE success notice opens the record it just created ("Lihat Detail"),
 // so a create must return it; and the order detail page lists the sales
@@ -21,10 +22,10 @@ let orderA = null
 let orderB = null
 
 beforeAll(async () => {
-  location = await db.location.create({
+  location = await db.location.create(await withTestTenant({
     name: `CRID_STORE_${stamp}`,
     status: 'active'
-  })
+  }))
   adminUser = await db.user.create({
     userName: `crid_admin_${stamp}`,
     email: `crid_admin_${stamp}@test.com`,

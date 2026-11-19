@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 const cashFlowDef = require('../api/service/reportDefs/cashFlow')
 const { bucketCashFlowTenders } = require('../api/service/canonicalPayment')
 
@@ -41,7 +42,7 @@ const TENDERS = [
 const EXPECTED = { tunai: 100000, qris: 50000, transfer: 30000, lainnya: 215000 }
 
 beforeAll(async () => {
-  store = await db.location.create({ name: `CF_STORE_${SUFFIX}`, status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: `CF_STORE_${SUFFIX}`, status: 'active' }))
   await db.user.create({
     id: 7201,
     userName: `cashier_cf_${SUFFIX}`,
@@ -138,7 +139,7 @@ describe('cash-flow tender edge cases', () => {
   })
 
   test('the database rejects a non-canonical tender outright', async () => {
-    const otherStore = await db.location.create({ name: `CF_UNKNOWN_${SUFFIX}`, status: 'active' })
+    const otherStore = await db.location.create(await withTestTenant({ name: `CF_UNKNOWN_${SUFFIX}`, status: 'active' }))
     try {
       const order = await db.order.create({
         orderNumber: `CF-UNK-${SUFFIX}`,
@@ -158,7 +159,7 @@ describe('cash-flow tender edge cases', () => {
   })
 
   test('empty data preserves zero behavior and shape', async () => {
-    const emptyStore = await db.location.create({ name: `CF_EMPTY_${SUFFIX}`, status: 'active' })
+    const emptyStore = await db.location.create(await withTestTenant({ name: `CF_EMPTY_${SUFFIX}`, status: 'active' }))
     try {
       const { rows } = await cashFlowDef.getData(reqFor(emptyStore.id))
       const byKeterangan = Object.fromEntries(rows.map((r) => [r.keterangan, r.nominal]))

@@ -26,7 +26,7 @@ beforeAll(async () => {
   f.tB = await db.tenant.create({ code: uniq('b').replace(/_/g, '-'), name: uniq('TB') })
   f.a1 = await db.location.create({ name: uniq('A1'), status: 'active', tenantId: f.tA.id })
   f.b1 = await db.location.create({ name: uniq('B1'), status: 'active', tenantId: f.tB.id })
-  f.free = await db.location.create({ name: uniq('F'), status: 'active' })
+  f.free = await db.location.create({ tenantId: null, name: uniq('F'), status: 'active' })
   f.category = await db.category.create({ name: uniq('CAT') })
   f.product = await db.product.create({ nameProduct: uniq('P'), category: f.category.id, price: 10000, stock: 50, tenantId: f.tA.id })
   await db.product_store.create({ product: f.product.id, store: f.a1.id })

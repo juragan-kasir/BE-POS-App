@@ -6,6 +6,7 @@ const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -31,7 +32,7 @@ const setStatus = (id, status, reason, asToken = token) =>
 
 describe('F-03 cancelled/refunded order must not be resurrected to paid', () => {
   beforeAll(async () => {
-    location = await db.location.create({ name: 'F03_RACE_STORE', status: 'active' })
+    location = await db.location.create(await withTestTenant({ name: 'F03_RACE_STORE', status: 'active' }))
     category = await db.category.create({ name: 'F03_CATEGORY' })
     product = await db.product.create({
       nameProduct: 'F03_PRODUCT',

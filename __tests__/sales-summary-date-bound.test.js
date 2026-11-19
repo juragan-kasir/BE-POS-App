@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -14,7 +15,7 @@ let recentOrder = null
 let oldOrder = null
 
 beforeAll(async () => {
-  location = await db.location.create({ name: 'SALES_SUMMARY_STORE', status: 'active' })
+  location = await db.location.create(await withTestTenant({ name: 'SALES_SUMMARY_STORE', status: 'active' }))
 
   // P1-4: central gate denies unknown caller identities; this row gives the
   // caller id a real identity. Assertions below are unchanged.
@@ -102,8 +103,8 @@ describe('GET /report/sales-summary — per-store breakdown (derived from the gr
   let superAdminToken = null
 
   beforeAll(async () => {
-    locA = await db.location.create({ name: 'SALES_SUMMARY_STORE_A', status: 'active' })
-    locB = await db.location.create({ name: 'SALES_SUMMARY_STORE_B', status: 'active' })
+    locA = await db.location.create(await withTestTenant({ name: 'SALES_SUMMARY_STORE_A', status: 'active' }))
+    locB = await db.location.create(await withTestTenant({ name: 'SALES_SUMMARY_STORE_B', status: 'active' }))
 
     // P1-4: central gate denies unknown caller identities; this row gives the
     // caller id a real identity. Assertions below are unchanged.

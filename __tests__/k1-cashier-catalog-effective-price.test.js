@@ -10,6 +10,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 const PREFIX = 'K1EP_'
@@ -26,8 +27,8 @@ let cashierAToken = null
 let superToken = null
 
 beforeAll(async () => {
-  storeA = await db.location.create({ name: 'K1EP_STORE_A', status: 'active' })
-  storeB = await db.location.create({ name: 'K1EP_STORE_B', status: 'active' })
+  storeA = await db.location.create(await withTestTenant({ name: 'K1EP_STORE_A', status: 'active' }))
+  storeB = await db.location.create(await withTestTenant({ name: 'K1EP_STORE_B', status: 'active' }))
   // The cashier catalog inner-joins an active category.
   category = await db.category.create({ name: 'K1EP_CAT', status: 'active' })
   // Created in this order so id ASC paging is deterministic: product,

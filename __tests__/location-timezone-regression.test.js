@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -127,11 +128,11 @@ describe('Blocker 1 — Location timezone: creation must not 500 when column exi
   })
 
   test('location model default is Asia/Jakarta when no timezone supplied at ORM level', async () => {
-    const loc = await db.location.create({
+    const loc = await db.location.create(await withTestTenant({
       name: `TZ_ORM_DEFAULT_${Date.now()}`,
       status: 'active',
       createdBy: superAdminUser.id
-    })
+    }))
     expect(loc.timezone).toBe('Asia/Jakarta')
     await loc.destroy({ force: true })
   })

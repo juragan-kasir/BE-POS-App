@@ -6,6 +6,7 @@ const { signSessionToken } = require('../test-helpers/authSession')
 const excelJS = require('exceljs')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -52,8 +53,8 @@ const buildOpnameExcel = ({ lokasiName = null } = {}) => {
 
 describe('SO-01/02/03 stockOpname.js cookie-based tenant-isolation bypass', () => {
   beforeAll(async () => {
-    storeA = await db.location.create({ name: 'SO_STORE_A', status: 'active' })
-    storeB = await db.location.create({ name: 'SO_STORE_B', status: 'active' })
+    storeA = await db.location.create(await withTestTenant({ name: 'SO_STORE_A', status: 'active' }))
+    storeB = await db.location.create(await withTestTenant({ name: 'SO_STORE_B', status: 'active' }))
 
 
     // P1-4: central gate denies unknown caller identities; these rows give

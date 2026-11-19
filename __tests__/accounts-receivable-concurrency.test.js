@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -38,7 +39,7 @@ const pay = (id, body) =>
 
 describe('F-01 accounts_receivable.recordPayment — concurrent double-apply / lost update', () => {
   beforeAll(async () => {
-    location = await db.location.create({ name: 'AR_RACE_STORE', status: 'active' })
+    location = await db.location.create(await withTestTenant({ name: 'AR_RACE_STORE', status: 'active' }))
     orderSeq = 900000
   // P1-4: central gate denies unknown caller identities; these rows
   // satisfy the identity invariant. Assertions below are unchanged.

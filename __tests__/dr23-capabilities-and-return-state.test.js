@@ -6,6 +6,7 @@ const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -85,7 +86,7 @@ async function deniedAudits(entity, capability) {
 }
 
 beforeAll(async () => {
-  store = await db.location.create({ name: unique('CAP_STORE'), status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: unique('CAP_STORE'), status: 'active' }))
   category = await db.category.create({ name: unique('CAP_CAT') })
   product = await db.product.create({
     nameProduct: unique('CAP_PRODUCT'),

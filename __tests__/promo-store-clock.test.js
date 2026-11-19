@@ -7,6 +7,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 const { getStoreClock } = require('../utils/businessDate')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
@@ -28,11 +29,11 @@ const windowAroundStoreNow = () => {
 }
 
 beforeAll(async () => {
-  store = await db.location.create({
+  store = await db.location.create(await withTestTenant({
     name: unique('PSC_STORE'),
     status: 'active',
     timezone: STORE_TIMEZONE
-  })
+  }))
   category = await db.category.create({ name: unique('PSC_CAT') })
   product = await db.product.create({
     nameProduct: unique('PSC_PRODUCT'),
@@ -81,6 +82,7 @@ test('a happy hour set in store time applies during that store hour', async () =
     type: 'happy_hour',
     status: 'active',
     store: [store.id],
+    tenantId: store.tenantId,
     startDate: new Date(Date.now() - 86400000),
     endDate: new Date(Date.now() + 86400000),
     ...windowAroundStoreNow(),

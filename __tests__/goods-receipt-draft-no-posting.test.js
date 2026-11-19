@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -69,7 +70,7 @@ async function activeBatches() {
 }
 
 beforeAll(async () => {
-  location = await db.location.create({ name: `GR_DRAFT_STORE_${SUFFIX}`, status: 'active' })
+  location = await db.location.create(await withTestTenant({ name: `GR_DRAFT_STORE_${SUFFIX}`, status: 'active' }))
   category = await db.category.create({ name: `GR_DRAFT_CAT_${SUFFIX}` })
   product = await db.product.create({
     nameProduct: `GR_DRAFT_PROD_${SUFFIX}`,

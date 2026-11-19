@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 const { computeOrderCogs } = require('../api/service/accountingService')
 const {
   ingredientBaseUnitCost,
@@ -97,7 +98,7 @@ async function makeRecipe(product, lines) {
 }
 
 beforeAll(async () => {
-  store = await db.location.create({ name: unique('HPP_STORE'), status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: unique('HPP_STORE'), status: 'active' }))
   category = await db.category.create({ name: unique('HPP_CAT') })
   await db.taxConfig.create({ store: store.id, name: unique('HPP_PPN'), rate: 0, type: 'ppn', status: 'active' })
   admin = await db.user.create({

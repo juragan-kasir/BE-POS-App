@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -167,13 +168,13 @@ describe('Batch 6D — location.openingHours is24Hours flag', () => {
   })
 
   test('legacy row written without is24Hours normalizes to false on read, without needing a migration', async () => {
-    const legacy = await db.location.create({
+    const legacy = await db.location.create(await withTestTenant({
       name: `LOC24H_LEGACY_${Date.now()}`,
       status: 'active',
       createdBy: superAdminUser.id,
       // Simulates data written before this field existed — no is24Hours key.
       openingHours: [{ day: 'Saturday', open: '08:00', close: '17:00' }]
-    })
+    }))
 
     const detail = await getLocationDetail(legacy.id)
     expect(detail.status).toBe(200)

@@ -4,6 +4,7 @@ process.env.VERCEL = 'true'
 const request = require('supertest')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 // DR-24 C-24b / DR-20 §35.6: a public QR order is created by no authenticated
 // actor, so the create event must be traceable via the append-only audit log:
@@ -22,7 +23,7 @@ const orderIds = []
 const createQrOrder = (body) => request(app).post('/order/customer-create').send(body)
 
 beforeAll(async () => {
-  location = await db.location.create({ name: unique('C24B_STORE'), status: 'active' })
+  location = await db.location.create(await withTestTenant({ name: unique('C24B_STORE'), status: 'active' }))
   category = await db.category.create({ name: unique('C24B_CATEGORY') })
   product = await db.product.create({
     nameProduct: unique('C24B_PRODUCT'),

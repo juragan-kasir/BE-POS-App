@@ -11,6 +11,7 @@ const jwt = require('jsonwebtoken')
 const crypto = require('crypto')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 const mw = require('../utils/authorizationContextMiddleware')
 const { hashResetToken } = require('../utils/resetToken')
 const { signSessionToken, createAuthenticatedTestSession } = require('../test-helpers/authSession')
@@ -66,7 +67,7 @@ const disable = (userId, status = 'inactive') =>
   request(app).put('/auth/change-user-status').set(bearer(adminToken)).send({ id: userId, status })
 
 beforeAll(async () => {
-  storeA = await db.location.create({ name: unique('STORE_A'), status: 'active' })
+  storeA = await db.location.create(await withTestTenant({ name: unique('STORE_A'), status: 'active' }))
   admin = await makeUser('admin', { roleType: 'admin', userType: 'admin' })
   adminToken = (await mint(admin)).token
 })

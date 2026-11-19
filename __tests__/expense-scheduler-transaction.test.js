@@ -7,6 +7,7 @@ process.env.VERCEL = 'true'
 // second argument silently dropped the transaction.
 
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 const { generateDueRecurringExpenses } = require('../api/service/expenseScheduler')
 
 const PREFIX = `RECTX_${Date.now()}_${Math.floor(Math.random() * 1e6)}`
@@ -16,7 +17,7 @@ let category = null
 let template = null
 
 beforeAll(async () => {
-  location = await db.location.create({ name: `${PREFIX}_STORE`, status: 'active' })
+  location = await db.location.create(await withTestTenant({ name: `${PREFIX}_STORE`, status: 'active' }))
   category = await db.expense_category.create({
     store: location.id,
     name: `${PREFIX}_CATEGORY`,

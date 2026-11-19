@@ -21,6 +21,7 @@ const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 const ADMIN_A = 9761
@@ -142,8 +143,8 @@ const sellAndAssert = async (lines) => {
 }
 
 beforeAll(async () => {
-  storeA = await db.location.create({ name: 'WRS_WARUNG_A', status: 'active' })
-  storeB = await db.location.create({ name: 'WRS_WARUNG_B', status: 'active' })
+  storeA = await db.location.create(await withTestTenant({ name: 'WRS_WARUNG_A', status: 'active' }))
+  storeB = await db.location.create(await withTestTenant({ name: 'WRS_WARUNG_B', status: 'active' }))
   category = await db.category.create({ name: 'WRS_MENU' })
   await db.user.bulkCreate([
     { id: ADMIN_A, userName: 'wrs_admin_a', email: 'wrs-admin-a@test.com', roleType: 'admin', userType: 'admin', store: storeA.id, status: 'active', fullName: 'wrs_admin_a' },

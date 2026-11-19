@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -38,7 +39,7 @@ const makeUnpaidOrder = async ({ qty = 5, totalPrice = 50000 } = {}) => {
 }
 
 beforeAll(async () => {
-  location = await db.location.create({ name: 'SPL_FLOW_STORE', status: 'active' })
+  location = await db.location.create(await withTestTenant({ name: 'SPL_FLOW_STORE', status: 'active' }))
   category = await db.category.create({ name: 'SPL_FLOW_CATEGORY' })
   product = await db.product.create({
     nameProduct: 'SPL_FLOW_PRODUCT',

@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -39,7 +40,7 @@ async function payCount(key) {
 }
 
 beforeAll(async () => {
-  store = await db.location.create({ name: `PPIDEM_STORE_${Date.now()}`, status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: `PPIDEM_STORE_${Date.now()}`, status: 'active' }))
   supplier = await db.supplier.create({
     name: `PPIDEM_SUP_${Date.now()}`,
     phone: '0800000003'

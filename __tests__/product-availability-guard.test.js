@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -19,7 +20,7 @@ let adminToken = null
 const auth = (token) => ({ Authorization: `Bearer ${token}` })
 
 beforeAll(async () => {
-  store = await db.location.create({ name: `PAV_STORE_${Date.now()}`, status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: `PAV_STORE_${Date.now()}`, status: 'active' }))
   table = await db.table.create({ store: store.id, name: 'PAV_TABLE' })
   category = await db.category.create({ name: `PAV_CAT_${Date.now()}` })
   await db.user.create({

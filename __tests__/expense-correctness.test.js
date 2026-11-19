@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -58,7 +59,7 @@ const journalFor = (store, expenseId) =>
   db.journal_entry.findAll({ where: { store, sourceType: 'expense', referenceId: expenseId } })
 
 beforeAll(async () => {
-  location = await db.location.create({ name: 'EXP_CORRECTNESS_STORE', status: 'active' })
+  location = await db.location.create(await withTestTenant({ name: 'EXP_CORRECTNESS_STORE', status: 'active' }))
   category = await db.expense_category.create({
     store: location.id,
     name: 'EXP_CORRECTNESS_CATEGORY',

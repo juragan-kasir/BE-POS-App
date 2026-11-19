@@ -6,6 +6,7 @@ const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -76,8 +77,8 @@ async function snapshot() {
 }
 
 beforeAll(async () => {
-  store = await db.location.create({ name: unique('QUOTE_STORE'), status: 'active' })
-  otherStore = await db.location.create({ name: unique('QUOTE_OTHER'), status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: unique('QUOTE_STORE'), status: 'active' }))
+  otherStore = await db.location.create(await withTestTenant({ name: unique('QUOTE_OTHER'), status: 'active' }))
   category = await db.category.create({ name: unique('QUOTE_CAT') })
   product = await db.product.create({
     nameProduct: unique('QUOTE_PRODUCT'),

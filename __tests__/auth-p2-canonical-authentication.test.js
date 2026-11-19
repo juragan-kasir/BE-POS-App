@@ -10,6 +10,7 @@ const request = require('supertest')
 const jwt = require('jsonwebtoken')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 const authorization = require('../utils/authorization')
 const { requireRole } = require('../utils/authorization')
 const { validateStoreAccess } = require('../utils/storeValidation')
@@ -67,8 +68,8 @@ const mockRes = () => {
 }
 
 beforeAll(async () => {
-  storeA = await db.location.create({ name: unique('STORE_A'), status: 'active' })
-  storeB = await db.location.create({ name: unique('STORE_B'), status: 'active' })
+  storeA = await db.location.create(await withTestTenant({ name: unique('STORE_A'), status: 'active' }))
+  storeB = await db.location.create(await withTestTenant({ name: unique('STORE_B'), status: 'active' }))
 })
 
 afterEach(() => {

@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -47,6 +48,8 @@ const makeCampaign = (overrides = {}, rewardValue = 1000) =>
       maxUsagePerMember: 1,
       currentUsage: 0,
       priority: 999,
+      // a promo belongs to its outlet's tenant, as one created through the API
+      tenantId: store.tenantId,
       ...overrides
     })
     .then(async (campaign) => {
@@ -74,7 +77,7 @@ const sell = (token, memberId, key) =>
     })
 
 beforeAll(async () => {
-  store = await db.location.create({ name: `PMC_STORE_${Date.now()}`, status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: `PMC_STORE_${Date.now()}`, status: 'active' }))
   category = await db.category.create({ name: `PMC_CAT_${Date.now()}` })
   product = await db.product.create({
     nameProduct: `PMC_PROD_${Date.now()}`,

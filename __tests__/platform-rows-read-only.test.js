@@ -15,6 +15,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 const uniq = (k) => `plat_${k}_${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`
@@ -31,7 +32,7 @@ const makeUser = async (roleType, store) => {
 const as = (who, method, url) => request(app)[method](url).set('Authorization', `Bearer ${who.token}`)
 
 beforeAll(async () => {
-  f.a = await db.location.create({ name: uniq('A'), status: 'active', timezone: 'Asia/Jakarta' })
+  f.a = await db.location.create(await withTestTenant({ name: uniq('A'), status: 'active', timezone: 'Asia/Jakarta' }))
   f.boundSA = await makeUser('super_admin', f.a.id)
   f.admin = await makeUser('admin', f.a.id)
   f.globalSA = await makeUser('super_admin', null)

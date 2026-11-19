@@ -3,6 +3,7 @@ process.env.NODE_ENV = 'test'
 const request = require('supertest')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 // AI personal assistant data API: ai-business-core reads one store's live
 // data with `Authorization: Bearer $ASSISTANT_SERVICE_SECRET`. Fails closed
@@ -38,8 +39,8 @@ const createOrder = async (storeId, attrs, items = []) => {
 }
 
 beforeAll(async () => {
-  store = await db.location.create({ name: `${TAG}_STORE`, status: 'active', timezone: 'Asia/Jakarta' })
-  otherStore = await db.location.create({ name: `${TAG}_OTHER`, status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: `${TAG}_STORE`, status: 'active', timezone: 'Asia/Jakarta' }))
+  otherStore = await db.location.create(await withTestTenant({ name: `${TAG}_OTHER`, status: 'active' }))
   category = await db.category.create({ name: `${TAG}_CAT` })
 
   const makeProduct = async (name, storeId, stock, minStock) => {

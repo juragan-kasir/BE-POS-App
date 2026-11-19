@@ -7,6 +7,7 @@ const crypto = require('crypto')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -20,7 +21,7 @@ let cashierToken = null
 let tableA = null
 
 beforeAll(async () => {
-  location = await db.location.create({ name: 'PPN_CODE_STORE', status: 'active' })
+  location = await db.location.create(await withTestTenant({ name: 'PPN_CODE_STORE', status: 'active' }))
   category = await db.category.create({ name: 'PPN_CODE_CATEGORY' })
   productA = await db.product.create({
     nameProduct: 'PPN_CODE_PRODUCT_A',

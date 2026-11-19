@@ -4,14 +4,15 @@ process.env.VERCEL = 'true'
 const request = require('supertest')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 let storeA, storeB, category, productA, productB
 let bundleActiveA, bundleInactiveA, bundleActiveB, bundleUnassigned, bundleFutureA
 
 describe('F-1 GET /product-bundle/customer-active — public customer bundle listing', () => {
   beforeAll(async () => {
-    storeA = await db.location.create({ name: 'BUNDLE_F1_STORE_A', status: 'active' })
-    storeB = await db.location.create({ name: 'BUNDLE_F1_STORE_B', status: 'active' })
+    storeA = await db.location.create(await withTestTenant({ name: 'BUNDLE_F1_STORE_A', status: 'active' }))
+    storeB = await db.location.create(await withTestTenant({ name: 'BUNDLE_F1_STORE_B', status: 'active' }))
     category = await db.category.create({ name: 'BUNDLE_F1_CATEGORY' })
     productA = await db.product.create({
       nameProduct: 'BUNDLE_F1_PRODUCT_A',

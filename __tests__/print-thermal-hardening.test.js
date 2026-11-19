@@ -10,6 +10,7 @@ const request = require('supertest')
 const { execSync } = require('child_process')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 const { createAuthenticatedTestSession } = require('../test-helpers/authSession')
 
 const PREFIX = `print_hardening_${Date.now()}`
@@ -40,7 +41,7 @@ const post = (data, { forwardedFor, extra } = {}) => {
 }
 
 beforeAll(async () => {
-  store = await db.location.create({ name: `${PREFIX}_STORE`, status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: `${PREFIX}_STORE`, status: 'active' }))
   kasir = await createAuthenticatedTestSession({
     userName: `${PREFIX}_kasir`,
     email: `${PREFIX}_kasir@test.com`,

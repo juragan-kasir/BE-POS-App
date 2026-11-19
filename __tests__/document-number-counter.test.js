@@ -13,6 +13,7 @@ const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 const { nextDocumentNumber } = require('../utils/documentNumber')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
@@ -23,7 +24,7 @@ const NOON_UTC = new Date('2026-11-19T05:00:00Z') // 12:00 in Asia/Jakarta
 beforeAll(async () => {
   f.stores = []
   for (let i = 0; i < 5; i++) {
-    f.stores.push(await db.location.create({ name: uniq(`S${i}`), status: 'active', timezone: 'Asia/Jakarta' }))
+    f.stores.push(await db.location.create(await withTestTenant({ name: uniq(`S${i}`), status: 'active', timezone: 'Asia/Jakarta' })))
   }
   f.category = await db.category.create({ name: uniq('CAT') })
   f.product = await db.product.create({ nameProduct: uniq('P'), category: f.category.id, price: 10000, stock: 100 })

@@ -11,6 +11,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -25,8 +26,8 @@ let admin1Token = null
 let superToken = null
 
 beforeAll(async () => {
-  store1 = await db.location.create({ name: 'N1_STORE_A', status: 'active' })
-  store2 = await db.location.create({ name: 'N1_STORE_B', status: 'active' })
+  store1 = await db.location.create(await withTestTenant({ name: 'N1_STORE_A', status: 'active' }))
+  store2 = await db.location.create(await withTestTenant({ name: 'N1_STORE_B', status: 'active' }))
   category = await db.category.create({ name: 'N1_CAT', status: 'active' })
 
   const suffix = Date.now()

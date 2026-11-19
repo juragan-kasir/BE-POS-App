@@ -2,6 +2,7 @@ process.env.NODE_ENV = 'test'
 process.env.VERCEL = 'true'
 
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 const accountingService = require('../api/service/accountingService')
 
 let location
@@ -9,10 +10,10 @@ let cash
 let revenue
 
 beforeAll(async () => {
-  location = await db.location.create({
+  location = await db.location.create(await withTestTenant({
     name: 'ACC_GUARD_STORE',
     status: 'active'
-  })
+  }))
   await accountingService.ensureDefaultAccounts(location.id)
   cash = await accountingService.findAccount(location.id, '1000')
   revenue = await accountingService.findAccount(location.id, '4000')

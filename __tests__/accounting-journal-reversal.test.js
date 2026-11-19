@@ -7,6 +7,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 const USER_ID = 7611
@@ -40,11 +41,11 @@ const waitForAudit = async (entityId) => {
 }
 
 beforeAll(async () => {
-  location = await db.location.create({
+  location = await db.location.create(await withTestTenant({
     name: 'ACC_REVERSAL_STORE',
     status: 'active',
     timezone: 'Asia/Jakarta'
-  })
+  }))
   await db.user.create({
     id: USER_ID,
     userName: 'admin_acc_reversal',

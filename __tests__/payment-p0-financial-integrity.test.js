@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -171,9 +172,9 @@ async function makePartiallyPaid({ storeId = store.id, customerId } = {}) {
 }
 
 beforeAll(async () => {
-  store = await db.location.create({ name: unique('P0_STORE'), status: 'active' })
-  storeNoRegister = await db.location.create({ name: unique('P0_NOREG'), status: 'active' })
-  storeRotating = await db.location.create({ name: unique('P0_ROT'), status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: unique('P0_STORE'), status: 'active' }))
+  storeNoRegister = await db.location.create(await withTestTenant({ name: unique('P0_NOREG'), status: 'active' }))
+  storeRotating = await db.location.create(await withTestTenant({ name: unique('P0_ROT'), status: 'active' }))
   category = await db.category.create({ name: unique('P0_CAT') })
   product = await db.product.create({
     nameProduct: unique('P0_PRODUCT'),
@@ -538,7 +539,7 @@ describe('P0-3 — money never disappears on cancel; void refunds exactly what w
 // ---------------------------------------------------------------------------
 describe('P0-3 equivalent path — store deletion never cancels orders that hold money', () => {
   test('P0-3F. deleting a location whose orders hold net-collected money is refused; orders and money untouched', async () => {
-    const doomed = await db.location.create({ name: unique('P0_DOOMED'), status: 'active' })
+    const doomed = await db.location.create(await withTestTenant({ name: unique('P0_DOOMED'), status: 'active' }))
     const superAdmin = await db.user.create({
       userName: unique('p0_super'),
       email: `${unique('p0_super')}@test.com`,

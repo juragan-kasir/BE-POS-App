@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 // FG-SEC-01 wave 3: the remaining back-office route files follow the Role
 // Management checkboxes for their writes. Cashier/floor flows (queue,
@@ -41,7 +42,7 @@ const menuDenied = (res) => res.status === 403 && res.body?.code === 'MENU_ACTIO
 const homeOnly = [{ menu: '/home', view: true, add: true }]
 
 beforeAll(async () => {
-  location = await db.location.create({ name: unique('MW3_STORE'), status: 'active' })
+  location = await db.location.create(await withTestTenant({ name: unique('MW3_STORE'), status: 'active' }))
 })
 
 afterAll(async () => {

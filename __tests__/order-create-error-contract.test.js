@@ -17,6 +17,7 @@ const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 const { resolveAttributedRegister } = require('../api/service/settlementAttribution')
 const { emitNewOrder } = require('../api/service/socket')
 
@@ -40,7 +41,7 @@ let qrTable = null
 let token = null
 
 beforeAll(async () => {
-  store = await db.location.create({ name: unique('ERRC_STORE'), status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: unique('ERRC_STORE'), status: 'active' }))
   category = await db.category.create({ name: unique('ERRC_CAT') })
   product = await db.product.create({
     nameProduct: unique('ERRC_P'),

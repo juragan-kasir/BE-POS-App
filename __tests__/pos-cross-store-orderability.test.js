@@ -6,6 +6,7 @@ const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -68,14 +69,14 @@ async function orderAsA(items, key) {
 }
 
 beforeAll(async () => {
-  storeA = await db.location.create({
+  storeA = await db.location.create(await withTestTenant({
     name: `OWN_STORE_A_${Date.now()}`,
     status: 'active'
-  })
-  storeB = await db.location.create({
+  }))
+  storeB = await db.location.create(await withTestTenant({
     name: `OWN_STORE_B_${Date.now()}`,
     status: 'active'
-  })
+  }))
   category = await db.category.create({ name: `OWN_CAT_${Date.now()}` })
 
   // Product assigned ONLY to store B.

@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -25,8 +26,8 @@ const qrRate = async (store) =>
 const statusOf = async (row) => (await db.taxConfig.findByPk(row.id)).status
 
 beforeAll(async () => {
-  storeA = await db.location.create({ name: 'APPLY_STORE_A', status: 'active' })
-  storeB = await db.location.create({ name: 'APPLY_STORE_B', status: 'active' })
+  storeA = await db.location.create(await withTestTenant({ name: 'APPLY_STORE_A', status: 'active' }))
+  storeB = await db.location.create(await withTestTenant({ name: 'APPLY_STORE_B', status: 'active' }))
   await db.user.create({
     id: 9951, userName: 'apply_admin_a', email: 'apply-9951@test.com', roleType: 'admin',
     userType: 'admin', store: storeA.id, status: 'active', fullName: 'apply_admin_a'

@@ -7,6 +7,7 @@ const { signSessionToken } = require('../test-helpers/authSession')
 const { Op } = require('sequelize')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -26,7 +27,7 @@ const ADMIN_ID = 7202
 const createdProductIds = []
 
 beforeAll(async () => {
-  location = await db.location.create({ name: 'VOID_REASON_STORE', status: 'active' })
+  location = await db.location.create(await withTestTenant({ name: 'VOID_REASON_STORE', status: 'active' }))
   category = await db.category.create({ name: 'VOID_REASON_CATEGORY' })
   // P1-4: central gate denies unknown caller identities; these rows give the
   // constant caller ids real identities. Assertions below are unchanged.

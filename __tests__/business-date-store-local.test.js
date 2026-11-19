@@ -61,6 +61,7 @@ test('a DST transition day keeps its 25-hour bounds on the same local date', () 
 })
 
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 const { autoExpireShifts } = require('../api/controller/shift')
 
 describe('shift auto-expiry uses the store local date', () => {
@@ -68,11 +69,11 @@ describe('shift auto-expiry uses the store local date', () => {
   let shift
 
   beforeAll(async () => {
-    location = await db.location.create({
+    location = await db.location.create(await withTestTenant({
       name: 'WIT_SHIFT_STORE',
       status: 'active',
       timezone: 'Asia/Jayapura'
-    })
+    }))
     shift = await db.shift.create({
       store: location.id,
       name: 'WIT Shift',

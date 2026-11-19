@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 const { assertDecimalQuantity } = require('../utils/decimalQuantityGuard')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
@@ -23,7 +24,7 @@ let ingredient = null
 let adminToken = null
 
 beforeAll(async () => {
-  location = await db.location.create({ name: `OPNAME_DEC_STORE_${Date.now()}`, status: 'active' })
+  location = await db.location.create(await withTestTenant({ name: `OPNAME_DEC_STORE_${Date.now()}`, status: 'active' }))
   category = await db.category.create({ name: `OPNAME_DEC_CATEGORY_${Date.now()}` })
   product = await db.product.create({
     nameProduct: `OPNAME_DEC_PRODUCT_${Date.now()}`,

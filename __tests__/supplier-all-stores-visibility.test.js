@@ -51,9 +51,9 @@ const name = (tag) => `SUPVIS_${tag}_${Date.now()}_${Math.floor(Math.random() * 
 
 describe('Supplier list store scope — "All Stores" must not degrade to the caller own store', () => {
   beforeAll(async () => {
-    storeA = await db.location.create({ name: name('STORE_A'), status: 'active' })
-    storeB = await db.location.create({ name: name('STORE_B'), status: 'active' })
-    storeC = await db.location.create({ name: name('STORE_C'), status: 'active' })
+    storeA = await db.location.create({ tenantId: null, name: name('STORE_A'), status: 'active' })
+    storeB = await db.location.create({ tenantId: null, name: name('STORE_B'), status: 'active' })
+    storeC = await db.location.create({ tenantId: null, name: name('STORE_C'), status: 'active' })
 
     await db.user.create({
       id: U_STORE_BOUND,

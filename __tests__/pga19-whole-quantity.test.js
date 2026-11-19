@@ -13,6 +13,7 @@ const { signSessionToken } = require('../test-helpers/authSession')
 const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 const uniq = (p) => `${p}_${Date.now()}_${Math.floor(Math.random() * 1e6)}`
@@ -23,7 +24,7 @@ let product
 let token
 
 beforeAll(async () => {
-  store = await db.location.create({ name: uniq('PGA19_STORE'), status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: uniq('PGA19_STORE'), status: 'active' }))
   category = await db.category.create({ name: uniq('PGA19_CAT') })
   product = await db.product.create({ nameProduct: uniq('PGA19_P'), category: category.id, price: 5000, stock: 100 })
   await db.product_store_stock.create({ product: product.id, store: store.id, stock: 100 })
