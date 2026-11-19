@@ -41,11 +41,17 @@ const storeKey = (store) => {
   return Number.isSafeInteger(n) && n > 0 ? n : 0
 }
 
-const nextDocumentNumber = async (type, store, { transaction, now = new Date() } = {}) => {
-  const prefix = PREFIX[type]
-  if (!prefix) throw new Error(`nextDocumentNumber: unknown document type "${type}"`)
+// Counter types: every document prefix plus the customer queue, whose number
+// stays short ("Q001") because it is called out and printed for the guest.
+const COUNTER_TYPES = new Set([...Object.keys(PREFIX), 'queue'])
+
+// Next value of the (outlet, type, outlet-local business day) counter.
+const nextDailySequence = async (type, store, { transaction, now = new Date() } = {}) => {
+  if (!COUNTER_TYPES.has(type)) throw new Error(`nextDailySequence: unknown counter type "${type}"`)
   const storeId = storeKey(store)
-  const counterDate = getStoreLocalDate(await resolveStoreTimezone(storeId || null), now)
+  // Same transaction for the timezone lookup: no second pool connection
+  // while this one may wait on the counter row lock.
+  const counterDate = getStoreLocalDate(await resolveStoreTimezone(storeId || null, { transaction }), now)
   const rows = await db.sequelize.query(
     `INSERT INTO document_counter (store, "docType", "counterDate", "lastValue", "updatedAt")
      VALUES ($1, $2, $3, 1, NOW())
@@ -54,9 +60,22 @@ const nextDocumentNumber = async (type, store, { transaction, now = new Date() }
      RETURNING "lastValue"`,
     { bind: [storeId, type, counterDate], transaction, type: db.sequelize.QueryTypes.SELECT }
   )
-  const seq = Number(rows[0].lastValue)
+  return { storeId, counterDate, seq: Number(rows[0].lastValue) }
+}
+
+const nextDocumentNumber = async (type, store, options = {}) => {
+  const prefix = PREFIX[type]
+  if (!prefix) throw new Error(`nextDocumentNumber: unknown document type "${type}"`)
+  const { storeId, counterDate, seq } = await nextDailySequence(type, store, options)
   const yymmdd = counterDate.slice(2).replace(/-/g, '')
   return `${prefix}-${storeId}-${yymmdd}-${String(seq).padStart(4, '0')}`
 }
 
-module.exports = { nextDocumentNumber, DOCUMENT_PREFIX: PREFIX }
+// W3-6b: "Q001", "Q002", … restarting every business day per outlet. Unique
+// per (storeId, businessDate) — uq_queue_store_day_number, batch B25.
+const nextQueueNumber = async (store, options = {}) => {
+  const { storeId, counterDate, seq } = await nextDailySequence('queue', store, options)
+  return { queueNumber: `Q${String(seq).padStart(3, '0')}`, storeId, businessDate: counterDate }
+}
+
+module.exports = { nextDocumentNumber, nextDailySequence, nextQueueNumber, DOCUMENT_PREFIX: PREFIX }

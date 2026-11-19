@@ -12,6 +12,14 @@ module.exports = (sequelize, DataTypes) => {
       store: {
         type: DataTypes.JSONB
       },
+      // W3-6b (batch B25): first outlet of `store` and its business day;
+      // unique ("storeId", "businessDate", "queueNumber") among live rows.
+      storeId: {
+        type: DataTypes.INTEGER
+      },
+      businessDate: {
+        type: DataTypes.DATEONLY
+      },
       queueNumber: {
         allowNull: false,
         type: DataTypes.STRING(20)
