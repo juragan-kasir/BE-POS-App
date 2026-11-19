@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 const { portionsFromStock } = require('../api/service/recipeAvailabilityService')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
@@ -92,7 +93,7 @@ const qrOrder = async (items) => {
 }
 
 beforeAll(async () => {
-  store = await db.location.create({ name: unique('AV_STORE'), status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: unique('AV_STORE'), status: 'active' }))
   category = await db.category.create({ name: unique('AV_CAT') })
   await db.taxConfig.create({ store: store.id, name: unique('AV_PPN'), rate: 0, type: 'ppn', status: 'active' })
   admin = await db.user.create({

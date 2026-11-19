@@ -6,6 +6,7 @@ const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -73,7 +74,7 @@ async function fgStock(productId) {
 }
 
 beforeAll(async () => {
-  store = await db.location.create({ name: `RACE_STORE_${Date.now()}`, status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: `RACE_STORE_${Date.now()}`, status: 'active' }))
   category = await db.category.create({ name: `RACE_CAT_${Date.now()}` })
   productA = await makeProduct(`RACE_A_${Date.now()}`)
   productB = await makeProduct(`RACE_B_${Date.now()}`)

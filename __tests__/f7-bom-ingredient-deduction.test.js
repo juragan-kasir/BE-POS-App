@@ -6,6 +6,7 @@ const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -116,8 +117,8 @@ const makeUnpaidOrderWithItem = async ({ store, product, quantity, price = 20000
 }
 
 beforeAll(async () => {
-  storeA = await db.location.create({ name: 'F7_STORE_A', status: 'active' })
-  storeB = await db.location.create({ name: 'F7_STORE_B', status: 'active' })
+  storeA = await db.location.create(await withTestTenant({ name: 'F7_STORE_A', status: 'active' }))
+  storeB = await db.location.create(await withTestTenant({ name: 'F7_STORE_B', status: 'active' }))
   tableA = await db.table.create({ store: storeA.id, name: 'F7_TABLE' })
   category = await db.category.create({ name: 'F7_CATEGORY' })
   // P1-4: central gate denies unknown caller identities; these rows

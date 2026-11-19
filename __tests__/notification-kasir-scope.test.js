@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -36,8 +37,8 @@ const notify = async (store, title) => {
 }
 
 beforeAll(async () => {
-  ownStore = await db.location.create({ name: `NKS_OWN_${SUFFIX}`, status: 'active' })
-  otherStore = await db.location.create({ name: `NKS_OTHER_${SUFFIX}`, status: 'active' })
+  ownStore = await db.location.create(await withTestTenant({ name: `NKS_OWN_${SUFFIX}`, status: 'active' }))
+  otherStore = await db.location.create(await withTestTenant({ name: `NKS_OTHER_${SUFFIX}`, status: 'active' }))
   const kasir = await db.user.create({
     userName: `nks_kasir_${SUFFIX}`,
     email: `nks_kasir_${SUFFIX}@test.com`,

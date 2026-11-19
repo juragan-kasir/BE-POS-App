@@ -8,6 +8,7 @@ process.env.NODE_ENV = 'test'
 const request = require('supertest')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 const { quantityBreaksOf } = require('../utils/outletPricing')
 
 const unique = (p) => `${p}_${Date.now()}_${Math.floor(Math.random() * 1e6)}`
@@ -17,7 +18,7 @@ let category
 let product
 
 beforeAll(async () => {
-  store = await db.location.create({ name: unique('QB_STORE'), status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: unique('QB_STORE'), status: 'active' }))
   category = await db.category.create({ name: unique('QB_CAT') })
   product = await db.product.create({
     nameProduct: unique('QB_GULA'),

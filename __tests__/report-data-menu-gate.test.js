@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 // E2E 2026-11-11 (F-17): a kasir whose role has no report menu was refused
 // the report pages in the UI but could still GET /report/data/daily, which
@@ -41,7 +42,7 @@ const menuDenied = (res) => res.status === 403 && res.body?.code === 'MENU_ACTIO
 const cashierOnly = [{ menu: '/home', view: true, add: true }]
 
 beforeAll(async () => {
-  location = await db.location.create({ name: unique('RMG_STORE'), status: 'active' })
+  location = await db.location.create(await withTestTenant({ name: unique('RMG_STORE'), status: 'active' }))
 })
 
 afterAll(async () => {

@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -32,7 +33,7 @@ let adminToken = null
 let adminUser = null
 
 beforeAll(async () => {
-  location = await db.location.create({ name: 'PAY_TAX_REG_STORE_' + Date.now(), status: 'active', timezone: 'Asia/Jakarta' })
+  location = await db.location.create(await withTestTenant({ name: 'PAY_TAX_REG_STORE_' + Date.now(), status: 'active', timezone: 'Asia/Jakarta' }))
   category = await db.category.create({ name: 'PAY_TAX_REG_CAT_' + Date.now() })
   product = await db.product.create({
     nameProduct: 'PAY_TAX_REG_PROD_' + Date.now(),

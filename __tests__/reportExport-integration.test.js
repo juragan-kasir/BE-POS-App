@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 let token
@@ -13,7 +14,7 @@ let locId = null
 let orderId = null
 
 beforeAll(async () => {
-  const loc = await db.location.create({
+  const loc = await db.location.create(await withTestTenant({
     store: 1,
     name: 'Bisa Nota Integ',
     address: 'Jl. Integrasi No. 1',
@@ -24,7 +25,7 @@ beforeAll(async () => {
     email: 'integ@bisa.id',
     status: 'active',
     mainBranch: true
-  })
+  }))
   locId = loc.id
 
   // P1-4: central gate denies unknown caller identities; this row satisfies

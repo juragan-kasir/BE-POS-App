@@ -6,6 +6,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -73,8 +74,8 @@ const orderIds = []
 beforeAll(async () => {
   isolated = loadAppIsolated()
 
-  store = await db.location.create({ name: `SEC_LOG_1_STORE_${Date.now()}`, status: 'active' })
-  otherStore = await db.location.create({ name: `SEC_LOG_1_OTHER_${Date.now()}`, status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: `SEC_LOG_1_STORE_${Date.now()}`, status: 'active' }))
+  otherStore = await db.location.create(await withTestTenant({ name: `SEC_LOG_1_OTHER_${Date.now()}`, status: 'active' }))
 
   // P1-4: central gate denies unknown caller identities; this row gives the
   // caller id a real identity. Assertions below are unchanged.

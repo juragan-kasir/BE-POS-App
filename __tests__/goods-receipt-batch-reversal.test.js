@@ -6,6 +6,7 @@ const { signSessionToken } = require('../test-helpers/authSession')
 const { Op } = require('sequelize')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -104,7 +105,7 @@ async function fgStock() {
 }
 
 beforeAll(async () => {
-  location = await db.location.create({ name: `GR_B1_STORE_${SUFFIX}`, status: 'active' })
+  location = await db.location.create(await withTestTenant({ name: `GR_B1_STORE_${SUFFIX}`, status: 'active' }))
   category = await db.category.create({ name: `GR_B1_CAT_${SUFFIX}` })
   product = await db.product.create({
     nameProduct: `GR_B1_PROD_${SUFFIX}`,

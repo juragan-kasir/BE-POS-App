@@ -6,6 +6,7 @@ process.env.VERCEL = 'true'
 // The backfill applies the same rule to those products: dry run by default,
 // --apply switches them with a SYSTEM audit row.
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 const { backfillRecipeMode } = require('../api/service/recipeModeService')
 
 const TAG = `BFRM_${Date.now()}`
@@ -44,8 +45,8 @@ const run = (apply) => backfillRecipeMode({ apply, productIds: created.products 
 const ids = (rows) => rows.map((r) => r.id)
 
 beforeAll(async () => {
-  storeA = await db.location.create({ name: tag('STORE_A'), status: 'active' })
-  storeB = await db.location.create({ name: tag('STORE_B'), status: 'active' })
+  storeA = await db.location.create(await withTestTenant({ name: tag('STORE_A'), status: 'active' }))
+  storeB = await db.location.create(await withTestTenant({ name: tag('STORE_B'), status: 'active' }))
   created.stores.push(storeA.id, storeB.id)
   category = await db.category.create({ name: tag('CAT') })
   created.categories.push(category.id)

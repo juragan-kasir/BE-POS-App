@@ -6,6 +6,7 @@ const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -19,8 +20,8 @@ let cashierAToken = null
 let cashierBToken = null
 
 beforeAll(async () => {
-  locationA = await db.location.create({ name: 'REDEEM_STORE_A', status: 'active' })
-  locationB = await db.location.create({ name: 'REDEEM_STORE_B', status: 'active' })
+  locationA = await db.location.create(await withTestTenant({ name: 'REDEEM_STORE_A', status: 'active' }))
+  locationB = await db.location.create(await withTestTenant({ name: 'REDEEM_STORE_B', status: 'active' }))
   category = await db.category.create({ name: 'REDEEM_CAT' })
   product = await db.product.create({
     nameProduct: 'REDEEM_PRODUCT',

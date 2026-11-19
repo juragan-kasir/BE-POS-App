@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -69,8 +70,8 @@ const expireNow = (id) =>
   db.parkedCart.update({ expiresAt: new Date(Date.now() - 1000) }, { where: { id } })
 
 beforeAll(async () => {
-  store = await db.location.create({ name: 'PARKED_CART_STORE', status: 'active' })
-  storeOther = await db.location.create({ name: 'PARKED_CART_STORE_OTHER', status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: 'PARKED_CART_STORE', status: 'active' }))
+  storeOther = await db.location.create(await withTestTenant({ name: 'PARKED_CART_STORE_OTHER', status: 'active' }))
   table = await db.table.create({ store: store.id, name: 'T1', status: 'available' })
   tableOther = await db.table.create({ store: storeOther.id, name: 'T2', status: 'available' })
 
@@ -606,7 +607,7 @@ describe('Migration integrity', () => {
   })
 
   test('deleting a location with parked_cart history is blocked by ON DELETE RESTRICT', async () => {
-    const tempLocation = await db.location.create({ name: 'PARKED_CART_FK_TEST', status: 'active' })
+    const tempLocation = await db.location.create(await withTestTenant({ name: 'PARKED_CART_FK_TEST', status: 'active' }))
     await db.parkedCart.create({
       store: tempLocation.id,
       cartPayload: { items: sampleItems() },

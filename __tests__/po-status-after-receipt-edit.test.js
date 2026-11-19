@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -55,7 +56,7 @@ const makeReceipt = async (po, qtyReceived, status) => {
 const poStatus = async (poId) => (await db.purchase_order.findByPk(poId)).status
 
 beforeAll(async () => {
-  location = await db.location.create({ name: `PO_STATUS_STORE_${SUFFIX}`, status: 'active' })
+  location = await db.location.create(await withTestTenant({ name: `PO_STATUS_STORE_${SUFFIX}`, status: 'active' }))
   category = await db.category.create({ name: `PO_STATUS_CAT_${SUFFIX}` })
   product = await db.product.create({
     nameProduct: `PO_STATUS_PROD_${SUFFIX}`,

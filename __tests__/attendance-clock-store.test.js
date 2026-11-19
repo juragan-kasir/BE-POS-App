@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -18,8 +19,8 @@ beforeAll(async () => {
   // attempt below targets a genuinely different, valid store. attendance.userId
   // FKs to user.id, so the token subject needs a real user row too.
   const suffix = Date.now()
-  ownStore = await db.location.create({ name: `ATT_OWN_STORE_${suffix}`, status: 'active' })
-  otherStore = await db.location.create({ name: `ATT_OTHER_STORE_${suffix}`, status: 'active' })
+  ownStore = await db.location.create(await withTestTenant({ name: `ATT_OWN_STORE_${suffix}`, status: 'active' }))
+  otherStore = await db.location.create(await withTestTenant({ name: `ATT_OTHER_STORE_${suffix}`, status: 'active' }))
   employee = await db.user.create({
     userName: `employee_store1_att_${suffix}`,
     email: `employee_store1_att_${suffix}@test.com`,

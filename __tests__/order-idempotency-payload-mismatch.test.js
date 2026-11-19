@@ -6,6 +6,7 @@ const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -43,10 +44,10 @@ function orderPayload(items, key) {
 }
 
 beforeAll(async () => {
-  store = await db.location.create({
+  store = await db.location.create(await withTestTenant({
     name: `IDEM_STORE_${Date.now()}`,
     status: 'active'
-  })
+  }))
   category = await db.category.create({ name: `IDEM_CAT_${Date.now()}` })
   productA = await db.product.create({
     nameProduct: `IDEM_A_${Date.now()}`,
@@ -122,7 +123,7 @@ beforeAll(async () => {
     isAvailable: true
   })
   await db.product_store_stock.create({ product: qrProduct.id, store: store.id, stock: 50 })
-  store2 = await db.location.create({ name: unique('IDEM_STORE_2'), status: 'active' })
+  store2 = await db.location.create(await withTestTenant({ name: unique('IDEM_STORE_2'), status: 'active' }))
   await db.product_store_stock.create({ product: productA.id, store: store2.id, stock: 50 })
   await db.user.create({
     id: 7202,
@@ -570,7 +571,7 @@ describe('DR-23 §K — replay after legitimate post-create changes', () => {
       mTables[name] = await db.table.create({ store: store.id, name: unique(`IDEM_${name}`) })
     }
     // A store whose PPN is explicitly 0 % — edited to 11 % mid-test.
-    store3 = await db.location.create({ name: unique('IDEM_STORE_3'), status: 'active' })
+    store3 = await db.location.create(await withTestTenant({ name: unique('IDEM_STORE_3'), status: 'active' }))
     await db.product_store_stock.create({ product: productA.id, store: store3.id, stock: 50 })
     await db.user.create({
       id: 7203,

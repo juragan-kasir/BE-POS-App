@@ -12,6 +12,7 @@ const bcrypt = require('bcrypt')
 const timespan = require('jsonwebtoken/lib/timespan')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const PREFIX = `p1ls_${Date.now()}_${Math.floor(Math.random() * 1e6)}`
 let seq = 0
@@ -64,7 +65,7 @@ const interleaveAfterPasswordCheck = (between) => {
 }
 
 beforeAll(async () => {
-  storeA = await db.location.create({ name: unique('STORE_A'), status: 'active' })
+  storeA = await db.location.create(await withTestTenant({ name: unique('STORE_A'), status: 'active' }))
 })
 
 afterEach(() => {

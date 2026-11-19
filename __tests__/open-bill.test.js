@@ -6,6 +6,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -58,7 +59,7 @@ const outletStock = async () =>
   Number((await db.product_store_stock.findOne({ where: { product: product.id, store: store.id } })).stock)
 
 beforeAll(async () => {
-  store = await db.location.create({ name: unique('OB_STORE'), status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: unique('OB_STORE'), status: 'active' }))
   category = await db.category.create({ name: unique('OB_CAT') })
   product = await db.product.create({
     nameProduct: unique('OB_PRODUCT'),
@@ -222,7 +223,7 @@ describe('open bill (batch B9)', () => {
   })
 
   test("another store's order cannot be reached", async () => {
-    const other = await db.location.create({ name: unique('OB_OTHER'), status: 'active' })
+    const other = await db.location.create(await withTestTenant({ name: unique('OB_OTHER'), status: 'active' }))
     const foreign = await db.order.create({
       orderNumber: unique('OBF'),
       store: other.id,

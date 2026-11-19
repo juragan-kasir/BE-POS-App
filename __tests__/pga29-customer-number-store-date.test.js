@@ -8,6 +8,7 @@ process.env.VERCEL = 'true'
 
 const { generateCustomerNumber } = require('../api/controller/order')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 let jakarta = null
 let jayapura = null
@@ -23,16 +24,16 @@ const counterDateFor = async (store) => {
 }
 
 beforeAll(async () => {
-  jakarta = await db.location.create({
+  jakarta = await db.location.create(await withTestTenant({
     name: 'PGA29_JAKARTA',
     status: 'active',
     timezone: 'Asia/Jakarta'
-  })
-  jayapura = await db.location.create({
+  }))
+  jayapura = await db.location.create(await withTestTenant({
     name: 'PGA29_JAYAPURA',
     status: 'active',
     timezone: 'Asia/Jayapura'
-  })
+  }))
 })
 
 beforeEach(async () => {
@@ -65,11 +66,11 @@ test('a Jakarta store rolls over at its own midnight, not at 07:00 local', async
 })
 
 test('an invalid store timezone falls back to Asia/Jakarta', async () => {
-  const broken = await db.location.create({
+  const broken = await db.location.create(await withTestTenant({
     name: 'PGA29_BROKEN',
     status: 'active',
     timezone: 'Not/AZone'
-  })
+  }))
   const now = new Date('2026-11-07T20:00:00.000Z')
   await generateCustomerNumber(broken.id, null, now)
   expect(await counterDateFor(broken.id)).toBe('2026-11-08')

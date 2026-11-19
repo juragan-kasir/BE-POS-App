@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 const { postOrderJournal, postOrderCogsJournal } = require('../api/service/accountingService')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
@@ -15,7 +16,7 @@ let product = null
 let token = null
 
 beforeAll(async () => {
-  store = await db.location.create({ name: 'RECON_STORE', status: 'active', timezone: 'Asia/Jakarta' })
+  store = await db.location.create(await withTestTenant({ name: 'RECON_STORE', status: 'active', timezone: 'Asia/Jakarta' }))
   category = await db.category.create({ name: 'RECON_CAT' })
   product = await db.product.create({ nameProduct: 'RECON_PROD', category: category.id, price: 50000, costPrice: 20000, stock: 1000 })
   // P1-4: central gate denies unknown caller identities; these rows

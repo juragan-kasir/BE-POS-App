@@ -5,6 +5,7 @@ process.env.VERCEL = 'true'
 // number. The model setter enforces it for every write path — create, an
 // instance update and a bulk update — so no caller can store the full number.
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 const { lastFourDigits } = require('../utils/cardNumber')
 
 const SUFFIX = `DR28C_${Date.now()}`
@@ -12,7 +13,7 @@ let store
 let order
 
 beforeAll(async () => {
-  store = await db.location.create({ name: `${SUFFIX}_STORE`, status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: `${SUFFIX}_STORE`, status: 'active' }))
   order = await db.order.create({
     orderNumber: `${SUFFIX}_ORD`,
     store: store.id,

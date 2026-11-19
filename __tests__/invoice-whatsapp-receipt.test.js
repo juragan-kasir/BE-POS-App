@@ -10,6 +10,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 const { buildReceiptText } = require('../utils/receiptText')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
@@ -137,12 +138,12 @@ describe('buildReceiptText — same content and switches as the printed receipt'
 
 describe('GET /pos/invoice/wa-text/:orderId', () => {
   beforeAll(async () => {
-    store = await db.location.create({
+    store = await db.location.create(await withTestTenant({
       name: 'WA Receipt Store',
       status: 'active',
       address: 'Jl. Kenanga 1',
       socialMedia: [{ platform: 'Instagram', account: '@wa.store' }]
-    })
+    }))
     // As /invoice-page saves it: every switch explicit (the column defaults
     // for showStoreName/showAddress are false).
     setting = await db.invoice_setting.create({
@@ -236,10 +237,10 @@ describe('GET /pos/invoice/wa-text/:orderId', () => {
     const OTHER = 9783
 
     beforeAll(async () => {
-      otherStore = await db.location.create({
+      otherStore = await db.location.create(await withTestTenant({
         name: 'WA Other Store',
         status: 'active'
-      })
+      }))
       await db.user.create({
         id: OTHER,
         userName: `wa_other_${Date.now()}`,

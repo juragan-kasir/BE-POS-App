@@ -4,6 +4,7 @@ process.env.VERCEL = 'true'
 const request = require('supertest')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 let closedStore
 let openStore
@@ -19,18 +20,18 @@ const closedHours = [
 ].map((day) => ({ day, open: null, close: null, is24Hours: false }))
 
 beforeAll(async () => {
-  closedStore = await db.location.create({
+  closedStore = await db.location.create(await withTestTenant({
     name: 'PUBLIC_CLOSED_STORE',
     status: 'active',
     timezone: 'Asia/Jakarta',
     openingHours: closedHours
-  })
-  openStore = await db.location.create({
+  }))
+  openStore = await db.location.create(await withTestTenant({
     name: 'PUBLIC_OPEN_STORE',
     status: 'active',
     timezone: 'Asia/Jakarta',
     openingHours: null
-  })
+  }))
 })
 
 afterAll(async () => {

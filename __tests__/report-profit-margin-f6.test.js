@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -113,9 +114,9 @@ const getDaily = (token, query = {}) =>
     .query({ startDate: rangeStart, endDate: rangeEnd, ...query })
 
 beforeAll(async () => {
-  storeA = await db.location.create({ name: 'F6_STORE_A', status: 'active' })
-  storeB = await db.location.create({ name: 'F6_STORE_B', status: 'active' })
-  storeC = await db.location.create({ name: 'F6_STORE_C', status: 'active' })
+  storeA = await db.location.create(await withTestTenant({ name: 'F6_STORE_A', status: 'active' }))
+  storeB = await db.location.create(await withTestTenant({ name: 'F6_STORE_B', status: 'active' }))
+  storeC = await db.location.create(await withTestTenant({ name: 'F6_STORE_C', status: 'active' }))
   category = await db.category.create({ name: 'F6_CATEGORY' })
 
   // P1-4: central gate denies unknown caller identities; these rows give the

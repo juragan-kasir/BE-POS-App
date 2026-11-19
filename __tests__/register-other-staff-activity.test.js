@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -33,7 +34,7 @@ const makeUser = (role, name) =>
   })
 
 beforeAll(async () => {
-  store = await db.location.create({ name: `OTHERSTAFF_STORE_${RUN}`, status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: `OTHERSTAFF_STORE_${RUN}`, status: 'active' }))
   kasir = await makeUser('kasir', 'Sari')
   owner = await makeUser('owner', 'Budi')
   token = await signSessionToken(

@@ -4,6 +4,7 @@ process.env.VERCEL = 'true'
 const request = require('supertest')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 // DR-24 C-24a / DR-20 §35.6: authentication events are mandatory audit
 // entries. Every login outcome (success, wrong password, unknown account,
@@ -42,7 +43,7 @@ const findAuthRow = async (action, match) => {
 }
 
 beforeAll(async () => {
-  store = await db.location.create({ name: unique('C24A_STORE'), status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: unique('C24A_STORE'), status: 'active' }))
 })
 
 afterAll(async () => {

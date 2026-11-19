@@ -13,6 +13,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -52,14 +53,14 @@ const makeBackup = async (store, filename, content) => {
 }
 
 beforeAll(async () => {
-  store1 = await db.location.create({
+  store1 = await db.location.create(await withTestTenant({
     name: `CRIT3_STORE1_${Date.now()}`,
     status: 'active'
-  })
-  store2 = await db.location.create({
+  }))
+  store2 = await db.location.create(await withTestTenant({
     name: `CRIT3_STORE2_${Date.now()}`,
     status: 'active'
-  })
+  }))
 
   if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true })
 

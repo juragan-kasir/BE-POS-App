@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 const cashFlowDef = require('../api/service/reportDefs/cashFlow')
 const profitPerProductDef = require('../api/service/reportDefs/profitPerProduct')
 
@@ -35,7 +36,7 @@ let supplier = null
 let purchaseOrder = null
 
 beforeAll(async () => {
-  store = await db.location.create({ name: `SDB_STORE_${SUFFIX}`, status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: `SDB_STORE_${SUFFIX}`, status: 'active' }))
   await db.user.create({
     id: 7203,
     userName: `sdb_admin_${SUFFIX}`,

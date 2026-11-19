@@ -11,6 +11,7 @@ const { signSessionToken } = require('../test-helpers/authSession')
 const ExcelJS = require('exceljs')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -24,8 +25,8 @@ let op1 = null
 let op2 = null
 
 beforeAll(async () => {
-  store1 = await db.location.create({ name: 'N4_STORE_A', status: 'active' })
-  store2 = await db.location.create({ name: 'N4_STORE_B', status: 'active' })
+  store1 = await db.location.create(await withTestTenant({ name: 'N4_STORE_A', status: 'active' }))
+  store2 = await db.location.create(await withTestTenant({ name: 'N4_STORE_B', status: 'active' }))
   const suffix = Date.now()
   userAdmin1 = await db.user.create({
     id: 9401,

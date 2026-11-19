@@ -6,6 +6,7 @@ const { signSessionToken } = require('../test-helpers/authSession')
 const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -49,7 +50,7 @@ const expectNoEffect = async (res, status, code, ordersBefore, stockBefore) => {
 }
 
 beforeAll(async () => {
-  store = await db.location.create({ name: unique('G02_STORE'), status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: unique('G02_STORE'), status: 'active' }))
   category = await db.category.create({ name: unique('G02_CAT') })
   product = await db.product.create({
     nameProduct: unique('G02_PRODUCT'),

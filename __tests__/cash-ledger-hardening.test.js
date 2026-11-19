@@ -6,6 +6,7 @@ const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -77,8 +78,8 @@ const cashOrder = (token, overrides = {}) =>
     }))
 
 beforeAll(async () => {
-  store = await db.location.create({ name: 'CASH_LEDGER_STORE', status: 'active' })
-  storeOther = await db.location.create({ name: 'CASH_LEDGER_STORE_OTHER', status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: 'CASH_LEDGER_STORE', status: 'active' }))
+  storeOther = await db.location.create(await withTestTenant({ name: 'CASH_LEDGER_STORE_OTHER', status: 'active' }))
   category = await db.category.create({ name: 'CASH_LEDGER_CATEGORY' })
   product = await db.product.create({
     nameProduct: 'CASH_LEDGER_PRODUCT',
@@ -985,7 +986,7 @@ describe('Migration integrity', () => {
   })
 
   test('deleting a location with cash_movement history is blocked by ON DELETE RESTRICT', async () => {
-    const tempLocation = await db.location.create({ name: 'CASH_LEDGER_FK_TEST', status: 'active' })
+    const tempLocation = await db.location.create(await withTestTenant({ name: 'CASH_LEDGER_FK_TEST', status: 'active' }))
     const reg = await db.cashRegister.create({
       store: tempLocation.id,
       user: adminUser.id,

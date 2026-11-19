@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -12,22 +13,22 @@ let storeA, storeB, tokenA, tokenB, superToken
 
 describe('C-7 location detail — tenant isolation', () => {
   beforeAll(async () => {
-    storeA = await db.location.create({
+    storeA = await db.location.create(await withTestTenant({
       name: 'C7_STORE_A',
       status: 'active',
       phoneNumber: '111-AAA',
       email: 'storeA-canary@example.com',
       managerName: 'Manager A Canary',
       dailyTarget: 111111
-    })
-    storeB = await db.location.create({
+    }))
+    storeB = await db.location.create(await withTestTenant({
       name: 'C7_STORE_B',
       status: 'active',
       phoneNumber: '222-BBB',
       email: 'storeB-canary@example.com',
       managerName: 'Manager B Canary',
       dailyTarget: 222222
-    })
+    }))
 
 
     // P1-4: central gate denies unknown caller identities; these rows give

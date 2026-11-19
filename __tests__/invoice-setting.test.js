@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken, ensureLocationIds } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -20,23 +21,23 @@ let locationStore2 = null
 beforeAll(async () => {
   // AUTH-1 P2: the caller store comes from the DB row; abstract stores must exist.
   await ensureLocationIds(1, 2)
-  locationStore1 = await db.location.create({
+  locationStore1 = await db.location.create(await withTestTenant({
     store: 1,
     name: 'TEST_STORE_INVOICE_1',
     address: 'Jl. Test 1',
     phoneNumber: '0811111111',
     email: 'test1@store.com',
     status: 'active'
-  })
+  }))
 
-  locationStore2 = await db.location.create({
+  locationStore2 = await db.location.create(await withTestTenant({
     store: 2,
     name: 'TEST_STORE_INVOICE_2',
     address: 'Jl. Test 2',
     phoneNumber: '0822222222',
     email: 'test2@store.com',
     status: 'active'
-  })
+  }))
 
   // P1-4: central gate denies unknown caller identities; these rows satisfy
   // the identity invariant. JWT claims (abstract store numbers) and all

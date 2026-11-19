@@ -6,6 +6,7 @@ const { signSessionToken } = require('../test-helpers/authSession')
 const { Op } = require('sequelize')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 const PASSWORD = 'Rahasia123!'
@@ -49,8 +50,11 @@ const makeUser = async (key, attrs) => {
 }
 
 beforeAll(async () => {
-  storeA = await db.location.create({ name: unique('STORE_A'), status: 'active' })
-  storeB = await db.location.create({ name: unique('STORE_B'), status: 'active' })
+  storeA = await db.location.create(await withTestTenant({ name: unique('STORE_A'), status: 'active' }))
+  // storeB is a FOREIGN business: its own tenant. A tenant admin may place
+  // staff at any outlet of its own tenant (employee.js employeeWriteStore).
+  const foreignTenant = await db.tenant.create({ code: unique('TENANT_B'), name: unique('TENANT_B') })
+  storeB = await db.location.create({ name: unique('STORE_B'), status: 'active', tenantId: foreignTenant.id })
   roleSuper = await db.role.create({ name: unique('ROLE_SUPER'), roleType: 'super_admin', store: null })
   roleUser = await db.role.create({ name: unique('ROLE_USER'), roleType: 'user', store: storeA.id })
 

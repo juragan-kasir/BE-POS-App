@@ -7,13 +7,14 @@ process.env.VERCEL = 'true'
 // fixtures, all removed in afterAll via the documented maintenance bypass.
 // Never touches real data.
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 const { auditLog, createAudit } = require('../utils/auditLog')
 
 const P = 'FP_TX_'
 let store = null
 
 beforeAll(async () => {
-  store = await db.location.create({ name: `${P}STORE`, status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: `${P}STORE`, status: 'active' }))
 })
 
 afterAll(async () => {
@@ -65,7 +66,7 @@ describe('FP-01 legacy audit failure propagation with transaction', () => {
     await expect(
       db.sequelize.transaction(async (t) => {
         await db.location.create(
-          { name: `${P}BUSINESS_ROW`, status: 'active' },
+          await withTestTenant({ name: `${P}BUSINESS_ROW`, status: 'active' }),
           { transaction: t }
         )
         await createAudit(

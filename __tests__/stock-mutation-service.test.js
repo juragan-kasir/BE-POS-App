@@ -2,6 +2,7 @@ process.env.NODE_ENV = 'test'
 process.env.VERCEL = 'true'
 
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 const {
   adjustProductStock,
   setProductStock
@@ -11,7 +12,7 @@ let location = null
 let category = null
 
 beforeAll(async () => {
-  location = await db.location.create({ name: 'STOCKMUT_STORE', status: 'active' })
+  location = await db.location.create(await withTestTenant({ name: 'STOCKMUT_STORE', status: 'active' }))
   category = await db.category.create({ name: 'STOCKMUT_CATEGORY' })
   // W3-3 (DR-17): PPN is explicit setup, never a fallback — seed the rate
   // for sale-style decrements in this suite.
@@ -266,7 +267,7 @@ describe('setProductStock', () => {
 
 describe('setProductStock across multiple outlets', () => {
   test('counts one outlet against its own stock and moves the aggregate by that delta', async () => {
-    const storeB = await db.location.create({ name: 'STOCKMUT_STORE_B', status: 'active' })
+    const storeB = await db.location.create(await withTestTenant({ name: 'STOCKMUT_STORE_B', status: 'active' }))
     const product = await db.product.create({
       nameProduct: 'SM_MULTI_OUTLET', category: category.id, price: 1000, stock: 20
     })

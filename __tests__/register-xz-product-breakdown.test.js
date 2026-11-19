@@ -6,6 +6,7 @@ const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -64,7 +65,7 @@ const xReport = () => request(app).get('/cash-register/x-report').set(auth(admin
 const zReport = (id) => request(app).get(`/cash-register/z-report/${id}`).set(auth(adminToken))
 
 beforeAll(async () => {
-  store = await db.location.create({ name: unique('B1XZ_STORE'), status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: unique('B1XZ_STORE'), status: 'active' }))
   category = await db.category.create({ name: unique('B1XZ_CAT') })
   skuA = unique('SKU_A')
   skuB = unique('SKU_B')

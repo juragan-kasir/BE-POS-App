@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -27,8 +28,8 @@ const taxUrl = (storeId) => `/tax-config?store=${storeId}`
 
 beforeAll(async () => {
   await db.taxConfig.destroy({ where: {}, force: true })
-  storeA = await db.location.create({ name: 'T1G_STORE_A', status: 'active' })
-  storeB = await db.location.create({ name: 'T1G_STORE_B', status: 'active' })
+  storeA = await db.location.create(await withTestTenant({ name: 'T1G_STORE_A', status: 'active' }))
+  storeB = await db.location.create(await withTestTenant({ name: 'T1G_STORE_B', status: 'active' }))
   await db.user.create({
     id: 9921,
     userName: 't1g_admin_a',

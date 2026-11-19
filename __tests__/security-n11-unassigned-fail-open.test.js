@@ -23,6 +23,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -32,8 +33,8 @@ let currencyA = null
 let currencyB = null
 
 beforeAll(async () => {
-  storeA = await db.location.create({ name: 'N11_STORE_A', status: 'active' })
-  storeB = await db.location.create({ name: 'N11_STORE_B', status: 'active' })
+  storeA = await db.location.create(await withTestTenant({ name: 'N11_STORE_A', status: 'active' }))
+  storeB = await db.location.create(await withTestTenant({ name: 'N11_STORE_B', status: 'active' }))
   currencyA = await db.currency.create({
     store: storeA.id,
     code: 'N11-A',

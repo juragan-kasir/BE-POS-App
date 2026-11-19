@@ -4,6 +4,7 @@ process.env.VERCEL = 'true'
 const request = require('supertest')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -13,7 +14,7 @@ let product = null
 let table = null
 
 beforeAll(async () => {
-  location = await db.location.create({ name: 'F1801_STORE', status: 'active' })
+  location = await db.location.create(await withTestTenant({ name: 'F1801_STORE', status: 'active' }))
   category = await db.category.create({ name: 'F1801_CAT' })
   product = await db.product.create({
     nameProduct: 'F1801_PRODUCT',

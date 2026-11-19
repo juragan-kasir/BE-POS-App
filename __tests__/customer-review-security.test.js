@@ -5,6 +5,7 @@ const request = require('supertest')
 const crypto = require('crypto')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 // SEC-007 — security regression coverage for the public customer review
 // endpoint (POST /order/customer-review). Pin the non-breaking hardening:
@@ -59,8 +60,8 @@ const postReview = (payload) =>
     })
 
 beforeAll(async () => {
-  store1 = await db.location.create({ name: 'SEC007_STORE_1', status: 'active' })
-  store2 = await db.location.create({ name: 'SEC007_STORE_2', status: 'active' })
+  store1 = await db.location.create(await withTestTenant({ name: 'SEC007_STORE_1', status: 'active' }))
+  store2 = await db.location.create(await withTestTenant({ name: 'SEC007_STORE_2', status: 'active' }))
   category = await db.category.create({ name: 'SEC007_CATEGORY' })
 
   globalProduct = await db.product.create({

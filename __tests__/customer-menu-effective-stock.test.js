@@ -4,14 +4,15 @@ process.env.VERCEL = 'true'
 const request = require('supertest')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 let storeA, storeB, category, tableA, tableB
 let productZ, productMissing, productMTO
 
 describe('F4-03 /order/customer-menu — authoritative per-store effective stock', () => {
   beforeAll(async () => {
-    storeA = await db.location.create({ name: 'F403_STORE_A', status: 'active' })
-    storeB = await db.location.create({ name: 'F403_STORE_B', status: 'active' })
+    storeA = await db.location.create(await withTestTenant({ name: 'F403_STORE_A', status: 'active' }))
+    storeB = await db.location.create(await withTestTenant({ name: 'F403_STORE_B', status: 'active' }))
     category = await db.category.create({ name: 'F403_CATEGORY' })
     tableA = await db.table.create({ store: storeA.id, name: 'F403_TABLE_A' })
     tableB = await db.table.create({ store: storeB.id, name: 'F403_TABLE_B' })

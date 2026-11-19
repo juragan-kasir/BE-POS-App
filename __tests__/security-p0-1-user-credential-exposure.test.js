@@ -12,6 +12,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 const { sendEmail } = require('../utils/emailService')
 const { hashResetToken, resetTokenMatches } = require('../utils/resetToken')
 
@@ -61,8 +62,8 @@ const makeUser = async (key, attrs) => {
 }
 
 beforeAll(async () => {
-  storeA = await db.location.create({ name: unique('P01_STORE_A'), status: 'active' })
-  storeB = await db.location.create({ name: unique('P01_STORE_B'), status: 'active' })
+  storeA = await db.location.create(await withTestTenant({ name: unique('P01_STORE_A'), status: 'active' }))
+  storeB = await db.location.create(await withTestTenant({ name: unique('P01_STORE_B'), status: 'active' }))
 
   const future = new Date(Date.now() + 10 * 60 * 1000)
   await makeUser('adminA', { roleType: 'admin', userType: 'admin', store: storeA.id })

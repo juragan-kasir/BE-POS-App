@@ -8,6 +8,7 @@ const request = require('supertest')
 const jwt = require('jsonwebtoken')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -34,14 +35,14 @@ const registerBody = (overrides = {}) => ({
 })
 
 beforeAll(async () => {
-  store1 = await db.location.create({
+  store1 = await db.location.create(await withTestTenant({
     name: `CRIT1_STORE1_${Date.now()}`,
     status: 'active'
-  })
-  store2 = await db.location.create({
+  }))
+  store2 = await db.location.create(await withTestTenant({
     name: `CRIT1_STORE2_${Date.now()}`,
     status: 'active'
-  })
+  }))
 })
 
 afterAll(async () => {

@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 const { attemptJob, drainAccountingOutbox } = require('../api/service/accountingOutboxService')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
@@ -36,7 +37,7 @@ const makePO = async (price) => {
 }
 
 beforeAll(async () => {
-  location = await db.location.create({ name: 'GR_OUTBOX_STORE', status: 'active' })
+  location = await db.location.create(await withTestTenant({ name: 'GR_OUTBOX_STORE', status: 'active' }))
   category = await db.category.create({ name: 'GR_OUTBOX_CATEGORY' })
   product = await db.product.create({
     nameProduct: 'GR_OUTBOX_PRODUCT',

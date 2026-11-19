@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -20,18 +21,18 @@ let admin
 let token
 
 beforeAll(async () => {
-  closedStore = await db.location.create({
+  closedStore = await db.location.create(await withTestTenant({
     name: `DETAIL_CLOSED_${RUN}`,
     status: 'active',
     timezone: 'Asia/Jakarta',
     openingHours: everyDay.map((day) => ({ day, open: null, close: null, is24Hours: false }))
-  })
-  openStore = await db.location.create({
+  }))
+  openStore = await db.location.create(await withTestTenant({
     name: `DETAIL_OPEN_${RUN}`,
     status: 'active',
     timezone: 'Asia/Jakarta',
     openingHours: everyDay.map((day) => ({ day, open: '00:00', close: '23:59', is24Hours: true }))
-  })
+  }))
   admin = await db.user.create({
     userName: `detail_open_${RUN}`,
     email: `detail_open_${RUN}@test.com`,

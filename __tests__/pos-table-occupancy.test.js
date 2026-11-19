@@ -6,6 +6,7 @@ const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -91,8 +92,8 @@ const countRows = async (sqlTable) => {
 }
 
 beforeAll(async () => {
-  store = await db.location.create({ name: `POS_OCC_STORE_${SUFFIX}`, status: 'active' })
-  otherStore = await db.location.create({ name: `POS_OCC_OTHER_${SUFFIX}`, status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: `POS_OCC_STORE_${SUFFIX}`, status: 'active' }))
+  otherStore = await db.location.create(await withTestTenant({ name: `POS_OCC_OTHER_${SUFFIX}`, status: 'active' }))
   category = await db.category.create({ name: `POS_OCC_CAT_${SUFFIX}` })
   product = await db.product.create({
     nameProduct: `POS_OCC_PRODUCT_${SUFFIX}`,

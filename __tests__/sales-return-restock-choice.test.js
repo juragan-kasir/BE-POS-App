@@ -6,6 +6,7 @@ const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 const { profitFigures } = require('../api/service/salesFigures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
@@ -84,7 +85,7 @@ const storeCogs = async () => {
 }
 
 beforeAll(async () => {
-  store = await db.location.create({ name: unique('RSK_STORE'), status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: unique('RSK_STORE'), status: 'active' }))
   await db.taxConfig.create({
     name: unique('RSK_PPN'),
     rate: 0,

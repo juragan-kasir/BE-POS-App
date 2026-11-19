@@ -6,6 +6,7 @@ const crypto = require('crypto')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -66,8 +67,8 @@ const deepKeys = (value, acc = []) => {
 }
 
 beforeAll(async () => {
-  store1 = await db.location.create({ name: 'SEC_STORE_1', status: 'active' })
-  store2 = await db.location.create({ name: 'SEC_STORE_2', status: 'active' })
+  store1 = await db.location.create(await withTestTenant({ name: 'SEC_STORE_1', status: 'active' }))
+  store2 = await db.location.create(await withTestTenant({ name: 'SEC_STORE_2', status: 'active' }))
   // W3-3 (DR-17): PPN is explicit setup, never a fallback — seed rates for
   // both stores so QR setup assertions exercise configured tax.
   for (const s of [store1, store2]) {

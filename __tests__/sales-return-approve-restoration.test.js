@@ -6,6 +6,7 @@ const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -79,7 +80,7 @@ async function ingStock(ingredientId) {
 }
 
 beforeAll(async () => {
-  store = await db.location.create({ name: `RET_STORE_${Date.now()}`, status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: `RET_STORE_${Date.now()}`, status: 'active' }))
   // W3-3 (DR-17): PPN is explicit setup, never a fallback — seed the rate
   // so these restoration assertions exercise configured tax.
   await db.taxConfig.destroy({ where: { store: store.id }, force: true })

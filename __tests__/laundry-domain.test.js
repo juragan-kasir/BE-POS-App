@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 const RUN = Date.now()
@@ -12,7 +13,7 @@ const RUN = Date.now()
 let store, category, admin, adminToken, sa, saToken, service, member
 
 beforeAll(async () => {
-  store = await db.location.create({ name: `LDRY_STORE_${RUN}`, status: 'active', businessType: 'laundry' })
+  store = await db.location.create(await withTestTenant({ name: `LDRY_STORE_${RUN}`, status: 'active', businessType: 'laundry' }))
   category = await db.category.create({ name: `LDRY_CAT_${RUN}`, status: 'active' })
   admin = await db.user.create({ userName: `ldry_admin_${RUN}`, email: `ldry_admin_${RUN}@t.test`, roleType: 'admin', userType: 'admin', store: store.id, status: 'active', fullName: 'Laundry Admin' })
   adminToken = await signSessionToken({ id: admin.id, userName: admin.userName, roleType: 'admin', store: store.id }, JWT_SECRET)

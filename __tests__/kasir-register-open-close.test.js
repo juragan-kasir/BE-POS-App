@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 // Q-FIN-05 (product owner, 2026-11-01): a cashier opens and closes their own
 // store's register when their role grants "Tambah" on Kas Register; the close
@@ -52,8 +53,8 @@ const closeFor = (token, id, body) =>
   as(token, 'put', `/cash-register/close/${id}`, { store: store.id }).send(body)
 
 beforeAll(async () => {
-  store = await db.location.create({ name: unique('KRG_STORE'), status: 'active' })
-  otherStore = await db.location.create({ name: unique('KRG_OTHER'), status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: unique('KRG_STORE'), status: 'active' }))
+  otherStore = await db.location.create(await withTestTenant({ name: unique('KRG_OTHER'), status: 'active' }))
 })
 
 afterEach(async () => {

@@ -4,12 +4,13 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
 let store, cat, prodKg, prodPcs, ingredientKg, admin, token
 
 beforeAll(async () => {
-  store = await db.location.create({ name: 'FRAC_MUT_STORE', status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: 'FRAC_MUT_STORE', status: 'active' }))
   cat = await db.category.create({ name: 'FRAC_MUT_CAT' })
   prodKg = await db.product.create({ nameProduct: 'FRAC_KG_PROD', category: cat.id, price: 1000, stock: 10, unit: 'kg', baseUnit: 'kg' })
   prodPcs = await db.product.create({ nameProduct: 'FRAC_PCS_PROD', category: cat.id, price: 1000, stock: 10, unit: 'pcs', baseUnit: 'pcs' })

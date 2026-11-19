@@ -6,6 +6,7 @@ const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -110,7 +111,7 @@ async function reversalJobs(orderId) {
 }
 
 beforeAll(async () => {
-  store = await db.location.create({ name: `CX_STORE_${Date.now()}`, status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: `CX_STORE_${Date.now()}`, status: 'active' }))
   category = await db.category.create({ name: `CX_CAT_${Date.now()}` })
   stockedProduct = await makeProduct(`CX_STOCKED_${Date.now()}`)
   mtoProduct = await makeProduct(`CX_MTO_${Date.now()}`, { inventoryMode: 'make_to_order' })

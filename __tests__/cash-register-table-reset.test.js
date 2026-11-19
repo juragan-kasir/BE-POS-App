@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -40,7 +41,7 @@ const tokenFor = async (storeId) => {
 }
 
 async function mkStore(name) {
-  const store = await db.location.create({ name: `TR_${name}_${SUFFIX}` })
+  const store = await db.location.create(await withTestTenant({ name: `TR_${name}_${SUFFIX}` }))
   createdStoreIds.push(store.id)
   return store
 }

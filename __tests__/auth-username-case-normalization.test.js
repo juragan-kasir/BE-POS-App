@@ -10,6 +10,7 @@ process.env.VERCEL = 'true'
 const request = require('supertest')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const PASSWORD = 'Rahasia123!'
 const PREFIX = `uname_${Date.now()}_${Math.floor(Math.random() * 1e6)}`
@@ -36,10 +37,10 @@ const login = (userName) =>
   request(app).post('/auth/login').send({ userName, password: PASSWORD })
 
 beforeAll(async () => {
-  location = await db.location.create({
+  location = await db.location.create(await withTestTenant({
     name: `UNAME_CASE_${PREFIX}`,
     status: 'active'
-  })
+  }))
 })
 
 afterAll(async () => {

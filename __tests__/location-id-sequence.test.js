@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -154,13 +155,13 @@ describe('F1 sequence-authoritative location id allocation', () => {
     // Under MAX(id)+1 this would have diverted the next create to
     // explicitId + 1; under the sequence it must be ignored entirely.
     const explicitId = seqBefore + 100000
-    const planted = await db.location.create({
+    const planted = await db.location.create(await withTestTenant({
       id: explicitId,
       store: explicitId,
       name: `F1SEQ_PLANTED_${stamp()}`,
       status: 'draft',
       createdBy: superAdminUser.id
-    })
+    }))
     createdLocIds.push(planted.id)
 
     const res = await createStore()

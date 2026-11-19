@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 // DR-24 C-04 / DR-05 (§35.7): outlet closure is an archive, never a purge.
 // POST /location/archive-location refuses to close a store that still has an
@@ -27,7 +28,7 @@ let kasirToken = null
 let adminStore = null
 
 const createStore = async (name) => {
-  const loc = await db.location.create({ name: name || unique('C04_STORE'), status: 'active' })
+  const loc = await db.location.create(await withTestTenant({ name: name || unique('C04_STORE'), status: 'active' }))
   locations.push(loc.id)
   return loc
 }
@@ -367,7 +368,8 @@ describe('reactivating an inactive or closed store', () => {
   })
 
   test('a tenantless inactive store is refused (an active store needs a tenant)', async () => {
-    const store = await createStore()
+    const store = await db.location.create({ name: unique('C04_NOTENANT'), status: 'active', tenantId: null })
+    locations.push(store.id)
     await store.update({ status: 'inactive' })
     const res = await reactivate(superToken, { id: store.id, reason: 'reopen' })
     expect(res.status).toBe(409)

@@ -5,6 +5,7 @@ const request = require('supertest')
 const crypto = require('crypto')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 // FND-001 (security) — regression coverage for the public, unauthenticated
 // receipt endpoint GET /order/receipt-html/:publicToken (getReceiptHTML).
@@ -78,7 +79,7 @@ const createOrder = async (fields) => {
 const getReceipt = (token) => request(app).get(`/order/receipt-html/${token}`)
 
 beforeAll(async () => {
-  store = await db.location.create({ name: 'RECEIPT_XSS_STORE', status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: 'RECEIPT_XSS_STORE', status: 'active' }))
   category = await db.category.create({ name: 'RECEIPT_XSS_CATEGORY' })
   product = await db.product.create({
     nameProduct: 'RECEIPT_XSS_PRODUCT',

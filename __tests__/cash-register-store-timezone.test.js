@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -33,13 +34,13 @@ beforeAll(async () => {
   // No explicit timezone → the model's column default (Asia/Jakarta)
   // applies. This is the existing common case that must render exactly
   // as before.
-  storeDefault = await db.location.create({ name: `TZ_STORE_DEFAULT_${SUFFIX}` })
+  storeDefault = await db.location.create(await withTestTenant({ name: `TZ_STORE_DEFAULT_${SUFFIX}` }))
   // A real, distinct IANA zone already known to this codebase's
   // businessDate.js TIMEZONE_OFFSETS map (Asia/Jayapura, +09:00).
-  storeCustom = await db.location.create({
+  storeCustom = await db.location.create(await withTestTenant({
     name: `TZ_STORE_CUSTOM_${SUFFIX}`,
     timezone: 'Asia/Jayapura'
-  })
+  }))
 
   opener = await db.user.create({
     userName: `tz_opener_${SUFFIX}`,

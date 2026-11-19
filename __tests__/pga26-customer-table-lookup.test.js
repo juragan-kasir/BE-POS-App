@@ -9,6 +9,7 @@ process.env.VERCEL = 'true'
 const request = require('supertest')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 let store = null
 let otherStore = null
@@ -18,8 +19,8 @@ let foreignTable = null
 const lookup = (query) => request(app).get('/order/customer-table').query(query)
 
 beforeAll(async () => {
-  store = await db.location.create({ name: 'PGA26_STORE_A', status: 'active' })
-  otherStore = await db.location.create({ name: 'PGA26_STORE_B', status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: 'PGA26_STORE_A', status: 'active' }))
+  otherStore = await db.location.create(await withTestTenant({ name: 'PGA26_STORE_B', status: 'active' }))
   table = await db.table.create({ name: 'K3-4', store: store.id })
   foreignTable = await db.table.create({ name: 'K9-9', store: otherStore.id })
 })

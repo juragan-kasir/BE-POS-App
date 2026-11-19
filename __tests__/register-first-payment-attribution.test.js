@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -22,7 +23,7 @@ let token
 let order
 
 beforeAll(async () => {
-  store = await db.location.create({ name: `FIRSTPAY_STORE_${RUN}`, status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: `FIRSTPAY_STORE_${RUN}`, status: 'active' }))
   category = await db.category.create({ name: `FIRSTPAY_CAT_${RUN}` })
   product = await db.product.create({
     nameProduct: `FIRSTPAY_ITEM_${RUN}`,

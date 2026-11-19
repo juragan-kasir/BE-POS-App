@@ -4,6 +4,7 @@ process.env.VERCEL = 'true'
 const request = require('supertest')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 // D8 regression: POST /auth/login must NOT disclose the credential verifier.
 // Both login response branches (auth.js:404 for non-admin/user userType,
@@ -62,10 +63,10 @@ async function expectSanitizedLogin(userName) {
 }
 
 beforeAll(async () => {
-  store = await db.location.create({
+  store = await db.location.create(await withTestTenant({
     name: `D8_STORE_${Date.now()}`,
     status: 'active'
-  })
+  }))
 })
 
 afterAll(async () => {

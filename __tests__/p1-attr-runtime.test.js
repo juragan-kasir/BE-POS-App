@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -114,7 +115,7 @@ async function snapshot(orderId) {
 }
 
 beforeAll(async () => {
-  store = await db.location.create({ name: unique('P1_STORE'), status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: unique('P1_STORE'), status: 'active' }))
   category = await db.category.create({ name: unique('P1_CAT') })
   product = await db.product.create({
     nameProduct: unique('P1_PRODUCT'),
@@ -226,7 +227,7 @@ describe('CANON — canonical write boundary', () => {
 
 describe('REG — register-required contract', () => {
   test('REG-01/02: no open register → 422 REGISTER_REQUIRED with zero side effects', async () => {
-    const lonely = await db.location.create({ name: unique('P1_LONELY'), status: 'active' })
+    const lonely = await db.location.create(await withTestTenant({ name: unique('P1_LONELY'), status: 'active' }))
     await db.product_store_stock.create({ product: product.id, store: lonely.id, stock: 10000 })
     await db.taxConfig.create({ store: lonely.id, name: unique('P1_LONELY_PPN'), rate: 0, type: 'ppn', status: 'active' })
     try {

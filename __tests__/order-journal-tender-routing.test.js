@@ -2,12 +2,13 @@ process.env.NODE_ENV = 'test'
 process.env.VERCEL = 'true'
 
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 const { postOrderJournal } = require('../api/service/accountingService')
 
 let store = null
 
 beforeAll(async () => {
-  store = await db.location.create({ name: 'JOURNAL_TENDER_STORE', status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: 'JOURNAL_TENDER_STORE', status: 'active' }))
   await db.user.create({
     id: 98021,
     userName: 'journal_tender_admin',

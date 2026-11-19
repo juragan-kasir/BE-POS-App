@@ -43,7 +43,7 @@ beforeAll(async () => {
   f.a1 = await db.location.create({ name: uniq('A1'), status: 'active', tenantId: f.tA.id })
   f.a2 = await db.location.create({ name: uniq('A2'), status: 'active', tenantId: f.tA.id })
   f.b1 = await db.location.create({ name: uniq('B1'), status: 'active', tenantId: f.tB.id })
-  f.free = await db.location.create({ name: uniq('F'), status: 'active' })
+  f.free = await db.location.create({ tenantId: null, name: uniq('F'), status: 'active' })
   ids.stores.push(f.a1.id, f.a2.id, f.b1.id, f.free.id)
   f.ownerA = await mkOwner(f.tA, f.a1)
   f.ownerB = await mkOwner(f.tB, f.b1)

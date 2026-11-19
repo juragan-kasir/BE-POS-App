@@ -6,6 +6,7 @@ process.env.VERCEL = 'true'
 // fixtures, all removed in afterAll via the documented maintenance bypass.
 // Never touches real data.
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 const {
   auditLog,
   recordAudit,
@@ -17,7 +18,7 @@ const P = 'AUD_IMM_'
 let store = null
 
 beforeAll(async () => {
-  store = await db.location.create({ name: `${P}STORE`, status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: `${P}STORE`, status: 'active' }))
 })
 
 afterAll(async () => {

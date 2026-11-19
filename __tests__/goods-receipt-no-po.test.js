@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 const SUFFIX = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
@@ -46,10 +47,10 @@ const ingredientStock = async (id) =>
   Number((await db.ingredient.findByPk(id)).stock)
 
 beforeAll(async () => {
-  store = await db.location.create({
+  store = await db.location.create(await withTestTenant({
     name: `GR_NO_PO_STORE_${SUFFIX}`,
     status: 'active'
-  })
+  }))
   category = await db.category.create({ name: `GR_NO_PO_CAT_${SUFFIX}` })
   ingredientCategory = await db.ingredientCategory.create({
     store: store.id,
@@ -57,10 +58,10 @@ beforeAll(async () => {
     status: 'active'
   })
   ingredient = await createIngredientForStore(`GR_NO_PO_ING_${SUFFIX}`)
-  foreignStore = await db.location.create({
+  foreignStore = await db.location.create(await withTestTenant({
     name: `GR_NO_PO_FOREIGN_STORE_${SUFFIX}`,
     status: 'active'
-  })
+  }))
   foreignIngredientCategory = await db.ingredientCategory.create({
     store: foreignStore.id,
     name: `GR_NO_PO_FOREIGN_ING_CAT_${SUFFIX}`,

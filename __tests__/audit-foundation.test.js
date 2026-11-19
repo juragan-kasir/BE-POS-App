@@ -19,7 +19,7 @@ let tenantA = null
 let tenantB = null
 
 beforeAll(async () => {
-  store = await db.location.create({ name: `${P}STORE`, status: 'active' })
+  store = await db.location.create({ tenantId: null, name: `${P}STORE`, status: 'active' })
   tenantA = await db.tenant.create({ code: `${P}TA`, name: `${P}TENANT-A` })
   tenantB = await db.tenant.create({ code: `${P}TB`, name: `${P}TENANT-B` })
 })

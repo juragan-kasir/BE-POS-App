@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -28,7 +29,7 @@ const release = (body, token, tableId = table.id) =>
     .send(body)
 
 beforeAll(async () => {
-  store = await db.location.create({ name: `C16_STORE_${SUFFIX}`, status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: `C16_STORE_${SUFFIX}`, status: 'active' }))
   table = await db.table.create({
     store: store.id,
     name: `C16_TABLE_${SUFFIX}`,

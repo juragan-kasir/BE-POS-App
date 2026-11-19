@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -25,15 +26,15 @@ let superToken = null
 const createdRegisterIds = []
 
 beforeAll(async () => {
-  storeA = await db.location.create({ name: `CRC_STORE_A_${SUFFIX}` })
-  storeB = await db.location.create({ name: `CRC_STORE_B_${SUFFIX}` })
+  storeA = await db.location.create(await withTestTenant({ name: `CRC_STORE_A_${SUFFIX}` }))
+  storeB = await db.location.create(await withTestTenant({ name: `CRC_STORE_B_${SUFFIX}` }))
   // storeC: dedicated to the close test — stores B may already hold an open
   // register from the explicit-store positive control (single-open-register
   // partial unique index would reject a second one).
-  storeC = await db.location.create({ name: `CRC_STORE_C_${SUFFIX}` })
+  storeC = await db.location.create(await withTestTenant({ name: `CRC_STORE_C_${SUFFIX}` }))
   // storeD/E: dedicated open registers for the open-registers global test.
-  storeD = await db.location.create({ name: `CRC_STORE_D_${SUFFIX}` })
-  storeE = await db.location.create({ name: `CRC_STORE_E_${SUFFIX}` })
+  storeD = await db.location.create(await withTestTenant({ name: `CRC_STORE_D_${SUFFIX}` }))
+  storeE = await db.location.create(await withTestTenant({ name: `CRC_STORE_E_${SUFFIX}` }))
   opener = await db.user.create({
     userName: `crc_opener_${SUFFIX}`,
     // AUTH-1 P2: authority comes from this row, not the JWT — the caller these

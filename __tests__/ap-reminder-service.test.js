@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 const { generateApReminders } = require('../api/service/apReminderService')
 const { getStoreLocalDate } = require('../utils/businessDate')
 
@@ -43,16 +44,16 @@ const addDays = (dateStr, n) => {
 }
 
 beforeAll(async () => {
-  storeJakarta = await db.location.create({
+  storeJakarta = await db.location.create(await withTestTenant({
     name: 'AP_REM_STORE_JAKARTA',
     status: 'active',
     timezone: 'Asia/Jakarta'
-  })
-  storeJayapura = await db.location.create({
+  }))
+  storeJayapura = await db.location.create(await withTestTenant({
     name: 'AP_REM_STORE_JAYAPURA',
     status: 'active',
     timezone: 'Asia/Jayapura'
-  })
+  }))
   category = await db.category.create({ name: 'AP_REM_CATEGORY' })
 
   ingredientJakarta = await db.ingredient.create({

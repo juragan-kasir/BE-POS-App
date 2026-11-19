@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -21,16 +22,16 @@ let farToken = null
 let noCoordToken = null
 
 beforeAll(async () => {
-  store1 = await db.location.create({
+  store1 = await db.location.create(await withTestTenant({
     name: 'GEOFENCE_STORE_1',
     status: 'active',
     latitude: STORE_LAT,
     longitude: STORE_LNG
-  })
-  storeNoCoords = await db.location.create({
+  }))
+  storeNoCoords = await db.location.create(await withTestTenant({
     name: 'GEOFENCE_STORE_NO_COORDS',
     status: 'active'
-  })
+  }))
 
   nearUser = await db.user.create({
     id: 99121,

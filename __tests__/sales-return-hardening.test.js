@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 const { normalizePaymentMethod } = require('../api/service/canonicalPayment')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
@@ -120,8 +121,8 @@ const getReturn = (token, id) =>
     .set('Authorization', `Bearer ${token}`)
 
 beforeAll(async () => {
-  store = await db.location.create({ name: 'SR_HARDENING_STORE', status: 'active' })
-  storeOther = await db.location.create({ name: 'SR_HARDENING_STORE_OTHER', status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: 'SR_HARDENING_STORE', status: 'active' }))
+  storeOther = await db.location.create(await withTestTenant({ name: 'SR_HARDENING_STORE_OTHER', status: 'active' }))
   category = await db.category.create({ name: 'SR_HARDENING_CATEGORY' })
   product = await db.product.create({
     nameProduct: 'SR_HARDENING_PRODUCT_A',

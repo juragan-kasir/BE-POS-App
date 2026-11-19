@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 const SUFFIX = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
@@ -58,10 +59,10 @@ const cancel = (id) =>
     .send({ status: 'cancelled', store: location.id })
 
 beforeAll(async () => {
-  location = await db.location.create({
+  location = await db.location.create(await withTestTenant({
     name: `GR_CANCEL_COMPLETED_${SUFFIX}`,
     status: 'active'
-  })
+  }))
   category = await db.category.create({ name: `GR_CANCEL_CAT_${SUFFIX}` })
   product = await db.product.create({
     nameProduct: `GR_CANCEL_PROD_${SUFFIX}`,

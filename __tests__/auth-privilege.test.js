@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -18,8 +19,8 @@ let userInStore2 = null
 beforeAll(async () => {
   // `store` columns FK to location.id, not to any business-facing number —
   // create real locations and use their ids everywhere below.
-  store1 = await db.location.create({ name: 'PRIV_STORE_1', status: 'active' })
-  store2 = await db.location.create({ name: 'PRIV_STORE_2', status: 'active' })
+  store1 = await db.location.create(await withTestTenant({ name: 'PRIV_STORE_1', status: 'active' }))
+  store2 = await db.location.create(await withTestTenant({ name: 'PRIV_STORE_2', status: 'active' }))
 
 
   // P1-4: central per-request gate denies unknown caller identities, so the

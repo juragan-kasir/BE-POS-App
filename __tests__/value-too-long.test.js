@@ -9,6 +9,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 const { valueTooLongFromError, findTooLong } = require('../utils/valueTooLong')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
@@ -27,7 +28,7 @@ const addAccount = (body) =>
     .send({ code: `${TAG}`.slice(-10) + Math.floor(Math.random() * 1e6), type: 'asset', normalBalance: 'debit', ...body })
 
 beforeAll(async () => {
-  store = await db.location.create({ name: `${TAG}_STORE`, status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: `${TAG}_STORE`, status: 'active' }))
   adminUser = await db.user.create({
     userName: `${TAG}_admin`,
     email: `${TAG}_admin@test.com`,

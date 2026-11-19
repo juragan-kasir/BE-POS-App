@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -57,7 +58,7 @@ async function approvedReturn(orderId, qty) {
 }
 
 beforeAll(async () => {
-  store = await db.location.create({ name: unique('PRS_STORE'), status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: unique('PRS_STORE'), status: 'active' }))
   category = await db.category.create({ name: unique('PRS_CAT') })
   product = await db.product.create({ nameProduct: unique('PRS_PRODUCT'), category: category.id, price: PRICE, stock: 1000 })
   await db.product_store_stock.create({ product: product.id, store: store.id, stock: 1000 })

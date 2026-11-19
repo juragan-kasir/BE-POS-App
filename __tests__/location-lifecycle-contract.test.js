@@ -228,7 +228,7 @@ describe('PUT /location/edit-location lifecycle contract (HTTP)', () => {
   }
 
   test('platform config-only edit on active tenantless store is rejected', async () => {
-    const row = await db.location.create({
+    const row = await db.location.create({ tenantId: null,
       id: await nextDirectLocationId(),
       name: `LOCLCC_TENANTLESS_${Date.now()}`,
       status: 'active',
@@ -247,7 +247,7 @@ describe('PUT /location/edit-location lifecycle contract (HTTP)', () => {
   })
 
   test('explicit stay-active edit on active tenantless store is rejected', async () => {
-    const row = await db.location.create({
+    const row = await db.location.create({ tenantId: null,
       id: await nextDirectLocationId(),
       name: `LOCLCC_STAYACTIVE_${Date.now()}`,
       status: 'active',
@@ -273,7 +273,7 @@ describe('PUT /location/edit-location lifecycle contract (HTTP)', () => {
   })
 
   test('deactivation-out of active tenantless store is allowed', async () => {
-    const row = await db.location.create({
+    const row = await db.location.create({ tenantId: null,
       id: await nextDirectLocationId(),
       name: `LOCLCC_DEACT_${Date.now()}`,
       status: 'active',

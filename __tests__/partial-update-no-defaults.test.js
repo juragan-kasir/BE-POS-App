@@ -12,6 +12,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 const schemas = require('../api/validation/schemas')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
@@ -72,10 +73,10 @@ describe('PUT /employee/edit-employee with a partial body', () => {
   let kasir
 
   beforeAll(async () => {
-    const store = await db.location.create({
+    const store = await db.location.create(await withTestTenant({
       name: uniq('S'),
       status: 'active'
-    })
+    }))
     ids.stores.push(store.id)
     const admin = await db.user.create({
       userName: uniq('admin'),

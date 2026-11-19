@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -34,7 +35,7 @@ const nextTag = () => {
 }
 
 beforeAll(async () => {
-  store = await db.location.create({ name: 'GR_COST_FORMULA_STORE', status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: 'GR_COST_FORMULA_STORE', status: 'active' }))
   category = await db.category.create({ name: 'GR_COST_FORMULA_CATEGORY' })
   adminUser = await db.user.create({
     userName: 'admin_gr_cost_formula',

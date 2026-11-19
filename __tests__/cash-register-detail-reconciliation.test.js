@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 const { normalizePaymentMethod } = require('../api/service/canonicalPayment')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
@@ -86,8 +87,8 @@ async function mkExpense(name, overrides) {
 }
 
 beforeAll(async () => {
-  store = await db.location.create({ name: `ZREC_STORE_${SUFFIX}` })
-  storeOther = await db.location.create({ name: `ZREC_STORE_OTHER_${SUFFIX}` })
+  store = await db.location.create(await withTestTenant({ name: `ZREC_STORE_${SUFFIX}` }))
+  storeOther = await db.location.create(await withTestTenant({ name: `ZREC_STORE_OTHER_${SUFFIX}` }))
 
   opener = await db.user.create({
     userName: `zrec_opener_${SUFFIX}`,

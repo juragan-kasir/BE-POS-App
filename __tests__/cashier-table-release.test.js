@@ -11,6 +11,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 const IDS = { kasirA: 9851, adminA: 9852, staffA: 9853, kasirB: 9854 }
@@ -46,8 +47,8 @@ const statusList = (who, storeId) =>
 const statusOf = async (table) => (await db.table.findByPk(table.id)).status
 
 beforeAll(async () => {
-  storeA = await db.location.create({ name: 'CTR Store A', status: 'active' })
-  storeB = await db.location.create({ name: 'CTR Store B', status: 'active' })
+  storeA = await db.location.create(await withTestTenant({ name: 'CTR Store A', status: 'active' }))
+  storeB = await db.location.create(await withTestTenant({ name: 'CTR Store B', status: 'active' }))
   const users = [
     [IDS.kasirA, 'kasir', storeA.id],
     [IDS.adminA, 'admin', storeA.id],

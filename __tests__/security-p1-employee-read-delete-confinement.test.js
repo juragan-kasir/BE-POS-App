@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 const PREFIX = `p1_${Date.now()}_${Math.floor(Math.random() * 1e6)}`
@@ -38,8 +39,8 @@ const makeEmployee = async (key, storeId) => {
 }
 
 beforeAll(async () => {
-  storeA = await db.location.create({ name: unique('STORE_A'), status: 'active' })
-  storeB = await db.location.create({ name: unique('STORE_B'), status: 'active' })
+  storeA = await db.location.create(await withTestTenant({ name: unique('STORE_A'), status: 'active' }))
+  storeB = await db.location.create(await withTestTenant({ name: unique('STORE_B'), status: 'active' }))
   actors.adminA = await db.user.create({
     userName: unique('adminA'),
     email: `${unique('a')}@test.com`,

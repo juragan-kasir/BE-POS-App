@@ -17,6 +17,7 @@ const { Op } = require('sequelize')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 const {
   deleteFromCloudinary,
   uploadToCloudinaryWithDedup
@@ -52,8 +53,8 @@ const createEmployee = (attrs = {}) => {
 }
 
 beforeAll(async () => {
-  store1 = await db.location.create({ name: unique('STORE_1'), status: 'active' })
-  store2 = await db.location.create({ name: unique('STORE_2'), status: 'active' })
+  store1 = await db.location.create(await withTestTenant({ name: unique('STORE_1'), status: 'active' }))
+  store2 = await db.location.create(await withTestTenant({ name: unique('STORE_2'), status: 'active' }))
 
   admin1 = await db.user.create({
     userName: unique('admin'),

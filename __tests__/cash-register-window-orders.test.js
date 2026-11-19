@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -60,8 +61,8 @@ async function mkOrder(name, overrides) {
 }
 
 beforeAll(async () => {
-  store = await db.location.create({ name: `CRW_STORE_${SUFFIX}` })
-  storeOther = await db.location.create({ name: `CRW_STORE_OTHER_${SUFFIX}` })
+  store = await db.location.create(await withTestTenant({ name: `CRW_STORE_${SUFFIX}` }))
+  storeOther = await db.location.create(await withTestTenant({ name: `CRW_STORE_OTHER_${SUFFIX}` }))
 
   opener = await db.user.create({
     userName: `crw_opener_${SUFFIX}`,

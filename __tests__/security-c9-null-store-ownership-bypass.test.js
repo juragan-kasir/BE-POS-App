@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -12,7 +13,7 @@ let storeA, tokenA, superToken
 
 describe('C-9 null-store (global) record ownership bypass', () => {
   beforeAll(async () => {
-    storeA = await db.location.create({ name: 'C9_STORE_A', status: 'active' })
+    storeA = await db.location.create(await withTestTenant({ name: 'C9_STORE_A', status: 'active' }))
 
     // P1-4: central gate denies unknown caller identities; these rows give
     // the caller ids real identities. Assertions below are unchanged.

@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -22,8 +23,8 @@ let regA = null
 let regB = null
 
 beforeAll(async () => {
-  storeA = await db.location.create({ name: `CRH_STORE_A_${SUFFIX}` })
-  storeB = await db.location.create({ name: `CRH_STORE_B_${SUFFIX}` })
+  storeA = await db.location.create(await withTestTenant({ name: `CRH_STORE_A_${SUFFIX}` }))
+  storeB = await db.location.create(await withTestTenant({ name: `CRH_STORE_B_${SUFFIX}` }))
   opener = await db.user.create({
     userName: `crh_opener_${SUFFIX}`,
     // AUTH-1 P2: authority comes from this row, not the JWT — the caller these

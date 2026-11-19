@@ -26,7 +26,8 @@ let phoneSeq = 0
 const phone = () => `0811${String(Date.now()).slice(-6)}${String(++phoneSeq).padStart(2, '0')}`
 
 const makeStore = async (key, tenantId) => {
-  const row = await db.location.create({ name: unique(key), status: 'active', ...(tenantId ? { tenantId } : {}) })
+  // no tenantId given = a deliberately tenant-less outlet (pre-tenant behavior)
+  const row = await db.location.create({ name: unique(key), status: 'active', tenantId: tenantId ?? null })
   ids.stores.push(row.id)
   return row
 }

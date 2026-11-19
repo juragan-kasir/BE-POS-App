@@ -1,6 +1,7 @@
 process.env.NODE_ENV = 'test'
 
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 const { addOrderRounds, dropOrderRounds } = require('../db/migrations/20261101000002-order-rounds')
 
 // Batch B9: up replays safely on a database that already has the table and
@@ -21,7 +22,7 @@ const objectsPresent = async () => {
 }
 
 beforeAll(async () => {
-  store = await db.location.create({ name: `B9_STORE_${Date.now()}`, status: 'active' })
+  store = await db.location.create(await withTestTenant({ name: `B9_STORE_${Date.now()}`, status: 'active' }))
   order = await db.order.create({ orderNumber: `B9-${Date.now()}`, store: store.id, status: 'pending' })
 })
 
