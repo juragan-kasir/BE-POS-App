@@ -320,6 +320,17 @@ const E2_BATCHES = Object.freeze({
     // uq_discount_tenant_code + uq_discount_tenantless_code. The models read
     // tenantId, so B21 must be recorded before this code deploys.
     openGates: []
+  }),
+  B22: deepFreeze({
+    id: 'B22',
+    title: 'W3-4 money: order, transaction, shift, cash_register, cash_movement, expense tenantId',
+    expectedCount: 1,
+    migrations: ['20261119000004-order-cash-tenant-id.js'],
+    // FIXING-PLAN W3-4 (BE audit S-04): nullable tenantId (FK tenant,
+    // RESTRICT) + index on the six money tables, backfilled from the row's
+    // store (transaction: from its order). The models read tenantId, so B22
+    // must be recorded before this code deploys.
+    openGates: []
   })
 })
 
@@ -344,7 +355,8 @@ const BATCH_ORDER = Object.freeze([
   'B18',
   'B19',
   'B20',
-  'B21'
+  'B21',
+  'B22'
 ])
 
 // D-08 B1 resume contracts. A resume finishes a batch whose earlier members
