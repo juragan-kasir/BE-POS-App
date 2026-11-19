@@ -49,7 +49,9 @@ const COUNTER_TYPES = new Set([...Object.keys(PREFIX), 'queue'])
 const nextDailySequence = async (type, store, { transaction, now = new Date() } = {}) => {
   if (!COUNTER_TYPES.has(type)) throw new Error(`nextDailySequence: unknown counter type "${type}"`)
   const storeId = storeKey(store)
-  const counterDate = getStoreLocalDate(await resolveStoreTimezone(storeId || null), now)
+  // Same transaction for the timezone lookup: no second pool connection
+  // while this one may wait on the counter row lock.
+  const counterDate = getStoreLocalDate(await resolveStoreTimezone(storeId || null, { transaction }), now)
   const rows = await db.sequelize.query(
     `INSERT INTO document_counter (store, "docType", "counterDate", "lastValue", "updatedAt")
      VALUES ($1, $2, $3, 1, NOW())

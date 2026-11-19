@@ -85,14 +85,34 @@ test('a created entry shows up in its outlet list and not in another outlet', as
   expect(listB.body.data.map((q) => q.id)).not.toContain(created.body.data.id)
 })
 
-test('20 parallel check-ins at one outlet: 20 distinct numbers, no 500', async () => {
+// 25 > pool max 20: before the timezone lookup ran inside the caller's
+// transaction, this starved the pool and timed out.
+test('25 parallel check-ins at one outlet: 25 distinct numbers, no 500', async () => {
   const before = await db.queue.count({ where: { storeId: f.b.id } })
-  const res = await Promise.all(Array.from({ length: 20 }, (_, i) => addToQueue(f.kb, f.b, `Paralel ${i}`)))
-  expect(res.map((r) => r.status)).toEqual(Array(20).fill(201))
+  const res = await Promise.all(Array.from({ length: 25 }, (_, i) => addToQueue(f.kb, f.b, `Paralel ${i}`)))
+  expect(res.map((r) => r.status)).toEqual(Array(25).fill(201))
   const numbers = res.map((r) => r.body.data.queueNumber)
-  expect(new Set(numbers).size).toBe(20)
-  const expected = Array.from({ length: 20 }, (_, i) => `Q${String(before + i + 1).padStart(3, '0')}`)
+  expect(new Set(numbers).size).toBe(25)
+  const expected = Array.from({ length: 25 }, (_, i) => `Q${String(before + i + 1).padStart(3, '0')}`)
   expect([...numbers].sort()).toEqual(expected)
+})
+
+test('40 concurrent counter transactions (pool max 20) all succeed: the timezone lookup rides the caller transaction', async () => {
+  // Before: resolveStoreTimezone ran outside the transaction and needed a
+  // second pool connection; 20 open transactions waiting for it starved the
+  // pool (2/40 ok, the rest SequelizeConnectionAcquireTimeoutError at 30 s).
+  const loc = await db.location.create({ name: uniq('POOL'), status: 'active', timezone: 'Asia/Jakarta' })
+  try {
+    const started = Date.now()
+    const results = await Promise.all(
+      Array.from({ length: 40 }, () => db.sequelize.transaction((transaction) => nextQueueNumber(loc.id, { transaction })))
+    )
+    expect(new Set(results.map((r) => r.queueNumber)).size).toBe(40)
+    expect(Date.now() - started).toBeLessThan(10000)
+  } finally {
+    await db.sequelize.query('DELETE FROM document_counter WHERE store = :s', { replacements: { s: loc.id } })
+    await loc.destroy({ force: true })
+  }
 })
 
 test('the counter restarts the next business day', async () => {
