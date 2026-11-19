@@ -1,6 +1,7 @@
 'use strict'
+const { attachStoreTenant } = require('../../utils/storeTenant')
 module.exports = (sequelize, DataTypes) => {
-  return sequelize.define(
+  return attachStoreTenant(sequelize.define(
     'type_payment',
     {
       id: {
@@ -11,6 +12,13 @@ module.exports = (sequelize, DataTypes) => {
       },
       store: {
         type: DataTypes.INTEGER
+      },
+      // Owning tenant = the tenant of `store` (utils/storeTenant, re-derived
+      // on every write that sets the outlet). Migration 20261119000005.
+      tenantId: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        references: { model: 'tenant', key: 'id' }
       },
       name: {
         allowNull: false,
@@ -60,5 +68,5 @@ module.exports = (sequelize, DataTypes) => {
       modelName: 'type_payment',
       tableName: 'type_payment'
     }
-  )
+  ))
 }

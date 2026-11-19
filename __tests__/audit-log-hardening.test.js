@@ -6,6 +6,7 @@ const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { purgeTenantLedger } = require('../test-helpers/tenantLedgerCleanup')
 const { redactAndAudit, createAudit, AUDIT_ACTIONS } = require('../utils/auditLog')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
@@ -160,6 +161,7 @@ afterAll(async () => {
     force: true
   })
   await db.location.destroy({ where: { id: [store?.id, storeOther?.id] }, force: true })
+  await purgeTenantLedger(db, tenant?.id)
   await db.tenant.destroy({ where: { id: tenant?.id }, force: true })
 })
 

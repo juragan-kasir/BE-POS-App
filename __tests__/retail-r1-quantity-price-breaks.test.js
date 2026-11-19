@@ -12,6 +12,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { purgeTenantLedger } = require('../test-helpers/tenantLedgerCleanup')
 const { normalizePriceTiers } = require('../utils/outletPricing')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
@@ -142,6 +143,7 @@ afterAll(async () => {
   await db.authorizationContextSession.destroy({ where: { userId: admin?.id } })
   await db.user.destroy({ where: { id: admin?.id }, force: true })
   await db.location.destroy({ where: { id: store?.id }, force: true })
+  await purgeTenantLedger(db, tenant?.id)
   await db.tenant.destroy({ where: { id: tenant?.id }, force: true })
 })
 

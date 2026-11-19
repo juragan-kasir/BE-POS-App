@@ -12,6 +12,7 @@ const { withIdempotencyKey } = require('../test-helpers/idempotency')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { purgeTenantLedger } = require('../test-helpers/tenantLedgerCleanup')
 const migration = require('../db/migrations/20261119000004-order-cash-tenant-id')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
@@ -66,6 +67,7 @@ afterAll(async () => {
   await db.authorizationContextSession.destroy({ where: { userId: f.cashier.id } })
   await db.user.destroy({ where: { id: f.cashier.id }, force: true })
   await db.location.destroy({ where: { id: stores }, force: true })
+  await purgeTenantLedger(db, [f.tA.id, f.tB.id])
   await db.tenant.destroy({ where: { id: [f.tA.id, f.tB.id] }, force: true })
   await db.sequelize.close()
 })
