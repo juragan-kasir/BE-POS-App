@@ -3,7 +3,24 @@ const { Op } = require('sequelize')
 const ExcelJS = require('exceljs')
 const TypePayment = db.type_payment
 const { createAudit } = require('../../utils/auditLog')
-const { scalarStoreScope, listStoreIds, storeIdsCondition } = require('../../utils/tenantScope')
+const { scalarStoreScope, listStoreIds, storeIdsCondition, callerStoreIds } = require('../../utils/tenantScope')
+
+// W3-y (owner decision 2026-11-19): a shared payment type (store null) is
+// PLATFORM data — every tenant reads it, only a global caller creates,
+// changes or deletes it. A tenant-bound super_admin writes its own
+// tenant's outlets only: no store / "all" means all of ITS outlets, never
+// the shared row every other tenant would see.
+const pinToCallerStores = async (req, stores) => {
+  const ids = await callerStoreIds(req)
+  if (ids === null) return { stores }
+  if (!stores.length) return ids.length ? { stores: ids } : { error: true }
+  return stores.every((s) => ids.includes(s)) ? { stores } : { error: true }
+}
+const platformWriteDenied = (res) =>
+  res.status(403).json({
+    success: false,
+    message: 'Metode pembayaran bersama (platform) hanya dapat diubah oleh super admin platform'
+  })
 const { visibleWhere, canWrite } = require('../../utils/ownedOrSharedScope')
 const { authorizedStoreIds } = require('../../utils/storeValidation')
 
@@ -191,7 +208,9 @@ exports.postNewTypePayment = async (req, res) => {
   const { name, type, icon, status, feeType, fee, tenor, sortOrder } = req.body
   let stores
   if (req.user?.roleType === 'super_admin') {
-    stores = resolveStoreIds(req.body.store, req.user?.store)
+    const pinned = await pinToCallerStores(req, resolveStoreIds(req.body.store, req.user?.store))
+    if (pinned.error) return platformWriteDenied(res)
+    stores = pinned.stores
   } else {
     // C-1: single-store tenant — reject ambiguously/foreign store immediately;
     // pin the write to the authorized own store.
@@ -269,7 +288,10 @@ exports.editTypePaymentById = async (req, res) => {
   const body = req.body
   let stores
   if (req.user?.roleType === 'super_admin') {
-    stores = resolveStoreIds(body.store, req.user?.store)
+    // An edit must not move a tenant's row to the shared platform scope.
+    const pinned = await pinToCallerStores(req, resolveStoreIds(body.store, req.user?.store))
+    if (pinned.error) return platformWriteDenied(res)
+    stores = pinned.stores
   } else {
     // C-1: single-store tenant edits must not expand scope.
     const authz = authorizedStoreIds(req)
@@ -630,6 +652,10 @@ exports.deleteTypePaymentById = async (req, res) => {
         message: 'Metode pembayaran sistem tidak dapat dihapus'
       })
     }
+    // W3-y: a tenant-bound super_admin's scope covers every row with no
+    // store filter, which included the shared rows: deleting one removed a
+    // payment method from every tenant.
+    if (target && !(await canWrite(req, target))) return platformWriteDenied(res)
     // IDOR fix: previously `store = body.store || req.user?.store` let a
     // client override the authorization boundary by sending another
     // store's id in the body — the destroy's WHERE clause would then
