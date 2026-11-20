@@ -5,6 +5,7 @@ const request = require('supertest')
 const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
+const { withTestTenant } = require('../test-helpers/fixtures')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 
@@ -16,11 +17,18 @@ let productTransfer = null
 let adminAUser = null
 let superAdminUser = null
 let adminAToken = null
+// Tenant-less pair (an unassigned draft business) for the GAP-2 refusals.
+let storeNA = null
+let storeNB = null
+let adminNAUser = null
+let adminNAToken = null
 let superAdminToken = null
 
 beforeAll(async () => {
-  storeA = await db.location.create({ tenantId: null, name: 'POS_FLOW_STORE_A', status: 'active' })
-  storeB = await db.location.create({ tenantId: null, name: 'POS_FLOW_STORE_B', status: 'active' })
+  // W3-z / Z2: stock can only move on an outlet that has a tenant, so the
+  // shared storeA/storeB are one business (the file's tenant).
+  storeA = await db.location.create(await withTestTenant({ name: 'POS_FLOW_STORE_A', status: 'active' }))
+  storeB = await db.location.create(await withTestTenant({ name: 'POS_FLOW_STORE_B', status: 'active' }))
   category = await db.category.create({ name: 'POS_FLOW_CATEGORY' })
 
   productAdjust = await db.product.create({
@@ -73,6 +81,21 @@ beforeAll(async () => {
   )
   superAdminToken = await signSessionToken(
     { id: superAdminUser.id, userName: superAdminUser.userName, roleType: 'super_admin' },
+    JWT_SECRET
+  )
+
+  storeNA = await db.location.create({ tenantId: null, name: 'POS_FLOW_STORE_NA', status: 'active' })
+  storeNB = await db.location.create({ tenantId: null, name: 'POS_FLOW_STORE_NB', status: 'active' })
+  adminNAUser = await db.user.create({
+    userName: 'admin_pos_flow_na',
+    email: 'admin_pos_flow_na@test.com',
+    roleType: 'admin',
+    userType: 'admin',
+    store: storeNA.id,
+    status: 'active'
+  })
+  adminNAToken = await signSessionToken(
+    { id: adminNAUser.id, userName: adminNAUser.userName, roleType: 'admin', store: storeNA.id },
     JWT_SECRET
   )
 })
@@ -171,11 +194,11 @@ afterAll(async () => {
 afterAll(async () => {
   await db.stock_transfer_item.destroy({ where: {}, force: true })
   await db.stock_transfer.destroy({
-    where: { fromStore: [storeA?.id, storeB?.id].filter(Boolean) },
+    where: { fromStore: [storeA?.id, storeB?.id, storeNA?.id].filter(Boolean) },
     force: true
   })
   await db.user.destroy({
-    where: { id: [adminAUser?.id, superAdminUser?.id].filter(Boolean) },
+    where: { id: [adminAUser?.id, superAdminUser?.id, adminNAUser?.id].filter(Boolean) },
     force: true
   })
   await db.stock_history.destroy({
@@ -191,7 +214,7 @@ afterAll(async () => {
     force: true
   })
   await db.category.destroy({ where: { id: category?.id }, force: true })
-  await db.location.destroy({ where: { id: [storeA?.id, storeB?.id] }, force: true })
+  await db.location.destroy({ where: { id: [storeA?.id, storeB?.id, storeNA?.id, storeNB?.id].filter(Boolean) }, force: true })
 })
 
 describe('POST /pos/adjust — stock adjustment', () => {
@@ -273,15 +296,16 @@ describe('POST /pos/transfer — inter-store stock transfer', () => {
     // The original success intent now lives in the same-tenant T1 case below.
     const res = await request(app)
       .post('/pos/transfer')
-      .set('Authorization', `Bearer ${adminAToken}`)
+      .set('Authorization', `Bearer ${adminNAToken}`)
       .send({
-        fromStore: storeA.id,
-        toStore: storeB.id,
+        fromStore: storeNA.id,
+        toStore: storeNB.id,
         items: [{ productId: productTransfer.id, qty: 6 }]
       })
 
     expect(res.status).toBe(422)
     expect(res.body.code).toBe('STORE_TENANT_REQUIRED')
+    expect(await db.stock_transfer.count({ where: { fromStore: storeNA.id } })).toBe(0)
 
     const sourceStock = await db.product_store_stock.findOne({
       where: { product: productTransfer.id, store: storeA.id }
@@ -411,7 +435,7 @@ describe('POST /pos/transfer — tenant boundary (GAP-2)', () => {
   })
 
   test('T3 non-platform tenantless source is rejected', async () => {
-    const res = await sendTransfer(adminAToken, storeA.id, storeB.id, productTransfer.id)
+    const res = await sendTransfer(adminNAToken, storeNA.id, storeNB.id, productTransfer.id)
     expect(res.status).toBe(422)
     expect(res.body.code).toBe('STORE_TENANT_REQUIRED')
   })
@@ -431,8 +455,18 @@ describe('POST /pos/transfer — tenant boundary (GAP-2)', () => {
     expect(await storeStock(product.id, storeTX1.id)).toBe(996)
   })
 
-  // T6 platform NULL→NULL staging is covered by the preserved
-  // 'super_admin can transfer from any store' case above (must stay green).
+  // T6 platform NULL→NULL staging: retired by W3-z / Z2 (owner-delegated
+  // decision 2026-11-19). An outlet without a tenant holds no stock, so a
+  // platform transfer between tenant-less outlets is refused too.
+  test('T6 platform transfer between tenant-less outlets is refused (W3-z Z2)', async () => {
+    // stock is there, so the refusal is the tenant rule, not availability
+    await db.product_store_stock.create({ product: productTransfer.id, store: storeNA.id, stock: 50 })
+    const res = await sendTransfer(superAdminToken, storeNA.id, storeNB.id, productTransfer.id)
+    expect(res.status).toBe(422)
+    expect(res.body.code).toBe('STORE_TENANT_REQUIRED')
+    expect(await db.stock_transfer.count({ where: { fromStore: storeNA.id } })).toBe(0)
+    expect(Number((await db.product_store_stock.findOne({ where: { product: productTransfer.id, store: storeNA.id } })).stock)).toBe(50)
+  })
 
   test('T7 platform NULL→owned transfer is rejected', async () => {
     const product = await makeTransferProduct('T7', categoryTX.id, storeTN.id, 1000)

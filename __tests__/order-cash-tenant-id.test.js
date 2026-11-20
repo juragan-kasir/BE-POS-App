@@ -112,8 +112,10 @@ test('every outlet table follows its store on create and on a store change', asy
   expect(expense.tenantId).toBe(f.tA.id)
   await db.expense.update({ store: f.b1.id }, { where: { id: expense.id } })
   expect((await db.expense.findByPk(expense.id)).tenantId).toBe(f.tB.id)
-  const free = await db.shift.create({ name: uniq('s'), store: f.free.id, startTime: '08:00', endTime: '16:00' })
-  expect(free.tenantId ?? null).toBeNull()
+  // W3-z / Z2: a row on an outlet without a tenant is refused.
+  await expect(db.shift.create({ name: uniq('s'), store: f.free.id, startTime: '08:00', endTime: '16:00' })).rejects.toMatchObject({
+    code: 'STORE_TENANT_REQUIRED'
+  })
 })
 
 test('a transaction takes its order\'s tenant, never a caller-supplied one', async () => {

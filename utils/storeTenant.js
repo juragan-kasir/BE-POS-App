@@ -7,7 +7,63 @@
 // call, static Model.update) can store a row under the wrong tenant.
 //
 // A row without an outlet (store NULL: shared/master rows) keeps whatever
-// tenantId was given to it (NULL by default); W3-y maps those explicitly.
+// tenantId was given to it (NULL by default); W3-y keeps those as platform
+// rows.
+//
+// W3-z / Z2: a row owned by an EXISTING outlet that has no tenant (a draft
+// outlet not yet assigned) is refused with 422 STORE_TENANT_REQUIRED before
+// it reaches the database. Every operational outlet has a tenant, so this
+// only stops writes against unassigned drafts; Z3 adds the same rule as a
+// CHECK constraint. Like DR-28 (utils/valueTooLong.js) the refusal marks the
+// request context, and storeTenantResponder turns the controller's generic
+// 5xx for that request into the 422 — no controller has to know about it.
+// An outlet id that matches no location keeps the pre-Z2 behavior (NULL).
+const userContext = require('./userContext')
+
+const STORE_TENANT_REQUIRED = 'STORE_TENANT_REQUIRED'
+
+class StoreTenantRequiredError extends Error {
+  constructor({ model, storeId }) {
+    super('Outlet ini belum terhubung ke tenant. Hubungkan outlet ke tenant dulu.')
+    this.name = 'StoreTenantRequiredError'
+    this.code = STORE_TENANT_REQUIRED
+    this.statusCode = 422
+    this.model = model
+    this.storeId = storeId
+  }
+}
+
+const refuseTenantless = (model, storeId) => {
+  const found = { model, storeId }
+  const store = userContext.getStore()
+  if (store) store.storeTenantRequired = found
+  throw new StoreTenantRequiredError(found)
+}
+
+const storeTenantBody = (found) => ({
+  success: false,
+  code: STORE_TENANT_REQUIRED,
+  message: 'Outlet ini belum terhubung ke tenant. Hubungkan outlet ke tenant dulu.',
+  storeId: found?.storeId ?? null
+})
+
+// Express middleware (mounted next to valueTooLongResponder): when this
+// request was refused by refuseTenantless and the handler answered 5xx — or
+// forwarded the error's 422 with its own body and no code — answer the
+// standard 422 STORE_TENANT_REQUIRED body instead.
+const storeTenantResponder = (req, res, next) => {
+  const store = userContext.getStore()
+  const json = res.json.bind(res)
+  res.json = (body) => {
+    const generic = res.statusCode >= 500 || (res.statusCode === 422 && !body?.code)
+    if (generic && store?.storeTenantRequired) {
+      res.status(422)
+      return json(storeTenantBody(store.storeTenantRequired))
+    }
+    return json(body)
+  }
+  next()
+}
 
 const storeIdOf = (value) => {
   const n = Number(value)
@@ -44,11 +100,20 @@ const includeTenantField = (options) => {
 const attachStoreTenant = (Model, { storeField = 'store' } = {}) => {
   const sequelize = Model.sequelize
 
+  // Tenant of an outlet-owned row; refuses an existing tenant-less outlet.
+  const tenantOrRefuse = (map, storeId) => {
+    if (!map.has(storeId)) return null
+    const tenantId = map.get(storeId)
+    if (tenantId == null) refuseTenantless(Model.name, storeId)
+    return tenantId
+  }
+
   const deriveOne = async (instance, options = {}) => {
     if (!instance.isNewRecord && !instance.changed(storeField)) return
     const storeId = storeIdOf(instance.get(storeField))
     if (storeId == null) return
-    instance.set('tenantId', await tenantForStore(sequelize, storeId, options.transaction))
+    const map = await tenantsForStores(sequelize, [storeId], options.transaction)
+    instance.set('tenantId', tenantOrRefuse(map, storeId))
     includeTenantField(options)
   }
 
@@ -60,7 +125,7 @@ const attachStoreTenant = (Model, { storeField = 'store' } = {}) => {
     )
     for (const instance of instances) {
       const storeId = storeIdOf(instance.get(storeField))
-      if (storeId != null) instance.set('tenantId', map.get(storeId) ?? null)
+      if (storeId != null) instance.set('tenantId', tenantOrRefuse(map, storeId))
     }
     includeTenantField(options)
   }
@@ -71,7 +136,8 @@ const attachStoreTenant = (Model, { storeField = 'store' } = {}) => {
     if (!attrs || !Object.prototype.hasOwnProperty.call(attrs, storeField)) return
     const storeId = storeIdOf(attrs[storeField])
     if (storeId == null) return
-    attrs.tenantId = await tenantForStore(sequelize, storeId, options.transaction)
+    const map = await tenantsForStores(sequelize, [storeId], options.transaction)
+    attrs.tenantId = tenantOrRefuse(map, storeId)
     includeTenantField(options)
   }
 
@@ -179,4 +245,15 @@ const attachParentTenant = (Model, { parent, foreignKey }) => {
   return Model
 }
 
-module.exports = { attachStoreTenant, attachStoresTenant, attachParentTenant, tenantForStore, tenantsForStores, storeIdOf }
+module.exports = {
+  attachStoreTenant,
+  attachStoresTenant,
+  attachParentTenant,
+  tenantForStore,
+  tenantsForStores,
+  storeIdOf,
+  STORE_TENANT_REQUIRED,
+  StoreTenantRequiredError,
+  storeTenantResponder,
+  storeTenantBody
+}

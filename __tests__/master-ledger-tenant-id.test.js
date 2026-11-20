@@ -74,8 +74,8 @@ test.each(Object.keys(BUILDERS))('%s takes the outlet\'s tenant, follows a store
   expect(row.tenantId).toBe(f.tA.id)
   await row.update({ store: f.b1.id })
   expect((await db[model].findByPk(row.id)).tenantId).toBe(f.tB.id)
-  const free = await make(model, BUILDERS[model](f.free.id))
-  expect(free.tenantId ?? null).toBeNull()
+  // W3-z / Z2: a row on an outlet without a tenant is refused.
+  await expect(make(model, BUILDERS[model](f.free.id))).rejects.toMatchObject({ code: 'STORE_TENANT_REQUIRED' })
 })
 
 describe('supplier (store = JSONB outlet set)', () => {

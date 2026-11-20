@@ -88,12 +88,15 @@ describe('tenant follows the outlet on every write path', () => {
     const member = await db.member.create({ name: uniq('m'), phoneNumber: phone(), store: f.a1.id })
     expect(member.tenantId).toBe(f.tA.id)
 
-    const [t1, t2, t3] = await db.member_tier.bulkCreate([
+    const [t1, t2] = await db.member_tier.bulkCreate([
       { name: uniq('t1'), store: f.a1.id },
-      { name: uniq('t2'), store: f.b1.id },
-      { name: uniq('t3'), store: f.free.id }
+      { name: uniq('t2'), store: f.b1.id }
     ])
-    expect([t1.tenantId, t2.tenantId, t3.tenantId ?? null]).toEqual([f.tA.id, f.tB.id, null])
+    expect([t1.tenantId, t2.tenantId]).toEqual([f.tA.id, f.tB.id])
+    // W3-z / Z2: a batch with a row on an outlet without a tenant is refused.
+    await expect(db.member_tier.bulkCreate([{ name: uniq('t3'), store: f.free.id }])).rejects.toMatchObject({
+      code: 'STORE_TENANT_REQUIRED'
+    })
 
     await member.update({ store: f.b1.id })
     expect((await db.member.findByPk(member.id)).tenantId).toBe(f.tB.id)

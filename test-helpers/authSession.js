@@ -33,10 +33,19 @@ async function createAuthenticatedTestSession(userAttrs, { activeTenantId, activ
 // Some legacy suites address stores by fixed abstract ids (1, 2). Since the
 // caller's store now comes from its DB row (FK to location), those ids must
 // be real locations; created once and reused across suites.
+// W3-z / Z2: each fixed outlet belongs to its own fixed tenant (stores 1 and
+// 2 stand for two separate businesses in these isolation suites), because a
+// write against a tenant-less outlet is refused (STORE_TENANT_REQUIRED).
 async function ensureLocationIds(...ids) {
   const db = models()
   for (const id of ids) {
-    await db.location.findOrCreate({ where: { id }, defaults: { id, name: `AUTH_P2_FIXTURE_STORE_${id}`, status: 'active' } })
+    const code = `fixture-store-${id}`
+    const [tenant] = await db.tenant.findOrCreate({ where: { code }, defaults: { code, name: `Fixture tenant store ${id}` } })
+    const [location] = await db.location.findOrCreate({
+      where: { id },
+      defaults: { id, name: `AUTH_P2_FIXTURE_STORE_${id}`, status: 'active', tenantId: tenant.id }
+    })
+    if (location.tenantId == null) await location.update({ tenantId: tenant.id })
   }
 }
 
