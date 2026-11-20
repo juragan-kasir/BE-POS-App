@@ -6539,7 +6539,7 @@ Auth required (any authenticated store staff; no role restriction). Parks the cu
 **Body:**
 | Field | Type | Description |
 |-------|------|-------------|
-| `cart` | object | Required: `{ items: [...], totalCovers?, orderType? }`; `items` must be non-empty (display-only snapshot, never re-priced here) |
+| `cart` | object | Required: `{ items: [...], totalCovers?, orderType?, orderDiscount? }`; `items` must be non-empty (display-only snapshot, never re-priced here). `displayTotalItems` = Σ `items[].count`, `displayTotalPrice` = max(0, Σ `items[].totalPrice` − `orderDiscount`). `orderDiscount`: optional order-level manual discount in rupiah (integer ≥ 0, else 400), stored and returned on resume; display-only, checkout re-prices via `/order/create` |
 | `tableId` | number | Optional; must exist in the same store |
 | `customerId` / `customerName` / `customerPhone` | number / string / string | Optional customer info |
 | `discountId` / `promoCode` | number / string | Optional discount references |
