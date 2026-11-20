@@ -1042,6 +1042,7 @@ Auth required (super_admin/admin).
   "birthDate": "string (optional)",
   "gender": "string (optional)",
   "address": "string (optional)",
+  "notes": "string (optional, max 255; \"\" clears it on edit)",
   "store": "number (optional)",
   "status": "string (default: active)"
 }
