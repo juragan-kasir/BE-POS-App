@@ -104,6 +104,11 @@ module.exports = (sequelize, DataTypes) => {
       serviceSnapshot: {
         type: DataTypes.JSONB,
         allowNull: true
+      },
+      // Salon (B26, DR-SLN-06): staff the service/product is attributed to.
+      staffId: {
+        type: DataTypes.INTEGER,
+        allowNull: true
       }
     },
     {

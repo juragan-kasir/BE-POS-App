@@ -46,6 +46,11 @@ module.exports = (sequelize, DataTypes) => {
       note: {
         type: DataTypes.STRING(255)
       },
+      // B26: retry-safe clock-in from the salon staff phone (unique per user).
+      idempotencyKey: {
+        type: DataTypes.STRING(100),
+        allowNull: true
+      },
       createdBy: {
         type: DataTypes.INTEGER
       },

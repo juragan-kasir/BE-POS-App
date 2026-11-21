@@ -8773,6 +8773,49 @@ Disconnects the store's Telegram assistant. **Response:** `{ "success": true, "m
 
 ---
 
+## Salon
+
+Salon & barbershop vertical for FE-SALON-App (plan `SALON-BARBERSHOP-PLAN.md` §3, rules `docs/product/salon/SALON-BA.md`). Only users of a tenant with `businessType: 'salon'` may call `/salon/*`. Every route resolves the salon tenant and the caller's outlets from the session, never from input (BR-SLN-020). Errors use the contract body `{ "code": "…", "message": "…", "details"?: {…} }` with codes from FE-SALON `ERROR_CODES`, for example `FORBIDDEN`, `VALIDATION_FAILED` (400, `details.issues[]`), `SLOT_TAKEN` and `INVALID_TRANSITION`. An unexpected failure is `500 INTERNAL_ERROR`.
+
+**Permissions** (`utils/salonCapabilities.js`, mapped from `roleType` while `AUTHZ_OWNER_V2` is off):
+
+| roleType | salon role | permissions |
+|---|---|---|
+| `super_admin` | `owner` | all 16 |
+| `admin` | `admin` | all except `settings.manage`, `outlet.manage` |
+| `kasir` | `kasir` | `catalog.read`, `employee.read`, `member.read/manage`, `appointment.read/manage`, `pos.sell`, `shift.manage` |
+| `user` | `staff` | `appointment.read`, `commission.read` (own only) |
+
+**Outlet:** an owner addresses every outlet of the tenant; the other roles address only their own outlet. Routes that act on an outlet take `?store=<id>` (or `body.store`). When the caller has a single outlet, it is used by default. An outlet outside the caller's access answers `403 FORBIDDEN`.
+
+### GET `/salon/context`
+Auth required. Returns the contract `AuthContext`, which FE-SALON builds its menu from:
+```json
+{
+  "user": { "id": "12", "name": "Pak Juragan", "username": "owner_salon" },
+  "tenant": { "id": "3", "name": "Kapster Juragan", "businessType": "salon",
+              "settings": { "salonProfile": "barbershop", "slotStepMin": 15, "depositDefault": 0, "pointsPer": 10000 } },
+  "canonicalRole": "owner",
+  "permissions": ["catalog.read", "…"],
+  "stores": [{ "id": "7", "name": "Kemang", "address": "…", "phone": "0812…", "timezone": "Asia/Jakarta", "openTime": "10:00", "closeTime": "21:00", "active": true }],
+  "staffUserId": "12",
+  "onboardingRequired": false
+}
+```
+- `tenant.settings` = `tenant.salonSettings` over the defaults shown.
+- Opening hours come from `location.salonSettings`, default 09:00–21:00.
+- `staffUserId` is set when the user has an active salon staff profile.
+- `onboardingRequired` is true for an owner whose tenant has no outlet yet. Such an owner is resolved through `tenant.ownerId`.
+- `403 FORBIDDEN` when the tenant is not a salon.
+
+**Schema (batch B26, `20261121000001-salon-domain.js`):**
+- tables `salon_staff_profile`, `salon_staff_skill`, `salon_availability`, `salon_time_off`, `salon_appointment`, `salon_appointment_item`, `salon_appointment_event`, `salon_queue_ticket`, `salon_order`, `salon_staff_commission`, all with `tenantId NOT NULL`;
+- new columns `order_item.staffId`, `tenant.salonSettings`, `location.salonSettings` (the public view hides `ownerPinHash`), `attendance.idempotencyKey`, `shift_swap.idempotencyKey`;
+- double booking is refused by the DB: `EXCLUDE USING gist (staffId, tstzrange(startAt, endAt))` on blocking statuses, Postgres error `23P01` → `409 SLOT_TAKEN`;
+- `salon_staff_commission` is immutable: a trigger refuses UPDATE/DELETE, and a refund writes a reversal row (`status: reversed`, negative `amount`, `reversesId`).
+
+---
+
 ## Misc
 
 ### GET `/health`

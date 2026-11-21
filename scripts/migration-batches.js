@@ -367,6 +367,20 @@ const E2_BATCHES = Object.freeze({
     // uq_queue_store_day_number. The queue model reads both columns, so B25
     // must be recorded before this code deploys.
     openGates: []
+  }),
+  B26: deepFreeze({
+    id: 'B26',
+    title: 'Salon S1-a: salon_* tables (double-booking EXCLUDE gist), order_item.staffId, salon settings',
+    expectedCount: 1,
+    migrations: ['20261121000001-salon-domain.js'],
+    // Salon vertical S1-a (SALON-BARBERSHOP-PLAN §3.1, SALON-BA DR-SLN-05/07):
+    // btree_gist + ten salon_* tables (tenantId NOT NULL), the staff
+    // exclusion constraint, the immutable commission ledger trigger, and
+    // nullable tenant/location.salonSettings, order_item.staffId,
+    // attendance/shift_swap.idempotencyKey. order_item, location, tenant,
+    // attendance and shift_swap models read the new columns, so B26 must be
+    // recorded before this code deploys.
+    openGates: []
   })
 })
 
@@ -395,7 +409,8 @@ const BATCH_ORDER = Object.freeze([
   'B22',
   'B23',
   'B24',
-  'B25'
+  'B25',
+  'B26'
 ])
 
 // D-08 B1 resume contracts. A resume finishes a batch whose earlier members

@@ -49,6 +49,11 @@ module.exports = (sequelize, DataTypes) => {
       decidedAt: {
         type: DataTypes.DATE
       },
+      // B26: retry-safe swap request (unique per requester).
+      idempotencyKey: {
+        type: DataTypes.STRING(100),
+        allowNull: true
+      },
       status_history: {
         type: DataTypes.JSONB,
         allowNull: true
