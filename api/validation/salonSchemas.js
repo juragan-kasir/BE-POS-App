@@ -144,6 +144,48 @@ const StoreInput = z
   })
   .refine((v) => v.closeTime > v.openTime, { message: 'Jam tutup harus setelah jam buka', path: ['closeTime'] })
 
+// ---------- pelanggan ----------
+const CustomerInput = z.object({
+  name: z.string().trim().min(2, 'Nama minimal 2 huruf').max(60),
+  phone: Phone,
+  notes: z.string().max(500)
+})
+
+// ---------- jadwal ----------
+const PaymentMethod = z.enum(['cash', 'qris', 'transfer', 'card'])
+const AppointmentSource = z.enum(['walk_in', 'phone', 'online'])
+
+const SlotQuery = z.object({
+  date: IsoDate,
+  serviceIds: z.array(Id).min(1).max(6),
+  staffId: Id.nullable()
+})
+
+const DateRange = z
+  .object({ from: IsoDate, to: IsoDate })
+  .refine((v) => v.to >= v.from, { message: 'Tanggal akhir harus setelah tanggal awal', path: ['to'] })
+
+const AppointmentInput = z.object({
+  serviceIds: z.array(Id).min(1, 'Pilih minimal satu layanan').max(6),
+  staffId: Id.nullable(),
+  startAt: IsoDateTime,
+  memberId: Id.nullable(),
+  customerName: z.string().trim().min(2, 'Nama minimal 2 huruf').max(60),
+  customerPhone: z.union([Phone, z.literal('')]),
+  source: AppointmentSource,
+  depositAmount: Money,
+  depositMethod: PaymentMethod.nullable(),
+  notes: z.string().max(300),
+  idempotencyKey: z.string().min(8).max(100)
+})
+
+const RescheduleInput = z.object({ startAt: IsoDateTime, staffId: Id })
+
+const TRANSITIONS = ['confirm', 'check-in', 'start', 'complete', 'no-show', 'cancel']
+const TransitionInput = z.object({ reason: z.string().max(200).nullable() })
+
+const WaTextQuery = z.object({ kind: z.enum(['reminder', 'thanks']).default('reminder') })
+
 module.exports = {
   Money,
   Id,
@@ -162,5 +204,14 @@ module.exports = {
   WorkShiftInput,
   WorkShiftRange,
   SettingsInput,
-  StoreInput
+  StoreInput,
+  CustomerInput,
+  PaymentMethod,
+  SlotQuery,
+  DateRange,
+  AppointmentInput,
+  RescheduleInput,
+  TRANSITIONS,
+  TransitionInput,
+  WaTextQuery
 }

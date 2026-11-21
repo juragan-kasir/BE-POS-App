@@ -34,7 +34,10 @@ const salonRoute = ({ perm = null, store = false } = {}, handler) => async (req,
       query: req.query || {},
       params: req.params || {}
     })
-    if (result && result.__status) return res.status(result.__status).json(result.body)
+    if (result && result.__status) {
+      if (result.headers) res.set(result.headers)
+      return res.status(result.__status).json(result.body)
+    }
     return res.status(200).json(result ?? { ok: true })
   } catch (err) {
     if (err instanceof SalonError) return fail(res, err.status, err.code, err.message, err.details)
@@ -48,7 +51,7 @@ const salonRoute = ({ perm = null, store = false } = {}, handler) => async (req,
   }
 }
 
-/** Reply with a non-200 status from a handler: return created(body). */
-const withStatus = (status, body) => ({ __status: status, body })
+/** Reply with another status (and optional headers): return withStatus(201, body). */
+const withStatus = (status, body, headers) => ({ __status: status, body, headers })
 
 module.exports = { salonRoute, withStatus, fail }

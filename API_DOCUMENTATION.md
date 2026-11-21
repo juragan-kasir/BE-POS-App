@@ -8855,6 +8855,32 @@ Request bodies are validated with `api/validation/salonSchemas.js`, a port of FE
 | POST / PATCH `/salon/work-shifts[/:id]?store=` | `shift.manage` | Body `{ name, type (harian\|mingguan), startDate, endDate (null for harian), startTime, endTime, employeeIds, status (draft\|active\|inactive) }`. Every employee must be a salon staff member of the outlet (`404`). An employee may hold several shifts, but two ACTIVE shifts of one employee that overlap in date and time are refused with `409 SLOT_TAKEN`. Writes are serialized per outlet. `user.shift` (the FE-POS one-shift model) is not changed. |
 | DELETE `/salon/work-shifts/:id?store=` | `shift.manage` | Soft delete. |
 
+### Customers
+Salon customers are `member` rows, listed per tenant (no `?store=`). Each row is still stored on an outlet: `?store=`, else the actor's only outlet, else the first one. The phone is stored E.164 and returned as `08…`, and it must be unique in the tenant. `tier` comes from `totalSpent` (≥ Rp1 jt silver, ≥ Rp3 jt gold; BR-SLN-019). `visitCount`, `lastVisitAt` and `totalSpent` come from paid salon orders, so they stay 0 until checkout ships (S2-a).
+
+| Route | Permission | Notes |
+|---|---|---|
+| GET `/salon/customers?q=` | `member.read` | Matches the name (case-insensitive) or ≥ 3 phone digits. At most 100 rows. |
+| POST / PATCH `/salon/customers[/:id]` | `member.manage` | Body `{ name, phone, notes }`. `409 DUPLICATE` for a phone already in the tenant, or a name already used at the same outlet (`details.field`). |
+| GET `/salon/customers/:id/history` | `member.read` | `{ appointments (latest 50), orders }`. `orders` is `[]` until S2-a. |
+
+### Schedule (`?store=` required)
+Instants are UTC; dates, weekdays and opening hours use the outlet's `timezone` (BR-SLN-001). A block is the sum of duration + buffer over the services, with the staff skill's `durationOverride` applied. The buffer is blocked time too (BR-SLN-002). The price per line is `priceOverride ?? levelPrices[level] ?? basePrice`. It is locked at booking and re-locked on reschedule (BR-SLN-005).
+
+| Route | Permission | Notes |
+|---|---|---|
+| GET `/salon/slots?date=&serviceIds=1,2&staffId=` | `appointment.read` | `{ slots: [{ startAt, endAt, staffId }], timezone }`. Lists start times every `slotStepMin` minutes where an active staff member has every skill, is within their availability and the opening hours, is not on leave or booked, and the time is not past (BR-SLN-003). Without `staffId`, each start goes to the free staff member with the fewest booked minutes that day; ties go to the lower id (BR-SLN-004). |
+| GET `/salon/appointments?from=&to=` | `appointment.read` | Outlet dates, at most 62 days. Sorted by `startAt`. A stylist gets only bookings they work on. |
+| GET `/salon/appointments/:id` | `appointment.read` | Contract `Appointment`, with `items` and `history`. |
+| POST `/salon/appointments` | `appointment.manage` | Contract `AppointmentInput`. `201`; a replay with the same `(store, idempotencyKey)` and the same body returns `200` with `Idempotent-Replay: true`. The same key with another body returns `409 IDEMPOTENCY_MISMATCH` (BR-SLN-006). `staffId: null` books the slot engine's pick. Errors: `404` (service / staff / member), `409 STAFF_NOT_SKILLED`, `OUTSIDE_AVAILABILITY`, `SLOT_IN_PAST` (more than 5 minutes ago), `SLOT_TAKEN`. Number `BK-YYMMDD-NNN` per outlet per booking day. |
+| POST `/salon/appointments/:id/reschedule` | `appointment.manage` | Body `{ startAt, staffId }`. Only `booked` / `confirmed` (`409 INVALID_TRANSITION`). Same checks as a new booking; the booking's own old time does not count as a clash (BR-SLN-007). |
+| POST `/salon/appointments/:id/{confirm\|check-in\|start\|complete\|no-show\|cancel}` | `appointment.manage` | Body `{ reason }`; `cancel` requires it. Allowed moves: confirm (booked), check-in (booked/confirmed), start (checked_in; `409 SLOT_TAKEN` when the stylist is still serving someone), complete (in_service), no-show (booked/confirmed), cancel (booked/confirmed/checked_in). Any other move returns `409 INVALID_TRANSITION` with `details { from, transition }`. `paid` is reached only through checkout. |
+| GET `/salon/appointments/:id/wa-text?kind=reminder\|thanks` | `appointment.read` | `{ phone, text }` for a wa.me link. |
+
+**Double booking.** The exclusion constraint `salon_appointment_item_no_double_booking` (staff × time range, only while the status is booked / confirmed / checked_in / in_service) decides races. Of N parallel bookings for one slot, exactly one succeeds; the rest get `409 SLOT_TAKEN`.
+
+**Deposit (BR-SLN-009).** `depositAmount > 0` requires `depositMethod` (`400`). A cash deposit requires an open cash register at the outlet (`409 SHIFT_CLOSED`) and is attributed to it (`depositCashRegisterId`). The deposit is `held` until checkout. A no-show or cancellation marks it `forfeited`.
+
 ---
 
 ## Misc
