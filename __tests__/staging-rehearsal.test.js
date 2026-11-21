@@ -89,7 +89,9 @@ const KNOWN_E2 = [
   // W3-6 document counter (B24).
   '20261119000006-document-counter.js',
   // W3-6b queue daily number (B25).
-  '20261119000007-queue-daily-number.js'
+  '20261119000007-queue-daily-number.js',
+  // Salon S1-a domain (B26).
+  '20261121000001-salon-domain.js'
 ]
 
 // Locked intentional staging/production divergence (D-06 manifest
@@ -278,7 +280,7 @@ describe('W-02R.4 staging manifest (locked rehearsal contract)', () => {
     expect(r.approved).toBe(false)
   })
 
-  test('derived E2 set equals the locked 41 and partitions 264 = 197 + 26 + 41', () => {
+  test('derived E2 set equals the locked 42 and partitions 265 = 197 + 26 + 42', () => {
     const staging = STAGING_MANIFEST()
     const ledger = harness.fixtureLedgerNames(FILES)
     expect(ledger).toHaveLength(26)
@@ -833,9 +835,9 @@ describe('W-02R.4 full rehearsal integration (disposable database)', () => {
     expect(ev.result).toBe('rehearsal-pass-blocked')
     expect(ev.target).toBe('staging')
     expect(ev.stagingDb).toBe(DB)
-    expect(ev.steps.plan.e2Candidates).toHaveLength(41)
+    expect(ev.steps.plan.e2Candidates).toHaveLength(42)
     expect(ev.steps.stamp.inserted).toHaveLength(197)
-    expect(ev.steps.e2.executed).toHaveLength(41)
+    expect(ev.steps.e2.executed).toHaveLength(42)
     expect(ev.steps.e2.missingAfterRun).toEqual([])
     // D-05: the snapshot's target indexes are dropped before E2 (production
     // has member_pkey only), so the D-05 migration genuinely creates them.
@@ -856,7 +858,7 @@ describe('W-02R.4 full rehearsal integration (disposable database)', () => {
     }
     expect(ev.steps.d05Indexes.present.sort()).toEqual([...harness.MEMBER_INDEXES_AFTER_E2].sort())
     expect(ev.steps.d05Indexes.missing).toEqual([])
-    expect(ev.steps.verify.metaCount).toBe(264)
+    expect(ev.steps.verify.metaCount).toBe(265)
     expect(ev.steps.verify.failures).toEqual([])
     expect(ev.steps.verify.status).toBe('BLOCKED')
     expect(ev.steps.verify.blocked).toHaveLength(3)

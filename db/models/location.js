@@ -159,6 +159,16 @@ module.exports = (sequelize, DataTypes) => {
         get() {
           return publicLaundrySettingsView(this.getDataValue('laundrySettings'))
         }
+      },
+      // Salon-only outlet settings (B26): { openTime, closeTime, ownerPinHash }.
+      // Same public view as laundrySettings: the getter never exposes the
+      // owner-PIN hash; refund approval reads getDataValue('salonSettings').
+      salonSettings: {
+        type: DataTypes.JSONB,
+        allowNull: true,
+        get() {
+          return publicLaundrySettingsView(this.getDataValue('salonSettings'))
+        }
       }
     },
     {
