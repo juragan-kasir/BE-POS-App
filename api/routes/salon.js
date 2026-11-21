@@ -7,9 +7,45 @@ const express = require('express')
 const router = express.Router()
 const authorization = require('../../utils/authorization')
 const context = require('../controller/salon/context')
+const settings = require('../controller/salon/settings')
+const catalog = require('../controller/salon/catalog')
+const staff = require('../controller/salon/staff')
+const hr = require('../controller/salon/hr')
 
 router.use(authorization)
 
 router.get('/context', context.getContext)
+
+// pengaturan & outlet
+router.patch('/settings', settings.updateSettings)
+router.post('/stores', settings.createStore)
+router.patch('/stores/:id', settings.updateStore)
+
+// katalog
+router.get('/services', catalog.listServices)
+router.post('/services', catalog.createService)
+router.patch('/services/:id', catalog.updateService)
+router.get('/products', catalog.listProducts)
+router.post('/products', catalog.createProduct)
+router.patch('/products/:id', catalog.updateProduct)
+
+// staff
+router.get('/staff', staff.listStaff)
+router.post('/staff', staff.createStaff)
+router.put('/staff/:userId/profile', staff.updateProfile)
+router.put('/staff/:userId/skills', staff.updateSkills)
+router.put('/staff/:userId/availability', staff.updateAvailability)
+router.post('/staff/:userId/time-off', staff.addTimeOff)
+router.delete('/staff/:userId/time-off/:id', staff.removeTimeOff)
+
+// SDM: jabatan & shift kerja
+router.get('/positions', hr.listPositions)
+router.post('/positions', hr.createPosition)
+router.patch('/positions/:id', hr.updatePosition)
+router.delete('/positions/:id', hr.deletePosition)
+router.get('/work-shifts', hr.listWorkShifts)
+router.post('/work-shifts', hr.createWorkShift)
+router.patch('/work-shifts/:id', hr.updateWorkShift)
+router.delete('/work-shifts/:id', hr.deleteWorkShift)
 
 module.exports = router
