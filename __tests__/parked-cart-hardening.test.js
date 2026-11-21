@@ -636,3 +636,43 @@ describe('Backward compatibility / regression', () => {
     expect(res.status).toBe(400)
   })
 })
+
+// Retail: the order-level manual discount used to be stripped by zod (the
+// cart object is not passthrough), so a resumed cart lost it.
+describe('Order-level discount (retail)', () => {
+  test('cart.orderDiscount is stored, returned on resume and lowers the display total', async () => {
+    const created = await parkCart(adminToken, {
+      cart: { items: sampleItems({ count: 2, totalPrice: 20000 }), orderDiscount: 5000 }
+    })
+    expect(created.status).toBe(201)
+    expect(created.body.data.cartPayload.orderDiscount).toBe(5000)
+    expect(created.body.data.displayTotalItems).toBe(2)
+    expect(created.body.data.displayTotalPrice).toBe(15000)
+
+    const resumed = await resumeParkedCart(adminToken, created.body.data.id)
+    expect(resumed.status).toBe(200)
+    expect(resumed.body.data.cartPayload.orderDiscount).toBe(5000)
+  })
+
+  test('the display total never goes below 0', async () => {
+    const created = await parkCart(adminToken, {
+      cart: { items: sampleItems(), orderDiscount: 999999 }
+    })
+    expect(created.status).toBe(201)
+    expect(created.body.data.displayTotalPrice).toBe(0)
+  })
+
+  test('a negative or fractional orderDiscount is refused with 400', async () => {
+    const negative = await parkCart(adminToken, { cart: { items: sampleItems(), orderDiscount: -1 } })
+    expect(negative.status).toBe(400)
+    const fractional = await parkCart(adminToken, { cart: { items: sampleItems(), orderDiscount: 1.5 } })
+    expect(fractional.status).toBe(400)
+  })
+
+  test('a cart without orderDiscount is unchanged (F&B clients)', async () => {
+    const created = await parkCart(adminToken)
+    expect(created.status).toBe(201)
+    expect(created.body.data.cartPayload.orderDiscount).toBeUndefined()
+    expect(created.body.data.displayTotalPrice).toBe(10000)
+  })
+})

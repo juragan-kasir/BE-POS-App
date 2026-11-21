@@ -2549,7 +2549,15 @@ exports.createParkedCartSchema = z.object({
   cart: z.object({
     items: z.array(z.object({}).passthrough()),
     totalCovers: strToNumNullable().optional(),
-    orderType: z.string().optional().nullable()
+    orderType: z.string().optional().nullable(),
+    // Retail: order-level manual discount (rupiah) to restore on resume.
+    // Display-only like the items — checkout re-prices via /order/create.
+    // Without this key zod stripped it and a resumed cart lost its discount.
+    orderDiscount: strToNumNullable()
+      .optional()
+      .refine((v) => v == null || Number.isInteger(v), {
+        message: 'orderDiscount must be an integer >= 0'
+      })
   }),
   idempotencyKey: z.string().max(255).optional().nullable()
 })

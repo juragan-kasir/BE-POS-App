@@ -37,9 +37,11 @@ function serializeParkedCart(row, now) {
   return { ...plain, status: computeEffectiveStatus(plain, now) }
 }
 
-function computeDisplayTotals(items) {
+function computeDisplayTotals(items, orderDiscount = 0) {
   const displayTotalItems = items.reduce((sum, item) => sum + (Number(item?.count) || 0), 0)
-  const displayTotalPrice = items.reduce((sum, item) => sum + (Number(item?.totalPrice) || 0), 0)
+  const linesTotal = items.reduce((sum, item) => sum + (Number(item?.totalPrice) || 0), 0)
+  // An order-level discount (retail) lowers the shown total, never below 0.
+  const displayTotalPrice = Math.max(0, linesTotal - (Number(orderDiscount) || 0))
   return { displayTotalItems, displayTotalPrice }
 }
 
@@ -116,7 +118,7 @@ const parkedCartController = {
         }
       }
 
-      const { displayTotalItems, displayTotalPrice } = computeDisplayTotals(cart.items)
+      const { displayTotalItems, displayTotalPrice } = computeDisplayTotals(cart.items, cart.orderDiscount)
 
       // Fast-path idempotency check, outside the transaction — mirrors
       // order.create/cashMovement.createMovement exactly. Same key +
