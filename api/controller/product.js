@@ -32,6 +32,14 @@ const {
   parseProductTemplate
 } = require('../../utils/excelTemplate')
 const { isSuperAdmin, storesInCallerTenant, callerStoreIds } = require('../../utils/tenantScope')
+const {
+  SkuTakenError,
+  skuTakenBody,
+  normalizeSku,
+  assertSkuFree,
+  generateSku,
+  isSkuUniqueViolation
+} = require('../service/productSku')
 const { assertSellableProductAssignment } = require('../validation/schemas')
 // W3-1 (DR-11): shared authoritative outlet-price resolution (checkout +
 // display use one rule).
@@ -764,6 +772,7 @@ exports.postAddProduct = async (req, res) => {
     conversionFactor,
     point,
     barcode,
+    sku,
     brand,
     hasModifiers,
     modifiers,
@@ -987,8 +996,12 @@ exports.postAddProduct = async (req, res) => {
       : null
 
     const productTenantId = await resolveStoresTenant(parsedStores)
+    // A typed SKU is kept; an empty one becomes PRD-xxxxx after the insert.
+    const manualSku = normalizeSku(sku)
+    if (manualSku) await assertSkuFree(manualSku, productTenantId)
     const postData = await Product.create({
       tenantId: productTenantId,
+      sku: manualSku || null,
       nameProduct: nameProduct || null,
       category: normalizedCategory,
       description,
@@ -1036,9 +1049,11 @@ exports.postAddProduct = async (req, res) => {
       estimationTime: estimationTime || 0
     })
 
-    const sku = `PRD-${String(postData.id).padStart(5, '0')}`
-    await Product.update({ sku }, { where: { id: postData.id } })
-    postData.sku = sku
+    if (!manualSku) {
+      const autoSku = await generateSku(postData.id, productTenantId)
+      await Product.update({ sku: autoSku }, { where: { id: postData.id } })
+      postData.sku = autoSku
+    }
 
     // Sync junction table
     if (parsedStores.length > 0) {
@@ -1108,6 +1123,10 @@ exports.postAddProduct = async (req, res) => {
     if (error instanceof InventoryLinkError) {
       return res.status(error.statusCode).json(inventoryLinkErrorBody(error))
     }
+    if (error instanceof SkuTakenError) return res.status(409).json(skuTakenBody(error))
+    if (isSkuUniqueViolation(error)) {
+      return res.status(409).json(skuTakenBody({ message: 'SKU sudah dipakai produk lain' }))
+    }
     console.error('Error =>', error)
     return res.status(500).json({
       success: false,
@@ -1133,6 +1152,7 @@ exports.editProductByLocationAndId = async (req, res) => {
     conversionFactor,
     point,
     barcode,
+    sku,
     brand,
     hasModifiers,
     modifiers,
@@ -1357,6 +1377,13 @@ exports.editProductByLocationAndId = async (req, res) => {
     const existing = getAllProductByIdAndLocation
     const nextModifiers = listToggle(hasModifiers, modifiers, existing.hasModifiers, existing.modifiers)
     const nextOptions = listToggle(isOption, options, existing.isOption, existing.options)
+    // SKU: a typed value replaces it (unique in the product's tenant); an
+    // empty one keeps the stored code — a product never loses its SKU.
+    const nextSku = normalizeSku(sku)
+    if (nextSku && nextSku !== existing.sku) {
+      const skuTenantId = stores !== undefined ? await resolveStoresTenant(parsedStores) : existing.tenantId
+      await assertSkuFree(nextSku, skuTenantId, { excludeId: Number(id) })
+    }
 
     const reqBody = {
       image: imageUrl,
@@ -1374,6 +1401,7 @@ exports.editProductByLocationAndId = async (req, res) => {
       ...(sent(point) ? { point: point || 0 } : {}),
       ...(sent(redeemPoints) ? { redeemPoints: redeemPoints || 0 } : {}),
       ...(sent(barcode) ? { barcode: barcode || null } : {}),
+      ...(nextSku ? { sku: nextSku } : {}),
       ...(sent(brand) ? { brand: brand || null } : {}),
       ...(sent(hasModifiers) ? { hasModifiers } : {}),
       ...(nextModifiers !== undefined ? { modifiers: nextModifiers } : {}),
@@ -1517,6 +1545,10 @@ exports.editProductByLocationAndId = async (req, res) => {
   } catch (error) {
     if (error instanceof InventoryLinkError) {
       return res.status(error.statusCode).json(inventoryLinkErrorBody(error))
+    }
+    if (error instanceof SkuTakenError) return res.status(409).json(skuTakenBody(error))
+    if (isSkuUniqueViolation(error)) {
+      return res.status(409).json(skuTakenBody({ message: 'SKU sudah dipakai produk lain' }))
     }
     console.error('ERROR =>', error)
     return res.status(500).json({

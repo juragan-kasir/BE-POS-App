@@ -521,6 +521,7 @@ Auth required (super_admin/admin). Content-Type: `multipart/form-data`.
 | `conversionFactor` | string | No | `"1"` |
 | `point` | number | No | `0` |
 | `barcode` | string | No | null |
+| `sku` | string (max 50) | No | `PRD-xxxxx` (from the id) |
 | `brand` | string | No | null |
 | `hasModifiers` | boolean | No | `false` |
 | `modifiers` | JSON array | No | `[]` |
@@ -541,6 +542,8 @@ Auth required (super_admin/admin). Content-Type: `multipart/form-data`.
 | `image` | file | No | null |
 
 **Name uniqueness (per tenant).** `nameProduct` must be unique within the business that owns the target `stores`, not across every business: another tenant may use the same name. The name is taken when an existing product with the same name is assigned to a store of the same tenant, or is assigned to no store at all (such a product is listed in every store). A product created without `stores` is checked against every product. Stores without a tenant form one shared group. A clash answers `409 {"success":false,"code":"NAME_TAKEN","field":"nameProduct","message":"Product with this name already exists."}` before any upload or write.
+
+**SKU.** A typed `sku` (trimmed) is kept; empty or missing → `PRD-` + the id padded to 5 digits (`PRD-00042-2` … when that code was typed by hand on another product). Unique per tenant, soft-deleted products included: a clash answers `409 {"success":false,"code":"SKU_TAKEN","field":"sku"}` (message names a deleted holder). On `PUT /product/edit-product` a typed `sku` replaces the code under the same check; an empty one keeps it.
 
 `inventoryMode: hybrid` is retired (BRD phase 4F): a product that already has it keeps it on any edit and may leave it, but a new product, or a switch from another mode, is 400 `INVENTORY_MODE_RETIRED` (`field: inventoryMode`). `npm run report:hybrid-products [--json]` lists the hybrid products read-only with a suggested mode (production orders → `stocked`; an active recipe at every selling outlet → `make_to_order`; else `stocked`).
 

@@ -219,6 +219,8 @@ exports.createProductSchema = z.object({
   conversionFactor: z.coerce.string().optional().default('1'),
   point: strToNum().optional().default(0),
   barcode: z.string().max(FIELD_MAX.BARCODE, tooLong(FIELD_MAX.BARCODE)).optional().nullable(),
+  // Typed SKU (empty = PRD-xxxxx). Was missing, so zod stripped it.
+  sku: z.string().trim().max(FIELD_MAX.CODE, tooLong(FIELD_MAX.CODE)).optional().nullable(),
   brand: z.string().max(FIELD_MAX.BUSINESS_NAME, tooLong(FIELD_MAX.BUSINESS_NAME)).optional().nullable(),
   hasModifiers: z.union([z.boolean(), z.string()]).optional().default(false),
   modifiers: jsonField().optional().default([]),
