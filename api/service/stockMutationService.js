@@ -591,8 +591,9 @@ async function resolveBomIngredientRequirements(flatItems, store, productById, t
       // consumes nothing (its cost lives in serviceConfig.costComponents).
       // With an active recipe (e.g. detergent per kg) it consumes like any
       // made-to-order product. BE audit 2026-11-18: laundry sales are now
-      // recognized through the same stock path as POS checkouts.
-      if (product.tipeProduk === 'laundry_service') continue
+      // recognized through the same stock path as POS checkouts. A salon
+      // service (make_to_order, no stock of its own) follows the same rule.
+      if (product.tipeProduk === 'laundry_service' || product.tipeProduk === 'salon_service') continue
       const e = new Error(
         `Produk "${product.nameProduct}" menggunakan mode inventaris "${mode}" tetapi tidak memiliki BOM aktif`
       )

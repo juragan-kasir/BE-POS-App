@@ -79,7 +79,15 @@ const PREFIX_MODEL = {
   // Laundry (2026-11-14): order ids are POS order ids; turnaround is its own row.
   '/laundry/order/': 'order',
   '/laundry/turnaround/': 'laundry_turnaround',
-  '/assistant/stores/': 'location'
+  '/assistant/stores/': 'location',
+  // Salon (2026-11-21, S1-b): ids are rows of the shared tables. Under
+  // /salon/staff/ every id is swept as a user id (the staff member).
+  '/salon/stores/': 'location',
+  '/salon/services/': 'product',
+  '/salon/products/': 'product',
+  '/salon/staff/': 'user',
+  '/salon/positions/': 'position',
+  '/salon/work-shifts/': 'shift'
 }
 const PARAM_MODEL = {
   supplierId: 'supplier',

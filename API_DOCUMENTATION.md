@@ -8817,6 +8817,44 @@ Auth required. Returns the contract `AuthContext`, which FE-SALON builds its men
 - double booking is refused by the DB: `EXCLUDE USING gist (staffId, tstzrange(startAt, endAt))` on blocking statuses, Postgres error `23P01` → `409 SLOT_TAKEN`;
 - `salon_staff_commission` is immutable: a trigger refuses UPDATE/DELETE, and a refund writes a reversal row (`status: reversed`, negative `amount`, `reversesId`).
 
+Request bodies are validated with `api/validation/salonSchemas.js`, a port of FE-SALON `src/api/contract.ts`. Responses have the contract shapes `Service`, `RetailProduct`, `Staff`, `Position`, `WorkShift`, `Tenant` and `Store`. Lists are `{ "data": [...] }`, creates answer `201`, and ids are strings. No new tables: S1-b uses the B26 tables and the shared `product`, `category`, `position`, `shift` and `location` tables.
+
+### Settings and outlets
+| Route | Permission | Notes |
+|---|---|---|
+| PATCH `/salon/settings` | `settings.manage` | Body `{ salonProfile, slotStepMin (10\|15\|20\|30), depositDefault, pointsPer }`. Merged into `tenant.salonSettings`. Returns `Tenant`. |
+| POST `/salon/stores` | `outlet.manage` | Body `{ name, address, phone, timezone (Asia/Jakarta\|Makassar\|Jayapura), openTime, closeTime, active }`. Creates a `businessType: 'salon'` outlet with its hours in `location.salonSettings` and links every salon service/product to it. The outlet name must be unique in the tenant (`409 DUPLICATE`). An owner without a home outlet is bound to it (onboarding). |
+| PATCH `/salon/stores/:id` | `outlet.manage` | Same body. Keeps the refund owner-PIN hash. Another tenant's outlet → `404`. |
+
+### Catalog
+| Route | Permission | Notes |
+|---|---|---|
+| GET `/salon/services` | `catalog.read` or `appointment.read` | |
+| POST / PATCH `/salon/services[/:id]` | `catalog.manage` | Body `{ name, category, basePrice, serviceConfig: { durationMin, bufferMin, levelPrices: { junior, senior, master }, commission: { type: percent\|flat, value } }, active }`. Stored as `product` with `tipeProduk 'salon_service'` and `inventoryMode 'make_to_order'` (no stock), plus an SKU `PRD-…`. `category` is a tenant category, created by name on first use. The name is unique in the tenant (`409 DUPLICATE`). Deactivating a service that an upcoming booking (booked/confirmed) still uses → `409 IN_USE`. |
+| GET `/salon/products[?store=]` | `catalog.read` or `pos.sell` | `stock` is the outlet's stock (`product_store_stock`). Without `?store=`, an owner of several outlets gets the sum over them. |
+| POST / PATCH `/salon/products[/:id][?store=]` | `catalog.manage` | Body `{ name, price, stock, commission, active }`. Stored as `tipeProduk 'salon_retail'`, `inventoryMode 'stocked'`, with `serviceConfig.commission`. A stock change sets the outlet's stock through `setProductStock`, which also writes `stock_history`. An owner of several outlets must pass `?store=` to change stock (`400`). |
+
+### Staff (`?store=` required)
+| Route | Permission | Notes |
+|---|---|---|
+| GET `/salon/staff` | `employee.read` or `appointment.read` | Profiles of the outlet. A stylist (`staff`) gets only their own row. `timeOff` lists leave that ended within the last 30 days or later. |
+| POST `/salon/staff` | `employee.manage` | Body `{ name, username, position, positionId, level, colorTag, acceptsOnline, active, commissionOverride }`. Creates a `user` (`roleType 'user'`, home outlet = `store`) and a `salon_staff_profile`. The response adds a one-time `temporaryPassword` for the stylist's first sign-in; only its hash is stored. A username is unique across all accounts (`409 DUPLICATE`). Without `positionId`, the tenant position named `position` is used, or created. |
+| PUT `/salon/staff/:userId/profile` | `employee.manage` | Same body without `username`. |
+| PUT `/salon/staff/:userId/skills` | `employee.manage` | Body `[{ productId, durationOverride, priceOverride }]`, which replaces the list. Each product must be a salon service of the tenant (`404`), with no duplicates (`400`). |
+| PUT `/salon/staff/:userId/availability` | `employee.manage` | Body `[{ weekday 0–6, startTime, endTime }]`, which replaces the list. Windows on the same weekday must not overlap (`400`). |
+| POST `/salon/staff/:userId/time-off` | `employee.manage` | Body `{ startAt, endAt, reason }`. Refused with `409 SLOT_TAKEN` when the staff member has a booked/confirmed booking in the window (BR-SLN-008). |
+| DELETE `/salon/staff/:userId/time-off/:id` | `employee.manage` | Idempotent. |
+
+### Positions and work shifts
+| Route | Permission | Notes |
+|---|---|---|
+| GET `/salon/positions` | `employee.read` | Tenant positions (`position` rows with `tenantId`). |
+| POST / PATCH `/salon/positions[/:id]` | `employee.manage` | Body `{ name, description, active }`. The name is unique in the tenant (`409 DUPLICATE`). |
+| DELETE `/salon/positions/:id` | `employee.manage` | `409 IN_USE` while a staff profile uses it. |
+| GET `/salon/work-shifts?store=&from=&to=` | `employee.read` or `appointment.read` | Outlet `shift` rows overlapping the date range. A stylist gets only the shifts they are on. |
+| POST / PATCH `/salon/work-shifts[/:id]?store=` | `shift.manage` | Body `{ name, type (harian\|mingguan), startDate, endDate (null for harian), startTime, endTime, employeeIds, status (draft\|active\|inactive) }`. Every employee must be a salon staff member of the outlet (`404`). An employee may hold several shifts, but two ACTIVE shifts of one employee that overlap in date and time are refused with `409 SLOT_TAKEN`. Writes are serialized per outlet. `user.shift` (the FE-POS one-shift model) is not changed. |
+| DELETE `/salon/work-shifts/:id?store=` | `shift.manage` | Soft delete. |
+
 ---
 
 ## Misc
