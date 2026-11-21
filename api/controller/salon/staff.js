@@ -70,15 +70,18 @@ const loadStaff = async (profiles, transaction) => {
   const keys = profiles.map((p) => ({ store: p.store, userId: p.userId }))
   const where = { [Op.or]: keys }
   const since = new Date(Date.now() - TIME_OFF_HISTORY_DAYS * 86400000)
-  const [skills, availability, timeOff] = await Promise.all([
-    db.salon_staff_skill.findAll({ where, order: [['id', 'ASC']], transaction }),
-    db.salon_availability.findAll({ where, order: [['weekday', 'ASC'], ['startTime', 'ASC']], transaction }),
-    db.salon_time_off.findAll({
-      where: { ...where, endAt: { [Op.gte]: since } },
-      order: [['startAt', 'ASC']],
-      transaction
-    })
-  ])
+  // Sequential: inside a transaction one connection runs one query at a time.
+  const skills = await db.salon_staff_skill.findAll({ where, order: [['id', 'ASC']], transaction })
+  const availability = await db.salon_availability.findAll({
+    where,
+    order: [['weekday', 'ASC'], ['startTime', 'ASC']],
+    transaction
+  })
+  const timeOff = await db.salon_time_off.findAll({
+    where: { ...where, endAt: { [Op.gte]: since } },
+    order: [['startAt', 'ASC']],
+    transaction
+  })
   const of = (rows, p) => rows.filter((r) => r.store === p.store && r.userId === p.userId)
   return profiles.map((p) =>
     serializeStaff(p, { skills: of(skills, p), availability: of(availability, p), timeOff: of(timeOff, p) })

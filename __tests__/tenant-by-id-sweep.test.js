@@ -87,7 +87,10 @@ const PREFIX_MODEL = {
   '/salon/products/': 'product',
   '/salon/staff/': 'user',
   '/salon/positions/': 'position',
-  '/salon/work-shifts/': 'shift'
+  '/salon/work-shifts/': 'shift',
+  // S1-c: customers are member rows; bookings are salon_appointment rows.
+  '/salon/customers/': 'member',
+  '/salon/appointments/': 'salon_appointment'
 }
 const PARAM_MODEL = {
   supplierId: 'supplier',
@@ -312,6 +315,21 @@ beforeAll(async () => {
     store: victimStore.id,
     fullName: `${MARK}-VU`
   })
+  // The generic seeder cannot satisfy CHECK ("endAt" > "startAt").
+  victims.salon_appointment = await db.salon_appointment.create(
+    {
+      tenantId: victimTenant.id,
+      store: victimStore.id,
+      number: `${MARK}-BK`.slice(0, 30),
+      customerName: `${MARK}-C`.slice(0, 60),
+      startAt: new Date(Date.now() + 3600000),
+      endAt: new Date(Date.now() + 7200000),
+      idempotencyKey: `${MARK}-key`,
+      requestHash: 'sweep'
+    },
+    { hooks: false }
+  )
+  created.push(['salon_appointment', victims.salon_appointment.id])
 
   const owner = await db.user.create({
     userName: `sweep_owner_${RUN}`,

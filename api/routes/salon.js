@@ -11,6 +11,8 @@ const settings = require('../controller/salon/settings')
 const catalog = require('../controller/salon/catalog')
 const staff = require('../controller/salon/staff')
 const hr = require('../controller/salon/hr')
+const customers = require('../controller/salon/customers')
+const appointments = require('../controller/salon/appointments')
 
 router.use(authorization)
 
@@ -47,5 +49,22 @@ router.get('/work-shifts', hr.listWorkShifts)
 router.post('/work-shifts', hr.createWorkShift)
 router.patch('/work-shifts/:id', hr.updateWorkShift)
 router.delete('/work-shifts/:id', hr.deleteWorkShift)
+
+// pelanggan
+router.get('/customers', customers.listCustomers)
+router.post('/customers', customers.createCustomer)
+router.patch('/customers/:id', customers.updateCustomer)
+router.get('/customers/:id/history', customers.customerHistory)
+
+// jadwal
+router.get('/slots', appointments.listSlots)
+router.get('/appointments', appointments.listAppointments)
+router.post('/appointments', appointments.createAppointment)
+router.get('/appointments/:id', appointments.getAppointment)
+router.post('/appointments/:id/reschedule', appointments.rescheduleAppointment)
+for (const [transition, handler] of Object.entries(appointments.transitions)) {
+  router.post(`/appointments/:id/${transition}`, handler)
+}
+router.get('/appointments/:id/wa-text', appointments.waText)
 
 module.exports = router
