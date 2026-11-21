@@ -3,9 +3,9 @@
 [![Node.js](https://img.shields.io/badge/Node.js-v18+-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![License](https://img.shields.io/badge/License-ISC-blue.svg)](LICENSE)
 
-Point of Sale (POS) backend API built with Node.js, Express, and PostgreSQL.
+Point of Sale (POS) backend API built with Node.js, Express, and PostgreSQL. One backend serves three business types per outlet: F&B/retail POS, laundry (`/laundry`) and salon & barbershop (`/salon`).
 
-> **Checkpoint:** reconciled against `master` `c9fe118` on 2026-10-23. Current scale: 544 route handlers + 3 inline routes, 111 models, 242 migrations, 331 Jest test files, 6 Vercel daily crons.
+> **Checkpoint:** reconciled against `development` `6ff3faa` on 2026-11-21. Current scale: 609 route handlers (603 static + 6 salon appointment transitions) + 3 inline routes, 126 models, 265 migrations, 443 Jest test files, 6 Vercel daily crons.
 
 ## Tech Stack
 
@@ -50,7 +50,7 @@ Copy `.env.example` to `.env` and fill it in. Variables read by the code (`proce
 |-------|-----------|
 | Server | `PORT` (default 5001), `NODE_ENV`, `TRUST_PROXY_HOPS`, `VERCEL` (set by Vercel; disables Socket.IO + in-process schedulers) |
 | Database | dev `DB_DEV_HOST/PORT/USERNAME/PASSWORD/DATABASE`; test `DB_TEST_DATABASE`; staging `STAGING_DB_*`; production `POSTGRES_HOST/PORT/USER/PASSWORD/DATABASE` |
-| Auth | `JWT_SECRET_KEY`, `JWT_EXPIRED_IN`, `PUBLIC_REGISTRATION_ENABLED` (sign-up closed unless set) |
+| Auth | `JWT_SECRET_KEY`, `JWT_EXPIRED_IN`, `JWT_REMEMBER_ME_EXPIRED_IN`, `PUBLIC_REGISTRATION_ENABLED` (sign-up closed unless set), `AUTHZ_OWNER_V2` (owner → tenant → outlet roles and `/onboarding`; off by default) |
 | CORS | `CORS_ORIGIN`, `FRONTEND_URL` |
 | Rate limits | `GLOBAL_RATE_LIMIT_WINDOW_MS`, `GLOBAL_RATE_LIMIT_MAX`, `AUTH_RATE_LIMIT_WINDOW_MS`, `AUTH_RATE_LIMIT_MAX`, `CUSTOMER_ORDER_RATE_LIMIT` |
 | Schedulers | `CRON_SECRET` (min 32 chars; `/internal/*` fail closed without it), `QR_PENDING_EXPIRY_MINUTES` (QR expiry off when unset), `BACKUP_DIR` |
@@ -111,11 +111,11 @@ npm start                 # Start server
 BE-POS-APP/
 ├── api/
 │   ├── index.js              # Express app entry + 3 inline HTTP routes + thermal print endpoint
-│   ├── controller/           # Route controllers (76 files)
-│   ├── routes/               # API routes (77 modules)
+│   ├── controller/           # Route controllers (78 files + salon/ folder)
+│   ├── routes/               # API routes (80 modules)
 │   ├── middleware/
 │   │   └── validate.js       # Zod validation middleware
-│   ├── service/
+│   ├── service/              # Domain services (pricing, stock, accounting outbox, salon slots, …)
 │   │   └── socket.js         # Socket.IO service
 │   └── validation/
 │       └── schemas.js        # Zod schemas
@@ -123,7 +123,7 @@ BE-POS-APP/
 │   ├── config.js             # Sequelize DB config
 │   └── database.js           # Database connection
 ├── db/
-│   ├── models/               # Sequelize models (111 files)
+│   ├── models/               # Sequelize models (126 files)
 │   ├── migrations/           # Database migrations
 │   └── seeders/              # Database seeders
 ├── utils/
@@ -184,7 +184,7 @@ BE-POS-APP/
 
 ## API Endpoints
 
-The endpoint reference is [`API_DOCUMENTATION.md`](./API_DOCUMENTATION.md) (every route, with auth, request and response). This README only lists the route modules, so it cannot drift from the code: 77 modules, 544 handlers, mounted in `api/index.js`, plus 3 inline routes (`GET /health`, `POST /print-thermal`, `GET /`).
+The endpoint reference is [`API_DOCUMENTATION.md`](./API_DOCUMENTATION.md) (every route, with auth, request and response). This README only lists the route modules, so it cannot drift from the code: 80 modules, 609 handlers, mounted in `api/index.js`, plus 3 inline routes (`GET /health`, `POST /print-thermal`, `GET /`).
 
 | Mount | Route file (`api/routes/`) | Handlers |
 |-------|----------------------------|----------|
@@ -198,7 +198,7 @@ The endpoint reference is [`API_DOCUMENTATION.md`](./API_DOCUMENTATION.md) (ever
 | `/auth` | `authorizationContext.js` | 4 |
 | `/backup` | `backup.js` | 7 |
 | `/best-selling` | `best-selling.js` | 5 |
-| `/bom` | `bom.js` | 6 |
+| `/bom` | `bom.js` | 7 |
 | `/business-trip` | `businessTrip.js` | 6 |
 | `/cash-register` | `cashRegister.js` | 13 |
 | `/category` | `category.js` | 8 |
@@ -219,18 +219,20 @@ The endpoint reference is [`API_DOCUMENTATION.md`](./API_DOCUMENTATION.md) (ever
 | `/internal` | `internal.js` | 7 |
 | `/inventory` | `inventory.js` | 11 |
 | `/invoice` | `invoice.js` | 3 |
-| `/location` | `location.js` | 12 |
+| `/laundry` | `laundry.js` | 13 |
+| `/location` | `location.js` | 13 |
 | `/member` | `member.js` | 6 |
 | `/member-tier` | `memberTier.js` | 7 |
 | `/memberships` | `membership.js` | 5 |
 | `/notification` | `notification.js` | 4 |
-| `/order` | `order.js` | 15 |
+| `/onboarding` | `onboarding.js` | 1 (404 while `AUTHZ_OWNER_V2` is off) |
+| `/order` | `order.js` | 21 |
 | `/overtime` | `overtime.js` | 5 |
 | `/overview` | `overview.js` | 10 |
 | `/parked-cart` | `parkedCart.js` | 5 |
 | `/pos` | `pos.js` | 20 |
 | `/position` | `position.js` | 10 |
-| `/product` | `product.js` | 10 |
+| `/product` | `product.js` | 11 |
 | `/product-bundle` | `productBundle.js` | 7 |
 | `/production-order` | `productionOrder.js` | 8 |
 | `/promo` | `promo.js` | 11 |
@@ -246,6 +248,7 @@ The endpoint reference is [`API_DOCUMENTATION.md`](./API_DOCUMENTATION.md) (ever
 | `/reports` | `reporting.js` | 4 |
 | `/reservation` | `reservation.js` | 6 |
 | `/role` | `role.js` | 9 |
+| `/salon` | `salon.js` | 42 (36 + 6 appointment transitions) |
 | `/sales-return` | `salesReturn.js` | 4 |
 | `/shift` | `shift.js` | 6 |
 | `/shift-swap` | `shiftSwap.js` | 4 |
@@ -281,11 +284,13 @@ Sub-category endpoints are **not mounted**; use categories.
 
 RBAC is enforced via `requireRole` middleware in `utils/authorization.js`. Granular per-menu permissions are stored in the `role` model; menu-level enforcement is currently partial (30/77 route files write-gated, `MENU_ENFORCED_ROUTES` empty) — see `FG-SEC-01`.
 
+Authorization itself comes from the server-resolved `req.authContext` (`utils/authContext.js`, `utils/tenantScope.js`), never from JWT claims, cookies or request store IDs. With `AUTHZ_OWNER_V2` on, the owner → tenant → outlet hierarchy (`utils/ownerRoles.js`) uses the canonical roles `owner`, `admin`, `kasir`, `staff` plus `platform_admin`; the legacy aliases `tenant_admin`, `store_admin` and `cashier` map onto them. The database allows at most one active owner per tenant, and writes on an outlet without a tenant are refused with `422 STORE_TENANT_REQUIRED`.
+
 ---
 
 ## Database Models
 
-111 Sequelize models covering:
+126 Sequelize models covering:
 
 | Domain | Models |
 |--------|--------|
@@ -302,6 +307,9 @@ RBAC is enforced via `requireRole` middleware in `utils/authorization.js`. Granu
 | **Production** | bom_header, bom_line, productionOrder, goodsReceipt, goodsReceiptItem, ingredient, ingredientCategory |
 | **People** | employee, department, position |
 | **Settings** | shift, invoice_setting, social_media, currency, taxConfig |
+| **Tenancy** | tenant, tenantMembership, platformAdmin |
+| **Laundry** | laundry_order (1:1 with order), laundry_status_history, laundry_turnaround |
+| **Salon** | salon_appointment, salon_appointment_item, salon_appointment_event, salon_availability, salon_time_off, salon_staff_profile, salon_staff_skill, salon_staff_commission, salon_queue_ticket, salon_order |
 | **System** | notification, auditLog, best_selling, daily_report, dailySummary, splitBill, station_dapur |
 
 ---
@@ -324,7 +332,7 @@ Deployed on **Vercel** with serverless functions.
 - **API Base URL**: https://api-bisa-nota.vercel.app
 - **Frontend**: https://bisa-nota-demo.vercel.app
 - **Crons**: 6 daily jobs in `vercel.json` (`0 0 * * *` UTC) call `/internal/*` with `CRON_SECRET`: accounting outbox drain, QR order expiry, backup, recurring expenses, shift-swap expiry, AP reminders.
-- **CI**: GitHub Actions is currently disabled at the organisation level; run `npm test` (sharded Jest, `scripts/run-tests-sharded.js`) locally before pushing. There is no `lint` script in this repo.
+- **CI**: `.github/workflows/ci.yml` runs on push/PR to `master` and `development` (the production branch): Jest against Postgres 16 on Node 20/22, plus `npx eslint api/ utils/ --max-warnings 0`. There is no `lint` script, so run that ESLint command and `npm test` (sharded Jest, `scripts/run-tests-sharded.js`) locally before pushing.
 
 ---
 
