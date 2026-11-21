@@ -1497,6 +1497,9 @@ exports.createMemberSchema = z.object({
   birthDate: z.string().optional().nullable(),
   gender: z.string().optional().default(''),
   address: z.string().max(FIELD_MAX.ADDRESS, tooLong(FIELD_MAX.ADDRESS)).optional().nullable(),
+  // member.notes (TEXT) — laundry customer notes. Without this key zod
+  // stripped it, so a saved note never reached the database.
+  notes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().nullable(),
   createdBy: strToNum().optional(),
   status: z.string().optional().default('active'),
   // Laundry credit customer fields. POS members default to non-credit.

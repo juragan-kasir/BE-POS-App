@@ -345,6 +345,7 @@ exports.addNewMember = async (req, res) => {
       dateOfBirth: body.birthDate,
       gender: body.gender,
       address: body.address,
+      notes: body.notes || null,
       tier: body.tier === '' ? null : body.tier,
       status:
         body.status !== undefined
@@ -398,6 +399,7 @@ exports.editMember = async (req, res) => {
       birthDate,
       gender,
       address,
+      notes,
       tier,
       status,
       point,
@@ -498,6 +500,7 @@ exports.editMember = async (req, res) => {
     if (birthDate !== undefined) updateData.dateOfBirth = birthDate
     if (gender !== undefined) updateData.gender = gender
     if (address !== undefined) updateData.address = address
+    if (notes !== undefined) updateData.notes = notes || null
     if (tier !== undefined) updateData.tier = tier === '' ? null : tier
     if (status !== undefined) updateData.status = status
     if (point !== undefined) {
