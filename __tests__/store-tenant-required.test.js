@@ -63,14 +63,21 @@ describe('model layer', () => {
     expect((await db.expense.findByPk(row.id)).store).toBe(f.owned.id)
   })
 
-  test('an outlet with a tenant, a platform row (store NULL) and an unknown outlet id keep working', async () => {
+  test('an outlet with a tenant and a platform row (store NULL) keep working', async () => {
     const owned = await db.type_payment.create({ name: uniq('TPO'), store: f.owned.id, type: 'cash', status: 'active' })
     expect(owned.tenantId).toBe(f.owned.tenantId)
     const platform = await db.type_payment.create({ name: uniq('TPP'), store: null, type: 'cash', status: 'active' })
     expect(platform.tenantId).toBeNull()
-    const unknown = await db.type_payment.create({ name: uniq('TPU'), store: 2147480000, type: 'cash', status: 'active' })
-    expect(unknown.tenantId).toBeNull()
-    await db.type_payment.destroy({ where: { id: [owned.id, platform.id, unknown.id] }, force: true })
+    await db.type_payment.destroy({ where: { id: [owned.id, platform.id] }, force: true })
+  })
+
+  // Z3 (B27) changed this: an outlet id that matches no location used to be
+  // stored with tenantId NULL; the CHECK now refuses that row, so the hook
+  // answers 422 before the database answers a constraint 500.
+  test('an unknown outlet id is refused like a tenant-less outlet', async () => {
+    await expect(
+      db.type_payment.create({ name: uniq('TPU'), store: 2147480000, type: 'cash', status: 'active' })
+    ).rejects.toMatchObject({ code: STORE_TENANT_REQUIRED, statusCode: 422, storeId: 2147480000 })
   })
 })
 

@@ -681,7 +681,8 @@ module.exports = async () => {
     '20261119000005-master-ledger-tenant-id', // batch B23
     '20261119000006-document-counter', // batch B24
     '20261119000007-queue-daily-number', // batch B25
-    '20261121000001-salon-domain' // batch B26
+    '20261121000001-salon-domain', // batch B26
+    '20261124000001-store-tenant-check' // batch B27
   ]
   try {
     const { Sequelize } = require('sequelize')

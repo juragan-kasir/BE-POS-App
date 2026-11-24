@@ -14,6 +14,7 @@ const app = require('../api/index')
 const db = require('../db/models')
 const { purgeTenantLedger } = require('../test-helpers/tenantLedgerCleanup')
 const migration = require('../db/migrations/20261119000004-order-cash-tenant-id')
+const { liftStoreTenantCheck, restoreStoreTenantCheck } = require('../test-helpers/storeTenantCheck')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 const uniq = (k) => `oct_${k}_${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`
@@ -69,6 +70,7 @@ afterAll(async () => {
   await db.location.destroy({ where: { id: stores }, force: true })
   await purgeTenantLedger(db, [f.tA.id, f.tB.id])
   await db.tenant.destroy({ where: { id: [f.tA.id, f.tB.id] }, force: true })
+  await restoreStoreTenantCheck(db)
   await db.sequelize.close()
 })
 
@@ -127,6 +129,7 @@ test('a transaction takes its order\'s tenant, never a caller-supplied one', asy
 })
 
 test('the backfill follows store (transaction: its order), leaves the rest NULL, and is replay-safe', async () => {
+  await liftStoreTenantCheck(db)
   const [[oA]] = await db.sequelize.query(
     `INSERT INTO "order" ("orderNumber", store, "createdAt", "updatedAt") VALUES ('${uniq('R')}', ${f.a1.id}, NOW(), NOW()) RETURNING id`
   )
