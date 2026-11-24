@@ -17,7 +17,9 @@
 // CHECK constraint. Like DR-28 (utils/valueTooLong.js) the refusal marks the
 // request context, and storeTenantResponder turns the controller's generic
 // 5xx for that request into the 422 — no controller has to know about it.
-// An outlet id that matches no location keeps the pre-Z2 behavior (NULL).
+// Z3 (migration 20261124000001, batch B27): the same rule is a CHECK on the
+// table, so an outlet id that matches no location (12 of these tables have no
+// FK on `store`) is refused here too — 422 instead of a CHECK violation 500.
 const userContext = require('./userContext')
 
 const STORE_TENANT_REQUIRED = 'STORE_TENANT_REQUIRED'
@@ -100,10 +102,9 @@ const includeTenantField = (options) => {
 const attachStoreTenant = (Model, { storeField = 'store' } = {}) => {
   const sequelize = Model.sequelize
 
-  // Tenant of an outlet-owned row; refuses an existing tenant-less outlet.
+  // Tenant of an outlet-owned row; refuses a tenant-less or unknown outlet.
   const tenantOrRefuse = (map, storeId) => {
-    if (!map.has(storeId)) return null
-    const tenantId = map.get(storeId)
+    const tenantId = map.has(storeId) ? map.get(storeId) : null
     if (tenantId == null) refuseTenantless(Model.name, storeId)
     return tenantId
   }

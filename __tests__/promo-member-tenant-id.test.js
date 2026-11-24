@@ -11,6 +11,7 @@ const { signSessionToken } = require('../test-helpers/authSession')
 const app = require('../api/index')
 const db = require('../db/models')
 const migration = require('../db/migrations/20261119000003-promo-member-tenant-id')
+const { liftStoreTenantCheck, restoreStoreTenantCheck } = require('../test-helpers/storeTenantCheck')
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'secret-key-user'
 const uniq = (k) => `pmt_${k}_${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`
@@ -60,6 +61,7 @@ afterAll(async () => {
   await db.user.destroy({ where: { id: ids.users }, force: true })
   await db.location.destroy({ where: { id: ids.stores }, force: true })
   await db.tenant.destroy({ where: { id: ids.tenants }, force: true })
+  await restoreStoreTenantCheck(db)
   await db.sequelize.close()
 })
 
@@ -155,6 +157,7 @@ describe('discount codes are per tenant', () => {
 })
 
 test('the backfill takes the outlet\'s tenant, leaves shared / tenant-less rows NULL, and is replay-safe', async () => {
+  await liftStoreTenantCheck(db)
   const insert = (table, store, extra = '') =>
     db.sequelize.query(
       `INSERT INTO "${table}" (name, store${extra ? ', "phoneNumber"' : ''}, "createdAt", "updatedAt")

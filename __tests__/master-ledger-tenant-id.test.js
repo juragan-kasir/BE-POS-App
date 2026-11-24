@@ -10,6 +10,7 @@ process.env.VERCEL = 'true'
 // locations on every write.
 const db = require('../db/models')
 const migration = require('../db/migrations/20261119000005-master-ledger-tenant-id')
+const { liftStoreTenantCheck, restoreStoreTenantCheck } = require('../test-helpers/storeTenantCheck')
 
 const uniq = (k) => `mlt_${k}_${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`
 const TABLES = [
@@ -54,6 +55,7 @@ afterAll(async () => {
   }
   await db.location.destroy({ where: { id: [f.a1.id, f.a2.id, f.b1.id, f.free.id] }, force: true })
   await db.tenant.destroy({ where: { id: [f.tA.id, f.tB.id] }, force: true })
+  await restoreStoreTenantCheck(db)
   await db.sequelize.close()
 })
 
@@ -91,6 +93,7 @@ describe('supplier (store = JSONB outlet set)', () => {
 })
 
 test('the backfill follows the outlet(s), leaves shared / mixed rows NULL, and is replay-safe', async () => {
+  await liftStoreTenantCheck(db)
   const insert = async (sql) => {
     const [[row]] = await db.sequelize.query(sql)
     return row.id

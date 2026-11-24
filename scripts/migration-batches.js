@@ -381,6 +381,18 @@ const E2_BATCHES = Object.freeze({
     // attendance and shift_swap models read the new columns, so B26 must be
     // recorded before this code deploys.
     openGates: []
+  }),
+  B27: deepFreeze({
+    id: 'B27',
+    title: 'W3-z Z3: CHECK (store IS NULL OR tenantId IS NOT NULL) on 18 outlet-owned tables',
+    expectedCount: 1,
+    migrations: ['20261124000001-store-tenant-check.js'],
+    // FIXING-PLAN W3-z / Z3 (BE audit README): backfill from location, then
+    // fail closed when a row of an outlet without a tenant remains, else
+    // ck_<table>_store_tenant NOT VALID + VALIDATE. No model reads anything
+    // new, and Z2 already refuses those writes, so B27 may run before or
+    // after the deploy; run it BEFORE the merge so the CHECK is in place.
+    openGates: []
   })
 })
 
@@ -410,7 +422,8 @@ const BATCH_ORDER = Object.freeze([
   'B23',
   'B24',
   'B25',
-  'B26'
+  'B26',
+  'B27'
 ])
 
 // D-08 B1 resume contracts. A resume finishes a batch whose earlier members

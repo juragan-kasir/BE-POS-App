@@ -31,12 +31,16 @@ describe('TDD DB DECIMAL contract - fractional stock', () => {
     await db.location.destroy({ where: { id: loc.id }, force: true })
   })
   test('stock_history preserves 1.5', async () => {
-    const sh = await db.stock_history.create({ store: 1, referenceType: 'adjustment', quantityBefore: 10, quantityChange: 1.5, quantityAfter: 11.5, unit: 'kg' })
+    // A real outlet with a tenant: since Z3 (B27) an unknown outlet id is
+    // refused (store 1 does not exist in a fresh test DB).
+    const loc = await db.location.create(await withTestTenant({ name: 'FRAC_DB_SH_LOC', status: 'active' }))
+    const sh = await db.stock_history.create({ store: loc.id, referenceType: 'adjustment', quantityBefore: 10, quantityChange: 1.5, quantityAfter: 11.5, unit: 'kg' })
     const fresh = await db.stock_history.findByPk(sh.id)
     expect(Number(fresh.quantityBefore)).toBeCloseTo(10, 4)
     expect(Number(fresh.quantityChange)).toBeCloseTo(1.5, 4)
     expect(Number(fresh.quantityAfter)).toBeCloseTo(11.5, 4)
     await db.stock_history.destroy({ where: { id: sh.id }, force: true })
+    await db.location.destroy({ where: { id: loc.id }, force: true })
   })
   test('non-negative constraint remains for product stock', async () => {
     const p = await db.product.create({ nameProduct: 'FRAC_DB_NEG', category: cat.id, price: 100, stock: 0 })
