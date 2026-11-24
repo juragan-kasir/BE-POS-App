@@ -115,6 +115,7 @@ const ALLOWLISTED_ROUTE_FILES = Object.freeze({
   'parkedCart.js': 'Cashier parked carts; store-scoped, any authenticated cashier.',
   'laundry.js': 'Laundry counter flows (orders, turnaround, report); every route is validateStoreAccess store-scoped and by-id lookups filter on the caller store. Role gating moves to canonical permissions in the W7 sweep.',
   'salon.js': 'Salon API for FE-SALON-App (own menu, no FE-POS menu entry). Every handler runs through salonRoute(): salon tenant + outlet resolved from the session (BR-SLN-020) and a salon permission from utils/salonCapabilities.js (roleType map while AUTHZ_OWNER_V2 is off).',
+  'bakery.js': 'Bakery & catering pre-order API for FE-BAKERY-App (own menu, no FE-POS menu entry). Every handler runs through bakeryRoute(): bakery tenant + outlet resolved from the session and a bakery permission from utils/bakeryCapabilities.js (roleType map while AUTHZ_OWNER_V2 is off).',
   'receipt.js': 'Read-only receipt for a store-scoped order.',
   'queue.js': 'Floor queue; requireRole(super_admin, admin, kasir) — cashier menus carry no /queue-list.',
   'waiter-request.js': 'Diner waiter call (public, rate-limited) + floor status by requireRole(super_admin, admin, kasir).',
