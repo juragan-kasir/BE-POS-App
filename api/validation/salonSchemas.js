@@ -186,6 +186,45 @@ const TransitionInput = z.object({ reason: z.string().max(200).nullable() })
 
 const WaTextQuery = z.object({ kind: z.enum(['reminder', 'thanks']).default('reminder') })
 
+// ---------- kasir (S2-a) ----------
+const CartExtra = z.object({ productId: Id, qty: z.number().int().min(1).max(99), staffId: Id.nullable() })
+
+const Discount = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('none') }),
+  z.object({ type: z.literal('percent'), value: z.number().min(0).max(100) }),
+  z.object({ type: z.literal('amount'), value: Money })
+])
+
+const QuoteInput = z.object({
+  appointmentId: Id.nullable(),
+  extras: z.array(CartExtra).max(30),
+  tip: z.object({ amount: Money, staffId: Id.nullable() }),
+  discount: Discount
+})
+
+const PaymentInput = z.object({
+  method: PaymentMethod,
+  amount: Money,
+  tendered: Money.nullable(),
+  reference: z.string().trim().max(60).nullable()
+})
+
+const CheckoutInput = QuoteInput.extend({
+  payments: z.array(PaymentInput).max(4),
+  customerName: z.string().trim().max(60),
+  memberId: Id.nullable(),
+  idempotencyKey: z.string().min(8).max(100)
+})
+
+const RefundInput = z.object({
+  reason: z.string().trim().min(5, 'Alasan minimal 5 huruf').max(200),
+  ownerPin: z.string().regex(/^\d{4,6}$/, 'PIN 4–6 angka').nullable()
+})
+
+const OpenShiftInput = z.object({ openingCash: Money })
+const CloseShiftInput = z.object({ countedCash: Money })
+const OrdersQuery = z.object({ date: IsoDate.optional() })
+
 module.exports = {
   Money,
   Id,
@@ -213,5 +252,14 @@ module.exports = {
   RescheduleInput,
   TRANSITIONS,
   TransitionInput,
+  CartExtra,
+  Discount,
+  QuoteInput,
+  PaymentInput,
+  CheckoutInput,
+  RefundInput,
+  OpenShiftInput,
+  CloseShiftInput,
+  OrdersQuery,
   WaTextQuery
 }

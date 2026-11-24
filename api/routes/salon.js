@@ -13,6 +13,8 @@ const staff = require('../controller/salon/staff')
 const hr = require('../controller/salon/hr')
 const customers = require('../controller/salon/customers')
 const appointments = require('../controller/salon/appointments')
+const shift = require('../controller/salon/shift')
+const checkout = require('../controller/salon/checkout')
 
 router.use(authorization)
 
@@ -66,5 +68,15 @@ for (const [transition, handler] of Object.entries(appointments.transitions)) {
   router.post(`/appointments/:id/${transition}`, handler)
 }
 router.get('/appointments/:id/wa-text', appointments.waText)
+
+// kasir: shift (= cash register outlet), checkout, order hari ini, refund
+router.get('/shift/current', shift.currentShift)
+router.get('/shifts', shift.listShifts)
+router.post('/shift/open', shift.openShift)
+router.post('/shift/close', shift.closeShift)
+router.post('/checkout/quote', checkout.quote)
+router.post('/checkout', checkout.checkout)
+router.get('/orders', checkout.listOrders)
+router.post('/orders/:id/refund', checkout.refund)
 
 module.exports = router

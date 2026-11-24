@@ -43,8 +43,10 @@ const storeKey = (store) => {
 
 // Counter types: every document prefix plus the customer queue, whose number
 // stays short ("Q001") because it is called out and printed for the guest,
-// and the salon booking number ("BK-261121-001", counted per booking day).
-const COUNTER_TYPES = new Set([...Object.keys(PREFIX), 'queue', 'salon_booking'])
+// the salon booking number ("BK-261121-001", counted per booking day) and
+// the salon invoice ("INV-12-261124-001": order.orderNumber is unique across
+// outlets, so the outlet id is part of it).
+const COUNTER_TYPES = new Set([...Object.keys(PREFIX), 'queue', 'salon_booking', 'salon_order'])
 
 // Next value of the (outlet, type, outlet-local business day) counter.
 const nextDailySequence = async (type, store, { transaction, now = new Date() } = {}) => {
