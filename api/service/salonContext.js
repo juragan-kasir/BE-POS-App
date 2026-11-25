@@ -53,7 +53,9 @@ const publicStore = (location) => {
     timezone: location.timezone || 'Asia/Jakarta',
     openTime: settings.openTime || DEFAULT_OPEN_TIME,
     closeTime: settings.closeTime || DEFAULT_CLOSE_TIME,
-    active: location.status !== 'inactive'
+    active: location.status !== 'inactive',
+    // From the model getter: whether a refund owner PIN is set (never the hash).
+    hasOwnerPin: Boolean(settings.hasOwnerPin)
   }
 }
 

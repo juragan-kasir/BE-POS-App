@@ -6,7 +6,7 @@
 const publicLaundrySettingsView = (value) => {
   if (!value || typeof value !== 'object') return value ?? null
   // eslint-disable-next-line no-unused-vars
-  const { ownerPinHash, ownerPin, hasOwnerPin, ...rest } = value
+  const { ownerPinHash, ownerPin, hasOwnerPin, ownerPinFailures, ownerPinLockedUntil, ...rest } = value
   return { ...rest, hasOwnerPin: Boolean(ownerPinHash) }
 }
 module.exports = (sequelize, DataTypes) => {
