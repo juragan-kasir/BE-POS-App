@@ -90,7 +90,9 @@ const PREFIX_MODEL = {
   '/salon/work-shifts/': 'shift',
   // S1-c: customers are member rows; bookings are salon_appointment rows.
   '/salon/customers/': 'member',
-  '/salon/appointments/': 'salon_appointment'
+  '/salon/appointments/': 'salon_appointment',
+  // S2-a: a salon sale is a salon_order row (refund by its id).
+  '/salon/orders/': 'salon_order'
 }
 const PARAM_MODEL = {
   supplierId: 'supplier',
