@@ -24,6 +24,8 @@ const {
 } = require('../../service/salonSlots')
 const { MIN, zonedToUtc, localDate, addDays, toIso } = require('../../service/salonTime')
 const { nextDailySequence } = require('../../../utils/documentNumber')
+const { requireTenderReference } = require('../../service/canonicalPayment')
+const { CANONICAL_METHOD } = require('../../service/salonMoney')
 const { SALON_SERVICE, idParam, notFound, hhmm } = require('./shared')
 
 // Salon schedule: slots, appointments, reschedule, status transitions,
@@ -369,7 +371,10 @@ const addEvent = (salon, appointmentId, status, reason, userId, transaction) =>
 
 exports.createAppointment = salonRoute({ perm: 'appointment.manage', store: true }, async ({ salon, store, user, body }) => {
   const input = AppointmentInput.parse(body)
-  const { idempotencyKey, ...payload } = input
+  const { idempotencyKey, depositReference: rawReference, ...rest } = input
+  // The reference joins the hash only when given, so a retry of a booking
+  // made before this field existed still replays.
+  const payload = rawReference ? { ...rest, depositReference: rawReference } : rest
   const requestHash = stableHash(payload)
 
   // BR-SLN-006: same key + same body → replay; same key + other body → 409.
@@ -378,6 +383,19 @@ exports.createAppointment = salonRoute({ perm: 'appointment.manage', store: true
 
   if (input.depositAmount > 0 && !input.depositMethod) {
     throw new SalonError('VALIDATION_FAILED', 'Pilih metode bayar deposit', 400, { field: 'depositMethod' })
+  }
+  // Same rule as the till (canonicalPayment): every tender but cash needs its
+  // reference, so the deposit row written at checkout is traceable.
+  let depositReference = null
+  if (input.depositAmount > 0) {
+    try {
+      depositReference = requireTenderReference(CANONICAL_METHOD[input.depositMethod], rawReference)
+    } catch (err) {
+      if (err?.code === 'REFERENCE_REQUIRED') {
+        throw new SalonError('REFERENCE_REQUIRED', 'Isi nomor referensi deposit non-tunai', 422, { field: 'depositReference' })
+      }
+      throw err
+    }
   }
   const start = Date.parse(input.startAt)
   const now = Date.now()
@@ -446,6 +464,7 @@ exports.createAppointment = salonRoute({ perm: 'appointment.manage', store: true
           endAt: new Date(end),
           depositAmount: input.depositAmount,
           depositMethod: input.depositAmount > 0 ? input.depositMethod : null,
+          depositReference,
           depositCashRegisterId: register ? register.id : null,
           depositStatus: input.depositAmount > 0 ? 'held' : 'none',
           notes: input.notes,

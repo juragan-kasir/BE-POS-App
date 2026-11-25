@@ -68,17 +68,18 @@ const f = {}
 let keySeq = 0
 const key = () => `sco-${stamp}-${++keySeq}`
 
-const completedBooking = async ({ depositAmount = 0, depositMethod = null, memberId = null } = {}) => {
+const completedBooking = async ({ depositAmount = 0, depositMethod = null, depositReference = null, memberId = null, startAt = at('11:00') } = {}) => {
   const res = await call('admin', 'post', `/salon/appointments${qa()}`, {
     serviceIds: [f.cut.id],
     staffId: f.senior.userId,
-    startAt: at("11:00"),
+    startAt,
     memberId,
     customerName: 'Rina',
     customerPhone: '081234567890',
     source: 'phone',
     depositAmount,
     depositMethod,
+    depositReference,
     notes: '',
     idempotencyKey: key()
   })
@@ -448,5 +449,28 @@ describe('shift, checkout and refund', () => {
     expect(res.status).toBe(403)
     const shifts = await call('stylist', 'get', `/salon/shift/current${qa()}`)
     expect(shifts.status).toBe(403)
+  })
+})
+
+describe('deposit reference (DR-23 §D)', () => {
+  test('a QRIS deposit keeps its booking reference on the till row written at checkout', async () => {
+    // The S2-a shift above is closed: this sale runs in a new one.
+    expect((await call('kasir', 'post', `/salon/shift/open${qa()}`, { openingCash: 0 })).status).toBe(201)
+    const booking = await completedBooking({ depositAmount: 15000, depositMethod: 'qris', depositReference: 'QR-DEP-5521', startAt: at('15:00') })
+    const res = await call('kasir', 'post', `/salon/checkout${qa()}`, {
+      appointmentId: booking.id,
+      extras: [],
+      tip: { amount: 0, staffId: null },
+      discount: { type: 'none' },
+      payments: [{ method: 'cash', amount: 65000 - 15000, tendered: 50000, reference: null }],
+      customerName: '',
+      memberId: null,
+      idempotencyKey: key()
+    })
+    expect(res.status).toBe(201)
+    const order = await db.salon_order.findByPk(Number(res.body.id))
+    const deposit = await db.transaction.findOne({ where: { order: order.orderId, idempotencyKey: `salon-deposit:${booking.id}` } })
+    expect(deposit).toMatchObject({ typePayment: 'QRIS', referenceNumber: 'QR-DEP-5521' })
+    expect(Number(deposit.amount)).toBe(15000)
   })
 })
