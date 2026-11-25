@@ -4,7 +4,8 @@ const { Op } = require('sequelize')
 const db = require('../../../db/models')
 const { salonRoute, withStatus } = require('./http')
 const { SalonError, publicTenant, publicStore } = require('../../service/salonContext')
-const { SettingsInput, StoreInput } = require('../../validation/salonSchemas')
+const { SettingsInput, StoreInput, OwnerPinInput } = require('../../validation/salonSchemas')
+const { setOwnerPin, clearOwnerPin } = require('../../service/salonOwnerPin')
 const { SALON_PRODUCT_TYPES, idParam, notFound, iEquals } = require('./shared')
 
 // Salon tenant settings and outlets (SALON-BA §2, onboarding U1–U10).
@@ -86,22 +87,52 @@ exports.createStore = salonRoute({ perm: 'outlet.manage' }, async ({ req, salon,
   return withStatus(201, publicStore(location))
 })
 
+/** The caller's outlet `id`, row-locked. An admin addresses only their own outlet; the owner, every outlet. */
+const lockOwnStore = async (salon, id, t) => {
+  const row = await db.location.findOne({
+    where: { id, tenantId: salon.tenant.id },
+    transaction: t,
+    lock: t.LOCK.UPDATE
+  })
+  if (!row || !salon.stores.some((s) => Number(s.id) === id)) throw notFound('Outlet tidak ditemukan')
+  return row
+}
+
 exports.updateStore = salonRoute({ perm: 'outlet.manage' }, async ({ salon, user, body, params }) => {
   const input = StoreInput.parse(body)
   const id = idParam(params.id, 'Outlet tidak ditemukan')
   const location = await db.sequelize.transaction(async (t) => {
-    const row = await db.location.findOne({
-      where: { id, tenantId: salon.tenant.id },
-      transaction: t,
-      lock: t.LOCK.UPDATE
-    })
-    // An admin addresses only their own outlet; the owner, every outlet.
-    if (!row || !salon.stores.some((s) => Number(s.id) === id)) throw notFound('Outlet tidak ditemukan')
+    const row = await lockOwnStore(salon, id, t)
     await assertStoreNameFree(salon, input.name, id, t)
     await row.update(
       { ...storeValues(input, row.getDataValue('salonSettings')), modifiedBy: user.id },
       { transaction: t }
     )
+    return row
+  })
+  return publicStore(location)
+})
+
+// Owner PIN of an outlet (BR-SLN-015): what a kasir types to get a refund
+// approved. `outlet.manage` = owner only, so an admin cannot set the PIN that
+// approves refunds at their own outlet. The PIN is write-only: the outlet
+// shows `hasOwnerPin`, never the PIN or its hash.
+exports.setOwnerPin = salonRoute({ perm: 'outlet.manage' }, async ({ salon, user, body, params }) => {
+  const { pin } = OwnerPinInput.parse(body)
+  const id = idParam(params.id, 'Outlet tidak ditemukan')
+  const location = await db.sequelize.transaction(async (t) => {
+    const row = await lockOwnStore(salon, id, t)
+    await setOwnerPin(row, pin, user.id, t)
+    return row
+  })
+  return publicStore(location)
+})
+
+exports.clearOwnerPin = salonRoute({ perm: 'outlet.manage' }, async ({ salon, user, params }) => {
+  const id = idParam(params.id, 'Outlet tidak ditemukan')
+  const location = await db.sequelize.transaction(async (t) => {
+    const row = await lockOwnStore(salon, id, t)
+    await clearOwnerPin(row, user.id, t)
     return row
   })
   return publicStore(location)

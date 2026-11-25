@@ -1,7 +1,6 @@
 'use strict'
 
 const crypto = require('crypto')
-const bcrypt = require('bcrypt')
 const { Op } = require('sequelize')
 const db = require('../../../db/models')
 const { salonRoute, withStatus } = require('./http')
@@ -17,6 +16,7 @@ const { nextDailySequence } = require('../../../utils/documentNumber')
 const { hasSalonPermission } = require('../../../utils/salonCapabilities')
 const { SALON_SERVICE, SALON_RETAIL, idParam, notFound } = require('./shared')
 const { DEPOSIT_KEY_PREFIX, requireOpenRegister } = require('./shift')
+const { verifyOwnerPin } = require('../../service/salonOwnerPin')
 
 // Salon cashier (SALON-BA BR-SLN-010…015, DR-SLN-06/07): quote, checkout,
 // the day's orders and full refund. One salon payment = one POS `order`
@@ -528,12 +528,7 @@ exports.listOrders = salonRoute({ perm: ['pos.sell', 'report.read'], store: true
 /** BR-SLN-015: `pos.refund`, or the owner PIN of the outlet for a kasir. */
 const assertRefundAllowed = async (user, store, ownerPin) => {
   if (hasSalonPermission(user, 'pos.refund')) return
-  const row = await db.location.findByPk(store.id, { attributes: ['id', 'salonSettings'] })
-  const hash = row?.getDataValue('salonSettings')?.ownerPinHash
-  if (!hash) throw new SalonError('OWNER_PIN_NOT_SET', 'PIN owner outlet ini belum diatur', 422)
-  if (!ownerPin || !(await bcrypt.compare(String(ownerPin), hash))) {
-    throw new SalonError('OWNER_PIN_INVALID', 'PIN owner salah', 403)
-  }
+  await verifyOwnerPin(store.id, ownerPin)
 }
 
 exports.refund = salonRoute({ perm: 'pos.sell', store: true }, async ({ salon, store, user, body, params }) => {

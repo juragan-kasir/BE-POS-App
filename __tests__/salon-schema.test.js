@@ -138,7 +138,8 @@ describe('GET /salon/context', () => {
       timezone: 'Asia/Jakarta',
       openTime: '10:00',
       closeTime: '21:00',
-      active: true
+      active: true,
+      hasOwnerPin: false
     })
     expect(res.body.tenant).toEqual({
       id: String(salonTenant.id),

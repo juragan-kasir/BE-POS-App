@@ -24,6 +24,8 @@ router.get('/context', context.getContext)
 router.patch('/settings', settings.updateSettings)
 router.post('/stores', settings.createStore)
 router.patch('/stores/:id', settings.updateStore)
+router.put('/stores/:id/owner-pin', settings.setOwnerPin)
+router.delete('/stores/:id/owner-pin', settings.clearOwnerPin)
 
 // katalog
 router.get('/services', catalog.listServices)

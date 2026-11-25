@@ -144,6 +144,20 @@ const StoreInput = z
   })
   .refine((v) => v.closeTime > v.openTime, { message: 'Jam tutup harus setelah jam buka', path: ['closeTime'] })
 
+// Owner PIN (BR-SLN-015): 4–6 digits, not one repeated digit and not a
+// straight run (1234, 987654), the first guesses of anyone trying.
+const isGuessablePin = (pin) => {
+  if (/^(\d)\1+$/.test(pin)) return true
+  const steps = [...pin].slice(1).map((d, i) => Number(d) - Number(pin[i]))
+  return steps.every((x) => x === 1) || steps.every((x) => x === -1)
+}
+const OwnerPinInput = z.object({
+  pin: z
+    .string()
+    .regex(/^\d{4,6}$/, 'PIN 4–6 angka')
+    .refine((pin) => !isGuessablePin(pin), 'PIN terlalu mudah ditebak (angka sama atau berurutan)')
+})
+
 // ---------- pelanggan ----------
 const CustomerInput = z.object({
   name: z.string().trim().min(2, 'Nama minimal 2 huruf').max(60),
@@ -244,6 +258,7 @@ module.exports = {
   WorkShiftRange,
   SettingsInput,
   StoreInput,
+  OwnerPinInput,
   CustomerInput,
   PaymentMethod,
   SlotQuery,

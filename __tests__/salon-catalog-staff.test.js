@@ -463,7 +463,7 @@ describe('settings and outlets', () => {
     const body = { name: `Cabang ${stamp}`, address: 'Jl. Melati 1', phone: '081234567890', timezone: 'Asia/Makassar', openTime: '10:00', closeTime: '20:00', active: true }
     const res = await call('owner', 'post', '/salon/stores', body)
     expect(res.status).toBe(201)
-    expect(res.body).toEqual({ id: expect.any(String), name: body.name, address: body.address, phone: body.phone, timezone: 'Asia/Makassar', openTime: '10:00', closeTime: '20:00', active: true })
+    expect(res.body).toEqual({ id: expect.any(String), name: body.name, address: body.address, phone: body.phone, timezone: 'Asia/Makassar', openTime: '10:00', closeTime: '20:00', active: true, hasOwnerPin: false })
     const row = await db.location.findByPk(Number(res.body.id))
     expect(row).toMatchObject({ tenantId: tenants.salon.id, businessType: 'salon' })
     const services = await db.product.count({ where: { tenantId: tenants.salon.id } })
