@@ -12,6 +12,9 @@ const allowedOrigins = (
     'https://order-app-dun.vercel.app',
     // Production Laundry Cashier Website
     'https://fe-laundry-app-dusky.vercel.app',
+    // Salon & barbershop app (FE-SALON-App) and retail cashier (FE-RETAIL-App)
+    'https://fe-salon-app.vercel.app',
+    'https://fe-retail-app.vercel.app',
     // Local Development Admin Website
     'http://localhost:3000',
     'http://localhost:3001',

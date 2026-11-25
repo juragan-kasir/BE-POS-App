@@ -1,7 +1,8 @@
 'use strict'
 
 // Production origins that must reach the API from a browser. The laundry
-// cashier (FE-LAUNDRY-App) logs real accounts in against this API.
+// cashier (FE-LAUNDRY-App), the salon app (FE-SALON-App) and the retail
+// cashier (FE-RETAIL-App) log real accounts in against this API.
 const loadCheck = () => {
   jest.resetModules()
   return require('../api/utils/corsOptions').corsOriginCheck
@@ -27,12 +28,19 @@ describe('CORS allowed origins', () => {
   it.each([
     'https://bisa-nota-demo.vercel.app',
     'https://order-app-dun.vercel.app',
-    'https://fe-laundry-app-dusky.vercel.app'
+    'https://fe-laundry-app-dusky.vercel.app',
+    'https://fe-salon-app.vercel.app',
+    'https://fe-retail-app.vercel.app'
   ])('allows the production frontend %s', async (origin) => {
     expect(await decide(loadCheck(), origin)).toBe(true)
   })
 
   it('refuses an unknown origin in production', async () => {
     expect(await decide(loadCheck(), 'https://evil.example')).toBe(false)
+  })
+
+  it('refuses a look-alike of an allowed origin (exact match only)', async () => {
+    expect(await decide(loadCheck(), 'https://fe-salon-app.vercel.app.evil.example')).toBe(false)
+    expect(await decide(loadCheck(), 'https://evil-fe-salon-app.vercel.app')).toBe(false)
   })
 })
