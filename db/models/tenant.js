@@ -49,11 +49,17 @@ module.exports = (sequelize, DataTypes) => {
       businessType: {
         type: DataTypes.STRING(20),
         allowNull: true,
-        validate: { isIn: [['fnb', 'retail', 'laundry', 'salon']] }
+        validate: { isIn: [['fnb', 'retail', 'laundry', 'salon', 'bakery']] }
       },
       // Salon-only tenant settings (B26): { salonProfile, slotStepMin,
       // depositDefault, pointsPer }. Null for other business types.
       salonSettings: {
+        type: DataTypes.JSONB,
+        allowNull: true
+      },
+      // Bakery-only tenant settings (B28): { leadTimeMinutes, pickupOpen,
+      // pickupClose, deliveryEnabled, wa*Template }. Null otherwise.
+      bakerySettings: {
         type: DataTypes.JSONB,
         allowNull: true
       }

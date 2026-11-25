@@ -900,7 +900,7 @@ exports.createLocationSchema = z.object({
   // Shared-domain marker + laundry-only outlet settings.
   // salon: owner hierarchy vertical (spec 2026-11-16). No default here: the
   // controller inherits the tenant's businessType, else falls back to fnb.
-  businessType: z.enum(['fnb', 'retail', 'laundry', 'salon']).optional(),
+  businessType: z.enum(['fnb', 'retail', 'laundry', 'salon', 'bakery']).optional(),
   laundrySettings: jsonField().optional().nullable()
 })
 
@@ -2427,7 +2427,7 @@ exports.applyPromoSchema = z.object({
 exports.onboardingTenantSchema = z.object({
   code: z.string().min(1).max(50),
   name: z.string().min(1).max(150),
-  businessType: z.enum(['fnb', 'retail', 'laundry', 'salon']).optional().default('fnb')
+  businessType: z.enum(['fnb', 'retail', 'laundry', 'salon', 'bakery']).optional().default('fnb')
 })
 
 // ===================== Query param helpers =====================

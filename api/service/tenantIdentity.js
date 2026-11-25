@@ -2,7 +2,7 @@
 
 const CODE_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,48}[a-z0-9])?$/
 const NAME_MAX = 150
-const BUSINESS_TYPES = Object.freeze(['fnb', 'retail', 'laundry', 'salon'])
+const BUSINESS_TYPES = Object.freeze(['fnb', 'retail', 'laundry', 'salon', 'bakery'])
 
 const normalizeTenantCode = (value) => {
   if (typeof value !== 'string') return null

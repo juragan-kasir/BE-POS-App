@@ -393,6 +393,16 @@ const E2_BATCHES = Object.freeze({
     // new, and Z2 already refuses those writes, so B27 may run before or
     // after the deploy; run it BEFORE the merge so the CHECK is in place.
     openGates: []
+  }),
+  B28: deepFreeze({
+    id: 'B28',
+    title: 'Bakery pre-orders: bakery_order + bakery_status_history, tenant.bakerySettings',
+    expectedCount: 1,
+    migrations: ['20261125000001-bakery-domain.js'],
+    // FE-BAKERY-App /bakery/* (pre-order = POS order + bakery_order view,
+    // like laundry_order). The tenant model reads bakerySettings, so B28
+    // must be recorded before this code deploys: run it BEFORE the merge.
+    openGates: []
   })
 })
 
@@ -423,7 +433,8 @@ const BATCH_ORDER = Object.freeze([
   'B24',
   'B25',
   'B26',
-  'B27'
+  'B27',
+  'B28'
 ])
 
 // D-08 B1 resume contracts. A resume finishes a batch whose earlier members
