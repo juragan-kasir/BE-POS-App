@@ -17,6 +17,7 @@ const shift = require('../controller/salon/shift')
 const checkout = require('../controller/salon/checkout')
 const me = require('../controller/salon/me')
 const queue = require('../controller/salon/queue')
+const reports = require('../controller/salon/reports')
 
 router.use(authorization)
 
@@ -88,6 +89,12 @@ router.get('/queue', queue.board)
 router.post('/queue', queue.enqueue)
 router.post('/queue/:id/call', queue.call)
 router.post('/queue/:id/skip', queue.skip)
+
+// S2-b: reports (aggregated from the ledgers; ?store= or every visible outlet).
+router.get('/reports/revenue', reports.revenue)
+router.get('/reports/commission', reports.commission)
+router.get('/reports/occupancy', reports.occupancy)
+router.get('/reports/no-show', reports.noShow)
 
 // S2-b: stylist phone app (own data only) and shift-swap approval.
 router.get('/me/schedule', me.schedule)
