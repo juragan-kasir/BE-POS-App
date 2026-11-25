@@ -189,6 +189,8 @@ const AppointmentInput = z.object({
   source: AppointmentSource,
   depositAmount: Money,
   depositMethod: PaymentMethod.nullable(),
+  // DR-23 §D: a non-cash deposit carries its transaction reference (QRIS / transfer / kartu).
+  depositReference: z.string().trim().max(60).nullable().optional().default(null),
   notes: z.string().max(300),
   idempotencyKey: z.string().min(8).max(100)
 })

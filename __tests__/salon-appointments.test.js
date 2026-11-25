@@ -324,10 +324,14 @@ describe('appointments', () => {
     const row = await db.salon_appointment.findByPk(Number(cash.body.id))
     expect([row.depositCashRegisterId, row.depositStatus, row.depositMethod]).toEqual([register.id, 'held', 'cash'])
     await register.update({ status: 'closed', closedAt: new Date() })
-    const qris = await book({ startAt: at('13:00'), staffId: staff.junior.userId, depositAmount: 15000, depositMethod: 'qris' })
+    // A non-cash deposit needs its transaction reference (DR-23 §D), like the till.
+    const noRef = await book({ startAt: at('13:00'), staffId: staff.junior.userId, depositAmount: 15000, depositMethod: 'qris', depositReference: '  ' })
+    expect([noRef.status, noRef.body.code, noRef.body.details]).toEqual([422, 'REFERENCE_REQUIRED', { field: 'depositReference' }])
+    const qris = await book({ startAt: at('13:00'), staffId: staff.junior.userId, depositAmount: 15000, depositMethod: 'qris', depositReference: ' QR-DEP-778 ' })
     expect(qris.status).toBe(201)
     const qrisRow = await db.salon_appointment.findByPk(Number(qris.body.id))
-    expect([qrisRow.depositCashRegisterId, qrisRow.depositStatus]).toEqual([null, 'held'])
+    expect([qrisRow.depositCashRegisterId, qrisRow.depositStatus, qrisRow.depositReference]).toEqual([null, 'held', 'QR-DEP-778'])
+    expect(row.depositReference).toBeNull()
   })
 
   test('reschedule over its own old time works; onto a taken slot → SLOT_TAKEN', async () => {
@@ -367,7 +371,7 @@ describe('appointments', () => {
   })
 
   test('cancel needs a reason, forfeits the deposit and frees the slot', async () => {
-    const apt = await book({ startAt: at('09:00'), staffId: staff.senior.userId, depositAmount: 10000, depositMethod: 'transfer' })
+    const apt = await book({ startAt: at('09:00'), staffId: staff.senior.userId, depositAmount: 10000, depositMethod: 'transfer', depositReference: 'TRF-0091' })
     expect(apt.status).toBe(201)
     const bare = await call('admin', 'post', `/salon/appointments/${apt.body.id}/cancel${qa()}`, { reason: '  ' })
     expect([bare.status, bare.body.code]).toEqual([400, 'VALIDATION_FAILED'])
