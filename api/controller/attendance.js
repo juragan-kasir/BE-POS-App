@@ -370,3 +370,11 @@ exports.getByShift = async (req, res) => {
     })
   }
 }
+// Shared with the salon stylist app (api/controller/salon/me.js), so both
+// clock-in paths apply the same GPS trust rules and store geofence.
+module.exports.attendanceGuards = {
+  validateCoordinate,
+  computeStatus,
+  storeDistance,
+  MAX_STORE_DISTANCE_M
+}

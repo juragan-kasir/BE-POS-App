@@ -239,6 +239,33 @@ const OpenShiftInput = z.object({ openingCash: Money })
 const CloseShiftInput = z.object({ countedCash: Money })
 const OrdersQuery = z.object({ date: IsoDate.optional() })
 
+// ---------- HP stylist: absensi & tukar shift (S2-b) ----------
+const DateQuery = z.object({ date: IsoDate.optional() })
+const AttendanceInput = z.object({
+  store: Id,
+  shiftId: Id.nullable(),
+  type: z.enum(['check_in', 'check_out']),
+  latitude: z.number().min(-90).max(90),
+  longitude: z.number().min(-180).max(180),
+  accuracy: z.number().nonnegative().max(100000),
+  note: z.string().trim().max(200).optional().default(''),
+  idempotencyKey: z.string().min(8).max(100)
+})
+const ShiftSwapInput = z.object({
+  requesterShiftId: Id,
+  targetShiftId: Id,
+  targetId: Id,
+  date: IsoDate,
+  note: z.string().trim().max(200).optional().default(''),
+  idempotencyKey: z.string().min(8).max(100)
+})
+const ShiftSwapDecisionInput = z.object({ decision: z.enum(['approved', 'rejected']) })
+const ShiftSwapListQuery = z.object({
+  status: z.enum(['pending', 'approved', 'rejected', 'cancelled']).optional(),
+  from: IsoDate.optional(),
+  to: IsoDate.optional()
+})
+
 module.exports = {
   Money,
   Id,
@@ -276,5 +303,10 @@ module.exports = {
   OpenShiftInput,
   CloseShiftInput,
   OrdersQuery,
+  DateQuery,
+  AttendanceInput,
+  ShiftSwapInput,
+  ShiftSwapDecisionInput,
+  ShiftSwapListQuery,
   WaTextQuery
 }

@@ -330,3 +330,6 @@ exports.removeTimeOff = salonRoute({ perm: 'employee.manage', store: true }, asy
   })
   return reload(salon, store, profile.userId)
 })
+
+module.exports.loadStaff = loadStaff
+module.exports.profileInclude = profileInclude
