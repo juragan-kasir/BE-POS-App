@@ -96,6 +96,8 @@ const PREFIX_MODEL = {
   // S2-b: shift swaps are shift_swap rows (outlet-scoped).
   '/salon/me/shift-swaps/': 'shift_swap',
   '/salon/shift-swaps/': 'shift_swap',
+  // S2-b: walk-in queue tickets.
+  '/salon/queue/': 'salon_queue_ticket',
   // Bakery pre-orders (B28): outlets are location rows, orders bakery_order.
   '/bakery/stores/': 'location',
   '/bakery/orders/': 'bakery_order'
