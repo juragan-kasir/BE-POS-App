@@ -629,3 +629,21 @@ exports.waText = salonRoute({ perm: 'appointment.read', store: true }, async ({ 
 
 module.exports.serializeAppointments = serializeAppointments
 module.exports.appointmentInclude = appointmentInclude
+
+// Booking building blocks reused by the walk-in queue (./queue.js), so a called
+// ticket becomes an appointment by the same rules and numbering.
+module.exports.bookingKit = {
+  loadServices,
+  loadScheduleStaff,
+  storeShape,
+  dayBounds,
+  bookingNumber,
+  createItems,
+  addEvent,
+  scheduleError,
+  slotTaken,
+  stableHash,
+  EXCLUSION_VIOLATION,
+  UNIQUE_VIOLATION,
+  pgCode
+}

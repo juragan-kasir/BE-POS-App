@@ -239,6 +239,17 @@ const OpenShiftInput = z.object({ openingCash: Money })
 const CloseShiftInput = z.object({ countedCash: Money })
 const OrdersQuery = z.object({ date: IsoDate.optional() })
 
+// ---------- antrian walk-in (S2-b) ----------
+const QueueInput = z.object({
+  customerName: z.string().trim().min(2, 'Nama minimal 2 huruf').max(60),
+  customerPhone: z.union([Phone, z.literal('')]),
+  memberId: Id.nullable(),
+  serviceIds: z.array(Id).min(1, 'Pilih minimal satu layanan').max(6),
+  preferredStaffId: Id.nullable(),
+  idempotencyKey: z.string().min(8).max(100)
+})
+const QueueCallInput = z.object({ staffId: Id.nullable().optional().default(null) })
+
 // ---------- HP stylist: absensi & tukar shift (S2-b) ----------
 const DateQuery = z.object({ date: IsoDate.optional() })
 const AttendanceInput = z.object({
@@ -304,6 +315,8 @@ module.exports = {
   CloseShiftInput,
   OrdersQuery,
   DateQuery,
+  QueueInput,
+  QueueCallInput,
   AttendanceInput,
   ShiftSwapInput,
   ShiftSwapDecisionInput,

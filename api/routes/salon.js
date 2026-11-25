@@ -16,6 +16,7 @@ const appointments = require('../controller/salon/appointments')
 const shift = require('../controller/salon/shift')
 const checkout = require('../controller/salon/checkout')
 const me = require('../controller/salon/me')
+const queue = require('../controller/salon/queue')
 
 router.use(authorization)
 
@@ -81,6 +82,12 @@ router.post('/checkout/quote', checkout.quote)
 router.post('/checkout', checkout.checkout)
 router.get('/orders', checkout.listOrders)
 router.post('/orders/:id/refund', checkout.refund)
+
+// S2-b: walk-in queue (today's board of the outlet).
+router.get('/queue', queue.board)
+router.post('/queue', queue.enqueue)
+router.post('/queue/:id/call', queue.call)
+router.post('/queue/:id/skip', queue.skip)
 
 // S2-b: stylist phone app (own data only) and shift-swap approval.
 router.get('/me/schedule', me.schedule)
