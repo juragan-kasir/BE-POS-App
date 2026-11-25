@@ -93,6 +93,9 @@ const PREFIX_MODEL = {
   '/salon/appointments/': 'salon_appointment',
   // S2-a: a salon sale is a salon_order row (refund by its id).
   '/salon/orders/': 'salon_order',
+  // S2-b: shift swaps are shift_swap rows (outlet-scoped).
+  '/salon/me/shift-swaps/': 'shift_swap',
+  '/salon/shift-swaps/': 'shift_swap',
   // Bakery pre-orders (B28): outlets are location rows, orders bakery_order.
   '/bakery/stores/': 'location',
   '/bakery/orders/': 'bakery_order'

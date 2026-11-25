@@ -15,6 +15,7 @@ const customers = require('../controller/salon/customers')
 const appointments = require('../controller/salon/appointments')
 const shift = require('../controller/salon/shift')
 const checkout = require('../controller/salon/checkout')
+const me = require('../controller/salon/me')
 
 router.use(authorization)
 
@@ -80,5 +81,17 @@ router.post('/checkout/quote', checkout.quote)
 router.post('/checkout', checkout.checkout)
 router.get('/orders', checkout.listOrders)
 router.post('/orders/:id/refund', checkout.refund)
+
+// S2-b: stylist phone app (own data only) and shift-swap approval.
+router.get('/me/schedule', me.schedule)
+router.get('/me/commission', me.commission)
+router.get('/me/attendance', me.attendance)
+router.post('/me/attendance', me.clock)
+router.get('/me/shift-swaps', me.mySwaps)
+router.get('/me/shift-swaps/candidates', me.swapCandidates)
+router.post('/me/shift-swaps', me.requestSwap)
+router.post('/me/shift-swaps/:id/cancel', me.cancelSwap)
+router.get('/shift-swaps', me.listSwaps)
+router.patch('/shift-swaps/:id', me.decideSwap)
 
 module.exports = router
