@@ -304,6 +304,7 @@ const routes = [
   { path: '/supplier-performance', route: supplierPerformanceRoutes },
   { path: '/promo', route: promoRoutes },
   { path: '/laundry', route: require('./routes/laundry') },
+  { path: '/bakery', route: require('./routes/bakery') },
   { path: '/product-bundle', route: productBundleRoutes },
   { path: '/reports', route: reportingRoutes },
   { path: '/report-config', route: reportConfigRoutes },

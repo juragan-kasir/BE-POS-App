@@ -225,6 +225,12 @@ module.exports = (sequelize, DataTypes) => {
         as: 'laundryOrder'
       })
     }
+    if (models.bakery_order) {
+      order.hasOne(models.bakery_order, {
+        foreignKey: 'orderId',
+        as: 'bakeryOrder'
+      })
+    }
   }
 
   return order

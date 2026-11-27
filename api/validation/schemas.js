@@ -895,9 +895,10 @@ exports.createLocationSchema = z.object({
   socialMedia: jsonField().optional().nullable(),
   dailyTarget: strToNum().optional().default(0),
   image: z.string().max(FIELD_MAX.URL, tooLong(FIELD_MAX.URL)).optional().nullable(),
-  // Shared-domain marker + laundry-only outlet settings.
-  businessType: z.enum(['fnb', 'retail', 'laundry']).optional().default('fnb'),
-  laundrySettings: jsonField().optional().nullable()
+  // Shared-domain marker + vertical outlet settings.
+  businessType: z.enum(['fnb', 'retail', 'laundry', 'bakery']).optional().default('fnb'),
+  laundrySettings: jsonField().optional().nullable(),
+  bakerySettings: jsonField().optional().nullable()
 })
 
 // ponytail: passthrough preserves locationId, id, storeId, coordinates, etc.
@@ -2704,6 +2705,98 @@ exports.cancelLaundryOrderSchema = z.object({
   referenceNumber: z.string().max(255).optional().nullable(),
   approverPin: z.string().max(20).optional().nullable(),
   idempotencyKey: z.string().min(1).max(255).optional().nullable()
+})
+
+const bakeryOrderItemSchema = z
+  .object({
+    productId: strToNum(),
+    product: strToNum().optional(),
+    quantity: z.coerce.number().gt(0),
+    qty: z.coerce.number().gt(0).optional(),
+    note: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().default(''),
+    notes: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().default(''),
+    expectedPrice: z
+      .any()
+      .optional()
+      .transform((v) => (v === undefined || v === null || v === '' ? undefined : Number(v)))
+      .refine((v) => v === undefined || (Number.isInteger(v) && v >= 0), {
+        message: 'expectedPrice must be an integer >= 0'
+      })
+  })
+  .passthrough()
+
+exports.createBakeryOrderSchema = z.object({
+  store: strToNum().optional(),
+  idempotencyKey: z.string().min(1).max(255),
+  customerId: strToNum().optional().nullable(),
+  memberId: strToNum().optional().nullable(),
+  customerName: z.string().max(FIELD_MAX.PERSON_NAME, tooLong(FIELD_MAX.PERSON_NAME)).optional().nullable(),
+  customerPhone: z.string().max(FIELD_MAX.PHONE, tooLong(FIELD_MAX.PHONE)).optional().nullable(),
+  fulfillmentType: z.enum(['pickup', 'delivery']).optional().default('pickup'),
+  scheduledAt: z.string().min(1),
+  deliveryAddress: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().nullable(),
+  deliveryNote: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().nullable(),
+  customerNote: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().nullable(),
+  adminNote: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().nullable(),
+  items: z.array(bakeryOrderItemSchema).min(1, 'At least one item is required'),
+  dpAmount: strToNum().optional().default(0),
+  dpMethod: z.string().max(50).optional().nullable(),
+  dpNote: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().nullable(),
+  referenceNumber: z.string().max(255).optional().nullable(),
+  cashAmount: z.any().optional(),
+  changeAmount: z.any().optional(),
+  expectedTotal: z
+    .any()
+    .optional()
+    .transform((v) => (v === undefined || v === null || v === '' ? undefined : Number(v)))
+    .refine((v) => v === undefined || (Number.isInteger(v) && v >= 0), {
+      message: 'expectedTotal must be an integer >= 0'
+    })
+})
+
+exports.updateBakeryStatusSchema = z.object({
+  store: strToNum().optional(),
+  status: z.enum(['PENDING_CONFIRMATION', 'CONFIRMED', 'IN_PRODUCTION', 'READY', 'PICKED_UP', 'DELIVERED', 'CANCELLED']).optional(),
+  toStatus: z.enum(['PENDING_CONFIRMATION', 'CONFIRMED', 'IN_PRODUCTION', 'READY', 'PICKED_UP', 'DELIVERED', 'CANCELLED']).optional(),
+  reason: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().nullable(),
+  idempotencyKey: z.string().min(1).max(255).optional().nullable()
+}).refine((v) => v.status || v.toStatus, { message: 'status is required', path: ['status'] })
+
+exports.addBakeryPaymentSchema = z.object({
+  store: strToNum().optional(),
+  amount: strToNum(),
+  method: z.string().min(1).max(50),
+  note: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional().nullable(),
+  referenceNumber: z.string().max(255).optional().nullable(),
+  cashAmount: z.any().optional(),
+  changeAmount: z.any().optional(),
+  idempotencyKey: z.string().min(1).max(255)
+})
+
+exports.cancelBakeryOrderSchema = z.object({
+  store: strToNum().optional(),
+  reason: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).min(1, 'reason is required'),
+  idempotencyKey: z.string().min(1).max(255).optional().nullable()
+})
+
+exports.bakerySettingsSchema = z.object({
+  store: strToNum().optional(),
+  businessType: z.literal('bakery').optional(),
+  leadTimeMinutes: z.coerce.number().int().nonnegative().optional(),
+  pickupOpen: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
+  pickupClose: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
+  deliveryEnabled: z.boolean().optional(),
+  waNoteTemplate: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional(),
+  waReadyTemplate: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional(),
+  waReminderTemplate: z.string().max(FIELD_MAX.TEXT, tooLong(FIELD_MAX.TEXT)).optional()
+})
+
+exports.bakeryStoreSchema = z.object({
+  name: z.string().trim().min(2).max(120),
+  timezone: z.string().min(1).max(64).optional().default('Asia/Jakarta'),
+  address: z.string().trim().max(255).optional().nullable(),
+  phone: z.string().trim().max(30).optional().nullable(),
+  active: z.boolean().optional().default(true)
 })
 
 exports.collectOrderPaymentSchema = z.object({

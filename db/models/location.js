@@ -141,6 +141,11 @@ module.exports = (sequelize, DataTypes) => {
       laundrySettings: {
         type: DataTypes.JSONB,
         allowNull: true
+      },
+      // Bakery-only outlet settings. Null for non-bakery outlets.
+      bakerySettings: {
+        type: DataTypes.JSONB,
+        allowNull: true
       }
     },
     {
