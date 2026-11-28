@@ -8772,6 +8772,39 @@ Disconnects the store's Telegram assistant. **Response:** `{ "success": true, "m
 
 ---
 
+## Bakery (Pre-order & Katering)
+
+Mounted at `/bakery` (`api/routes/bakery.js`, 18 handlers). Requires `Authorization: Bearer <JWT>`; store-scoped routes validate `?store=` against the session (`validateStoreAccess`). Tenant/outlet must be `businessType: 'bakery'`; non-bakery outlet → `NOT_BAKERY_STORE`. Money is IDR. Create/status/payment/cancel are idempotent via `idempotencyKey`.
+
+**Order state machine:** `PENDING_CONFIRMATION → CONFIRMED → IN_PRODUCTION → READY → PICKED_UP|DELIVERED`; active states may `CANCELLED`. Illegal transition → `409 INVALID_BAKERY_STATUS_TRANSITION`. `PICKED_UP`/`DELIVERED` require full payment → `409 PAYMENT_REQUIRED`. Payments require an open cash register (`REGISTER_REQUIRED`).
+
+| Method & path | Access | Notes |
+|---|---|---|
+| GET `/bakery/context` | auth | Raw `AuthContext` (no envelope) for FE-BAKERY-App |
+| GET `/bakery/settings` | auth + store | Tenant settings |
+| PATCH `/bakery/settings` | super_admin/admin/owner | Update settings |
+| GET `/bakery/stores` | auth | List bakery outlets |
+| POST `/bakery/stores` | super_admin/admin/owner | Create outlet |
+| PATCH `/bakery/stores/:id` | super_admin/admin/owner | Update outlet |
+| GET `/bakery/members?q` | auth + store | Customer reference |
+| GET `/bakery/products` | auth + store | Product reference |
+| GET `/bakery/orders?store&from&to&status&q` | auth + store | List orders |
+| POST `/bakery/orders` | auth + store | Create (idempotent; `scheduledAt` ISO; `dpAmount`/`dpMethod` optional) |
+| GET `/bakery/orders/:id` | auth + store | Detail |
+| PATCH `/bakery/orders/:id/status` | auth + store | `{status, reason?, idempotencyKey}` |
+| POST `/bakery/orders/:id/payments` | auth + store | `{amount, method, note?, idempotencyKey}` |
+| POST `/bakery/orders/:id/cancel` | auth + store | `{reason, idempotencyKey}` |
+| GET `/bakery/orders/:id/wa-text?template=note\|ready\|reminder` | auth + store | `{text, phone, waUrl}` |
+| GET `/bakery/calendar?store&from&to` | auth + store | Calendar items for a date range |
+| GET `/bakery/production-plan?store&date` | auth + store | Product aggregation + recipe materials |
+| GET `/bakery/dashboard?store&date` | auth + store | `{totalOrders, dueToday, overdue, unpaidOrDp, readyCount}` |
+
+**Error codes:** `NOT_BAKERY_STORE`, `INVALID_BAKERY_STATUS_TRANSITION`, `PAYMENT_REQUIRED`, `REGISTER_REQUIRED`, `REGISTER_STATE_CHANGED`, `OVERPAYMENT`, `NO_OUTSTANDING`, `ALREADY_PAID`.
+
+**Session bootstrap:** `GET /bakery/context` returns the raw `AuthContext` consumed by FE-BAKERY-App (no envelope). `canonicalRole` follows the active tenant membership when present, otherwise the legacy `roleType`; permissions use the bakery vocabulary.
+
+---
+
 ## Misc
 
 ### GET `/health`
@@ -8798,4 +8831,4 @@ Auth required (`super_admin`, `admin`, `kasir`) + private-network guard + rate l
 
 ---
 
-**Total: 544 route handlers across 77 route modules, plus 3 inline routes in `api/index.js` (547 HTTP routes total).**
+**Total: 575 route handlers across 79 route modules, plus 3 inline routes in `api/index.js` (578 HTTP routes total).**

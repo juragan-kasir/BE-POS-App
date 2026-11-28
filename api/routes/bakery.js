@@ -16,6 +16,7 @@ const {
   bakeryStoreSchema
 } = require('../validation/schemas')
 
+router.get('/context', authorization, bakery.getContext)
 router.get('/settings', authorization, validateStoreAccess, bakery.getSettings)
 router.patch('/settings', authorization, validateStoreAccess, requireRole('super_admin', 'admin', 'owner'), validate(bakerySettingsSchema), bakery.updateSettings)
 router.get('/stores', authorization, bakery.listStores)

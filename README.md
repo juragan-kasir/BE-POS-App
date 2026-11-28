@@ -5,7 +5,9 @@
 
 Point of Sale (POS) backend API built with Node.js, Express, and PostgreSQL.
 
-> **Checkpoint:** reconciled against `master` `c9fe118` on 2026-10-23. Current scale: 544 route handlers + 3 inline routes, 111 models, 242 migrations, 331 Jest test files, 6 Vercel daily crons.
+> **Checkpoint:** reconciled against `master` `c9fe118` on 2026-10-23. Scale at that checkpoint: 544 route handlers + 3 inline routes, 111 models, 242 migrations, 331 Jest test files, 6 Vercel daily crons.
+>
+> **Update 2026-11-28:** `/bakery` (18 handlers) and `/laundry` (13 handlers) are mounted and listed below. Bakery enforces paid-before-fulfillment (`409 PAYMENT_REQUIRED`, `api/service/bakeryFulfillment.js`). `GET /bakery/context` is implemented and returns the raw `AuthContext` consumed by FE-BAKERY-App (no envelope).
 
 ## Tech Stack
 
@@ -112,7 +114,7 @@ BE-POS-APP/
 ├── api/
 │   ├── index.js              # Express app entry + 3 inline HTTP routes + thermal print endpoint
 │   ├── controller/           # Route controllers (76 files)
-│   ├── routes/               # API routes (77 modules)
+│   ├── routes/               # API routes (79 modules)
 │   ├── middleware/
 │   │   └── validate.js       # Zod validation middleware
 │   ├── service/
@@ -140,7 +142,7 @@ BE-POS-APP/
 │   ├── userContext.js        # AsyncLocalStorage user context
 ├── scripts/                  # Migration & utility scripts
 ├── docs/                     # Documentation
-├── API_DOCUMENTATION.md      # Full API reference (547 routes)
+├── API_DOCUMENTATION.md      # Full API reference (578 routes)
 └── vercel.json               # Vercel deployment config
 ```
 
@@ -184,7 +186,7 @@ BE-POS-APP/
 
 ## API Endpoints
 
-The endpoint reference is [`API_DOCUMENTATION.md`](./API_DOCUMENTATION.md) (every route, with auth, request and response). This README only lists the route modules, so it cannot drift from the code: 77 modules, 544 handlers, mounted in `api/index.js`, plus 3 inline routes (`GET /health`, `POST /print-thermal`, `GET /`).
+The endpoint reference is [`API_DOCUMENTATION.md`](./API_DOCUMENTATION.md) (every route, with auth, request and response). This README only lists the route modules, so it cannot drift from the code: 79 modules (handler counts per module below), mounted in `api/index.js`, plus 3 inline routes (`GET /health`, `POST /print-thermal`, `GET /`).
 
 | Mount | Route file (`api/routes/`) | Handlers |
 |-------|----------------------------|----------|
@@ -197,6 +199,7 @@ The endpoint reference is [`API_DOCUMENTATION.md`](./API_DOCUMENTATION.md) (ever
 | `/auth` | `auth.js` | 11 |
 | `/auth` | `authorizationContext.js` | 4 |
 | `/backup` | `backup.js` | 7 |
+| `/bakery` | `bakery.js` | 18 |
 | `/best-selling` | `best-selling.js` | 5 |
 | `/bom` | `bom.js` | 6 |
 | `/business-trip` | `businessTrip.js` | 6 |
@@ -219,6 +222,7 @@ The endpoint reference is [`API_DOCUMENTATION.md`](./API_DOCUMENTATION.md) (ever
 | `/internal` | `internal.js` | 7 |
 | `/inventory` | `inventory.js` | 11 |
 | `/invoice` | `invoice.js` | 3 |
+| `/laundry` | `laundry.js` | 13 |
 | `/location` | `location.js` | 12 |
 | `/member` | `member.js` | 6 |
 | `/member-tier` | `memberTier.js` | 7 |
@@ -331,5 +335,5 @@ Deployed on **Vercel** with serverless functions.
 ## Related
 
 - [Frontend App](../FE-POS-App/README.md)
-- [API Documentation](./API_DOCUMENTATION.md) (all 547 routes with request/response examples)
+- [API Documentation](./API_DOCUMENTATION.md) (all 578 routes with request/response examples)
 - [API Response Contracts — ERP/Akuntansi](./docs/api-response-contracts.md) (envelope, error codes, response shapes untuk FE)

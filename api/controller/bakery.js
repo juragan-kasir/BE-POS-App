@@ -8,6 +8,7 @@ const { resolvePaymentMethodName } = require('../service/paymentTypeName')
 const { resolveAttributedRegister } = require('../service/settlementAttribution')
 const { assertSettlementReferenceUnused } = require('../service/settlementReference')
 const { assertFullyPaidForFulfillment } = require('../service/bakeryFulfillment')
+const { buildAuthContext } = require('../service/bakeryContext')
 // orderFinancials available for future refund/settlement parity; MVP uses simple paid/remaining math.
 const { withDeadlockRetry } = require('../../utils/deadlockRetry')
 
@@ -619,6 +620,68 @@ exports.updateSettings = async (req, res) => {
 }
 
 const fmtStore = (l) => ({ id: String(l.id), name: l.name, timezone: l.timezone || 'Asia/Jakarta', address: l.address || null, phone: l.phoneNumber || null, active: l.status !== 'inactive' })
+
+// Session bootstrap for FE-BAKERY-App: returns the raw AuthContext shape that
+// the FE zod contract parses (no envelope). Resolves the tenant from the
+// user's active store (location.tenantId) or an ACTIVE tenant membership.
+exports.getContext = async (req, res) => {
+  try {
+    const account = await db.user.findByPk(req.user.id, {
+      attributes: ['id', 'userName', 'fullName', 'email', 'roleType', 'store']
+    })
+    if (!account) return res.status(401).json({ code: 'UNAUTHENTICATED', message: 'User not found' })
+
+    const activeLocation = account.store ? await Location.findByPk(account.store) : null
+    let membership = null
+    if (db.tenantMembership) {
+      const membershipWhere = { userId: account.id, status: 'ACTIVE' }
+      if (activeLocation?.tenantId) membershipWhere.tenantId = activeLocation.tenantId
+      membership = await db.tenantMembership.findOne({ where: membershipWhere, order: [['id', 'ASC']] }).catch(() => null)
+    }
+    const tenantId = activeLocation?.tenantId || membership?.tenantId || null
+    const tenant = tenantId ? await db.tenant.findByPk(tenantId) : null
+
+    const effectiveRole = membership?.role || account.roleType
+    const tenantWide = ['platform_admin', 'tenant_admin', 'owner'].includes(effectiveRole) ||
+      (effectiveRole === 'super_admin' && !account.store)
+    const where = { businessType: 'bakery' }
+    if (tenantWide && tenantId) {
+      // Tenant-wide roles see every bakery outlet in the active tenant.
+      where.tenantId = tenantId
+    } else if (!tenantWide) {
+      // Store-confined roles only ever see their own outlet; without one they
+      // see none (no cross-tenant leak).
+      where.id = account.store || -1
+    }
+    // A global platform admin without a tenant keeps platform-wide visibility.
+    let locations = await Location.findAll({ where, order: [['id', 'ASC']] })
+    // Legacy stores may have a NULL tenantId; keep the caller's own active
+    // outlet visible even when the tenant filter excludes it.
+    if (activeLocation && activeLocation.businessType === 'bakery' &&
+        !locations.some((l) => String(l.id) === String(activeLocation.id))) {
+      locations = [activeLocation, ...locations]
+    }
+
+    const activeStore = locations.find((l) => String(l.id) === String(account.store)) || locations[0] || activeLocation
+    const settings = { ...defaultBakerySettings(), ...(activeStore?.bakerySettings || {}), businessType: 'bakery' }
+    // Legacy stores may have a NULL tenantId (created before tenant scoping);
+    // fall back to the store identity so the FE still boots, flagged by the
+    // store-level settings until the tenant link is backfilled.
+    const tenantOut = tenant || (activeStore
+      ? { id: activeStore.tenantId || activeStore.id, name: activeStore.name, status: 'active' }
+      : { id: '0', name: 'Bakery', status: 'active' })
+
+    return res.json(buildAuthContext({
+      tenant: tenantOut,
+      user: account,
+      stores: locations.map(fmtStore),
+      role: effectiveRole,
+      settings
+    }))
+  } catch (e) {
+    return res.status(e.statusCode || 500).json({ code: e.code || 'INTERNAL_ERROR', message: e.message })
+  }
+}
 
 exports.listStores = async (req, res) => {
   try {
